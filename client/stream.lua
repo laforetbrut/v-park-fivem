@@ -242,6 +242,12 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
                 model = GetEntityModel(entity),
                 frozen = result.frozen,
                 position = result.position,
+
+                -- What the DATABASE asked for, kept alongside where the placement actually
+                -- put it. The two are the same on a healthy restore and the difference is the
+                -- only number that matters when they are not. Read by `Stream.audit`.
+                saved = data.position,
+                savedRotation = data.rotation,
                 -- What body health was at restore. `Deformation.shouldRecapture` compares
                 -- against this, which is what stops the approximation compounding over
                 -- repeated save cycles.
@@ -484,6 +490,47 @@ end)
 -- ---------------------------------------------------------------------------------------
 -- Queries other files need
 -- ---------------------------------------------------------------------------------------
+
+--[[
+    Compare where every restored vehicle SHOULD be with where it actually is.
+
+    Written because five releases of reasoning about this produced five different theories and
+    the reports stayed the same shape: "not quite in the right place". A number per vehicle,
+    per axis, ends that.
+
+    Returns a list, worst first. `/vparkwhere` prints it.
+]]
+function Stream.audit()
+    local out = {}
+    local count = 0
+
+    for id, record in pairs(tracked) do
+        if record.entity and DoesEntityExist(record.entity) and record.saved then
+            local at = GetEntityCoords(record.entity)
+            local want = vector3(record.saved.x, record.saved.y, record.saved.z)
+
+            local rotation = GetEntityRotation(record.entity, 2)
+            local wantRotation = record.savedRotation or {}
+
+            count = count + 1
+            out[count] = {
+                id = id,
+                model = GetDisplayNameFromVehicleModel(record.model or 0),
+                delta = #(at - want),
+                dx = at.x - want.x,
+                dy = at.y - want.y,
+                dz = at.z - want.z,
+                dHeading = Park.angleDelta(rotation.z, wantRotation.z or 0.0),
+                frozen = record.frozen == true,
+                dressed = record.dressed ~= false,
+                mine = NetworkGetEntityOwner(record.entity) == PlayerId(),
+            }
+        end
+    end
+
+    table.sort(out, function(a, b) return a.delta > b.delta end)
+    return out
+end
 
 function Stream.record(id)
     return tracked[id]

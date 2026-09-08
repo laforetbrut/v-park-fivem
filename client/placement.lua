@@ -819,6 +819,52 @@ end
 Placement.takeControl = takeControl
 
 --[[
+    ================================================================================================
+    PUT AN ENTITY EXACTLY WHERE IT IS TOLD, INCLUDING WHEN IT IS FROZEN.
+    ================================================================================================
+
+    THIS IS WHY NO VEHICLE EVER CAME BACK IN QUITE THE RIGHT PLACE.
+
+    `FREEZE_ENTITY_POSITION` fixes an entity's matrix, and a position written to a frozen entity
+    is not reliably applied - the freeze is holding the matrix that the write is trying to
+    change. Every coordinate write in this file was made against an entity that this same file
+    had frozen a few lines earlier.
+
+    For most of this resource's life that was survivable, because the vehicle was not frozen
+    when it arrived: it fell, the placement unfroze nothing because nothing was frozen, the
+    write landed, and the result was roughly right. 1.0.7 fixed the falling by freezing the
+    vehicle on arrival through a replicated statebag - which was correct, and which turned
+    "roughly right" into "wherever the server first created it", on every vehicle. That is what
+    "none of them come back in the right place" was.
+
+    So every pose write goes through here: unfreeze, write, kill any velocity, freeze again.
+    There is no `Wait` between the three, so no physics tick happens in the window and the
+    entity cannot fall through it.
+
+    `wasFrozen` is passed rather than read back, because `IsEntityPositionFrozen` is not
+    available on every build and the caller always knows.
+]]
+local function setPose(entity, position, rotation, heading, wasFrozen)
+    if wasFrozen then FreezeEntityPosition(entity, false) end
+
+    SetEntityCoordsNoOffset(entity, position.x, position.y, position.z, false, false, false)
+
+    if rotation then
+        SetEntityRotation(entity, rotation.x or 0.0, rotation.y or 0.0, heading or 0.0, 2, true)
+    end
+
+    -- A frozen entity keeps whatever velocity it had when it was frozen, and hands it straight
+    -- back the moment it is released. Zeroing it is what stops a restored vehicle twitching
+    -- forward the first time somebody opens its door.
+    SetEntityVelocity(entity, 0.0, 0.0, 0.0)
+    SetEntityAngularVelocity(entity, 0.0, 0.0, 0.0)
+
+    if wasFrozen then FreezeEntityPosition(entity, true) end
+end
+
+Placement.setPose = setPose
+
+--[[
     Wait for the map to exist around an entity.
 
     ANSWER TO PROBLEM 1 in the config header. An entity created before its collision streams
@@ -875,7 +921,9 @@ local function watchForEjection(entity, target)
             if #(now - target) > distance then
                 Park.debug('a restored vehicle was being ejected - putting it back and freezing it')
                 takeControl(entity, 500)
-                SetEntityCoordsNoOffset(entity, target.x, target.y, target.z, false, false, false)
+                -- `false`: this watch only runs for a vehicle that was handed back to physics,
+                -- so it is not frozen. It is from here on.
+                setPose(entity, target, nil, nil, false)
                 FreezeEntityPosition(entity, true)
                 return
             end
@@ -1058,8 +1106,9 @@ function Placement.placeInner(entity, data)
     -- several builds, zeroes the pitch and roll with it - which is precisely what storing the
     -- full rotation was for. A car parked on a hill has a real pitch, and flattening it is the
     -- most visible way to get a restore subtly wrong.
-    SetEntityCoordsNoOffset(entity, target.x, target.y, target.z, false, false, false)
-    SetEntityRotation(entity, rotation.x or 0.0, rotation.y or 0.0, heading, 2, true)
+    -- Through `setPose`, which unfreezes for the write. The entity was frozen at the top of
+    -- this function and, since 1.0.7, was very likely frozen before that by the hold statebag.
+    setPose(entity, target, rotation, heading, true)
 
     SetEntityCollision(entity, true, true)
 
@@ -1068,8 +1117,7 @@ function Placement.placeInner(entity, data)
     -- Re-assert the pose after the map arrives. Streaming collision in around an entity can
     -- nudge it, and the nudge happens after the placement, so a pose set before is not
     -- necessarily the pose you have after.
-    SetEntityCoordsNoOffset(entity, target.x, target.y, target.z, false, false, false)
-    SetEntityRotation(entity, rotation.x or 0.0, rotation.y or 0.0, heading, 2, true)
+    setPose(entity, target, rotation, heading, true)
 
     -- Note for anybody editing below this line: `SetVehicleOnGroundProperly` does NOT belong
     -- here, however much the vehicle looks like it wants it. See the file header.
@@ -1132,10 +1180,7 @@ function Placement.placeInner(entity, data)
                 Park.debug('%s moved %.3f m after placement - re-asserting the pose',
                     tostring(data.id), #(at - target))
 
-                FreezeEntityPosition(entity, true)
-                SetEntityCoordsNoOffset(entity, target.x, target.y, target.z, false, false, false)
-                SetEntityRotation(entity, rotation.x or 0.0, rotation.y or 0.0, heading, 2, true)
-                SetEntityVelocity(entity, 0.0, 0.0, 0.0)
+                setPose(entity, target, rotation, heading, true)
             end
         end
     end

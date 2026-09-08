@@ -223,6 +223,7 @@ resource. Rename any of them in `Config.Commands`; set `enabled = false` to remo
 | `/vparksave` | Flush every pending change to the database |
 | `/vparkpurge <filter> [confirm]` | Bulk removal. Always previews first |
 | `/vparkprobe [model]` | Run the placement probe where you stand, and print the result |
+| `/vparkwhere` | Report how far each restored vehicle near you is from where the database says it should be - per axis, plus heading, frozen, dressed and owner |
 | `/vparkdebug` | Toggle debug logging and the on-screen overlay |
 | `/vparkmigrate <scan\|dry\|run\|rollback>` | The Advanced Parking migration |
 

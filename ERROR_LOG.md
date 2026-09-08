@@ -8,6 +8,50 @@ out of it.
 
 ---
 
+## [2026-09-09 01:40] — Setting the position of an entity we had just frozen
+
+**Context:** Reported after 1.0.9: the colours were finally correct, and "no vehicle reappears in
+the right place". Not some - none.
+
+**Error:** None. Silent, and total.
+
+**Root cause:** `FREEZE_ENTITY_POSITION` fixes an entity's matrix. A position written to a frozen
+entity is not reliably applied, because the freeze is holding the very thing the write is trying
+to change.
+
+`client/placement.lua` froze the entity at the top of `placeInner` and then wrote coordinates to
+it four times over the next hundred lines. It had always done that.
+
+What changed is that it used to get away with it. Before 1.0.7 a restored vehicle arrived
+unfrozen and fell, the placement's own `FreezeEntityPosition` was the first freeze that entity
+had seen, and the writes after it landed well enough. 1.0.7 fixed the falling by freezing the
+vehicle on arrival through a replicated statebag - correctly - and in doing so removed the
+accident that had been making the placement appear to work.
+
+The result was that every vehicle stayed wherever `CreateVehicleServerSetter` had created it,
+which is close enough to the saved position to look like a small drift rather than a total
+failure. That is why five releases of reasoning about drift found five plausible mechanisms and
+fixed none of them: the mechanism was that the writes were not being applied at all.
+
+**Fix:** One `setPose` helper - unfreeze, write, zero linear and angular velocity, freeze again,
+with no yield in the window - and every one of the four call sites goes through it. Plus
+`/vparkwhere`, which reports the delta per vehicle per axis.
+
+**Prevention:**
+
+> **When a fix makes an unrelated symptom worse, the fix is usually correct and has removed an
+> accident that something else was relying on.**
+>
+> The freeze-on-arrival in 1.0.7 was right, and it broke placement everywhere. Reading that as
+> "1.0.7 introduced a positioning bug" would have led to reverting the correct change. Reading
+> it as "something was depending on entities being unfrozen" led to the actual fault, which had
+> been in the file since the first release.
+>
+> And the smaller rule: **`FreezeEntityPosition` is not a flag you set once and forget.** It is
+> a lock on the entity's matrix, and every write to that matrix has to take it off first.
+
+---
+
 ## [2026-09-08 23:15] — Two natives for one paint, and the wrong one ran last
 
 **Context:** Reported after 1.0.8: "they still change colour on their own, that must not

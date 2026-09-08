@@ -613,6 +613,17 @@ register('debug', {
     end
 end)
 
+register('where', {
+    description = 'Report how far each restored vehicle near you is from where it should be',
+}, function(src)
+    if src == 0 then
+        reply(src, L('error.in_game_only'))
+        return
+    end
+
+    TriggerClientEvent('vpark:client:where', src)
+end)
+
 register('probe', {
     description = 'Test the placement probe where you are standing',
     params = { { name = 'model', help = 'optional; defaults to the vehicle you are in' } },

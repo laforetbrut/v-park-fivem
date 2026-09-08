@@ -112,6 +112,45 @@ end)
 -- change and has no other way to measure.
 -- ---------------------------------------------------------------------------------------
 
+--[[
+    How far is every restored vehicle from where the database says it is?
+
+    Five releases of reasoning about "they are not quite in the right place" produced five
+    different theories and the same report each time. This turns it into a number per vehicle
+    per axis, which is the only thing that can settle it.
+
+    `dz` on its own points at the ground correction or the model's origin height; `dx`/`dy`
+    together point at the search having nudged it; a heading that differs points at the
+    rotation; and `frozen = no` on a vehicle nobody is driving points at the freeze never
+    having taken.
+]]
+RegisterNetEvent('vpark:client:where', function()
+    local rows = Stream.audit()
+
+    if #rows == 0 then
+        print('^3[v-park]^7 no restored vehicles are being tracked on this client')
+        return
+    end
+
+    print(('^2[v-park]^7 %d restored vehicle(s), worst first:'):format(#rows))
+
+    for index = 1, math.min(#rows, 15) do
+        local row = rows[index]
+
+        print(('^2[v-park]^7   %-14s %-16s off by %6.3f m   dx %+.3f  dy %+.3f  dz %+.3f  heading %+.2f')
+            :format(row.id, tostring(row.model), row.delta, row.dx, row.dy, row.dz, row.dHeading))
+
+        print(('^2[v-park]^7                  frozen %s   dressed %s   owned by me %s')
+            :format(row.frozen and 'yes' or '^1NO^7',
+                    row.dressed and 'yes' or '^1NO^7',
+                    row.mine and 'yes' or 'no'))
+    end
+
+    if #rows > 15 then
+        print(('^2[v-park]^7   ... and %d more'):format(#rows - 15))
+    end
+end)
+
 RegisterNetEvent('vpark:client:probe', function(modelName)
     local ped = PlayerPedId()
     local position = GetEntityCoords(ped)

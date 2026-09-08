@@ -7,6 +7,78 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.10] - 2026-09-08
+
+**No vehicle came back in quite the right place.** Not some of them - none of them, which is the
+shape of a systematic fault rather than an edge case, and it turned out to be one line of
+sequencing repeated in four places.
+
+### Fixed
+
+- **A position written to a frozen entity is not reliably applied.**
+
+  `FREEZE_ENTITY_POSITION` fixes an entity's matrix. Every coordinate write in the placement was
+  made against an entity that the same file had frozen a few lines earlier - so the freeze was
+  holding the matrix that the write was trying to change.
+
+  For most of this resource's life that was survivable, because a restored vehicle was not
+  frozen when it arrived: it fell, the placement's freeze was the first one, and the write
+  landed. 1.0.7 fixed the falling by freezing the vehicle on arrival through a replicated
+  statebag - which was right, and which turned "roughly where it should be" into "wherever the
+  server first created it", **on every vehicle**.
+
+  Every pose write now goes through one helper that unfreezes, writes, kills any residual
+  velocity and freezes again, with no yield in the window so the vehicle cannot fall through
+  it. Four call sites: the placement, the re-assert after collision streams in, the pose hold
+  and the ejection watch.
+
+  It also zeroes angular velocity, which a frozen entity otherwise keeps and hands straight
+  back the moment it is released - the reason a restored car could twitch when somebody first
+  opened its door.
+
+### New
+
+- **`/vparkwhere`** reports, for every restored vehicle this client is tracking, how far it is
+  from where the database says it should be - per axis, plus the heading difference, whether it
+  is frozen, whether it was dressed, and whether this client owns it. Worst first.
+
+  Five releases of reasoning about "they are not quite in the right place" produced five
+  different theories and the same report each time. A number per vehicle per axis ends that
+  argument, and it is the fastest way to tell a ground-height problem (`dz` alone) from a
+  search that nudged the car (`dx` and `dy`) from a rotation that did not take.
+
+---
+
+## [1.0.10] - 2026-09-08 (français)
+
+**Aucun véhicule ne revenait tout à fait à sa place.** Pas certains : aucun - ce qui est la
+signature d'un défaut systématique, et c'en était un : une ligne d'enchaînement, répétée à
+quatre endroits.
+
+### Corrigé
+
+- **Une position écrite sur une entité gelée n'est pas appliquée de façon fiable.**
+  `FREEZE_ENTITY_POSITION` fige la matrice de l'entité, et toutes les écritures de position du
+  placement visaient une entité que ce même fichier avait gelée quelques lignes plus haut.
+
+  Pendant longtemps c'était supportable, parce qu'un véhicule restauré n'était pas gelé à son
+  arrivée : il tombait, le gel du placement était le premier, et l'écriture prenait. La 1.0.7 a
+  corrigé la chute en gelant le véhicule dès son arrivée - ce qui était juste, et ce qui a
+  transformé « à peu près à sa place » en « là où le serveur l'a créé », **sur tous les
+  véhicules**.
+
+  Toutes les écritures de pose passent maintenant par un helper unique qui dégèle, écrit,
+  annule la vitesse résiduelle et regèle, sans aucun `Wait` dans l'intervalle. Il annule aussi
+  la vitesse angulaire, qu'une entité gelée conserve et restitue dès qu'on la libère.
+
+### Nouveau
+
+- **`/vparkwhere`** indique, pour chaque véhicule restauré suivi par ce client, de combien il
+  s'écarte de ce que dit la base : par axe, plus l'écart de cap, s'il est gelé, s'il a été
+  habillé, et si ce client le possède. Le pire en premier.
+
+---
+
 ## [1.0.9] - 2026-09-08
 
 **Vehicles changed colour on their own, and were never quite in the right place.**
