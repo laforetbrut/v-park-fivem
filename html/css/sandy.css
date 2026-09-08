@@ -1,0 +1,322 @@
+/*
+    html/css/sandy.css
+
+    The Sandy Shores theme.
+
+    -------------------------------------------------------------------------------------------
+    WHAT IT IS TRYING TO LOOK LIKE
+    -------------------------------------------------------------------------------------------
+
+    A Blaine County noticeboard. Bleached paper pinned to a workshop wall, under a rusted steel
+    sign, in a room where everything has been in the sun for fifteen years.
+
+    That means, concretely:
+
+      - Sun-bleached paper, not white. #d6c6a4, warm, slightly green in the shadows.
+      - Rust as the only saturated colour, used sparingly and never as a "brand accent" on
+        everything.
+      - Scrub olive for anything that means "fine", because desert green is dull green.
+      - Hard 90 degree corners everywhere. No radius, not one pixel.
+      - Depth from a HARD offset shadow - the shadow a physical sign casts on a wall - never
+        from a blur.
+      - Texture from a fixed diagonal weave and a paper grain, both cheap and both static.
+
+    -------------------------------------------------------------------------------------------
+    ADDING YOUR OWN THEME
+    -------------------------------------------------------------------------------------------
+
+    Copy this file, change the values, add it to the `files` block in fxmanifest.lua and set
+    `Config.Panel.theme`. Nothing in panel.css contains a colour, so a theme cannot break the
+    layout however far it takes the palette.
+*/
+
+:root {
+    /* --------------------------------------------------------------- the palette --- */
+    /*
+        LEGIBILITY FIRST, THEME SECOND.
+
+        The first version of this theme was atmospheric and hard to read: a mid-tone board at
+        #d6c6a4, body text at 82% opacity over it, and buttons at 30% white. It looked like the
+        right place and you could not scan a table on it.
+
+        The board is now several steps lighter and the ink several steps darker, which takes
+        body text from roughly 6:1 to roughly 11:1 against the sheet. Nothing else about the
+        theme moved: same hues, same rust, same hard edges, same grain, half the grain opacity.
+
+        If you are retheming, that is the constraint worth keeping - body text at 7:1 or better
+        against the sheet, and anything interactive carrying a border you can see without
+        looking for it.
+    */
+    --paper:            #e8dcc0;   /* bleached board, in the sun */
+    --paper-2:          #ddceac;   /* the same in shadow */
+    --paper-3:          #d0bf9a;
+
+    --ink:              #17120a;   /* not black: burnt umber, but close */
+    --ink-2:            #241d13;
+    --ink-3:            #33291b;
+
+    --rust:             #a8482a;
+    --rust-2:           #8c3a20;
+    --rust-3:           #6d2c17;
+
+    --olive:            #5c6236;
+    --olive-2:          #454a26;
+
+    --dust:             #7d6e50;
+    --dust-2:           #5e5239;
+
+    --amber:            #a97612;
+    --blood:            #8f2f22;
+
+    --accent:           var(--rust);
+
+    /* ------------------------------------------------------------------ typography --- */
+    /*
+        System fonts only, on purpose. A NUI page cannot rely on the client having internet
+        access, and a webfont that fails to load produces a layout that shifts the first time
+        somebody opens the panel on a bad connection.
+
+        The narrow faces are what give the signage feel; the fallback chain ends at a plain
+        sans so a machine with none of them still reads correctly, only wider.
+    */
+    --font-display: "Oswald", "Arial Narrow", "Haettenschweiler", "Impact",
+                    "Franklin Gothic Medium", system-ui, sans-serif;
+
+    /* ---------------------------------------------------------------- structure --- */
+    --scrim:            rgba(12, 9, 6, 0.72);
+    --modal-scrim:      rgba(12, 9, 6, 0.66);
+
+    --edge:             1px solid rgba(23, 18, 10, 0.45);
+    --edge-strong:      2px solid var(--ink);
+    /* Row separators. At 0.16 they were invisible and the table read as a wall of text. */
+    --rule:             rgba(23, 18, 10, 0.30);
+
+    /*
+        The hard shadow. No blur radius at all: a 6px offset of solid near-black, which is what
+        a flat sign on a wall actually casts and what makes the panel read as an object rather
+        than as a layer.
+    */
+    --hard-shadow:      6px 6px 0 rgba(10, 8, 5, 0.55);
+    --panel-shadow:     10px 10px 0 rgba(10, 8, 5, 0.5);
+
+    /*
+        The sheet. A paper grain built from two repeating gradients rather than an image:
+        no request, no decode, no file to ship, and it tiles perfectly by construction.
+    */
+    --sheet:
+        repeating-linear-gradient(
+            0deg,
+            rgba(0, 0, 0, 0.011) 0px,
+            rgba(0, 0, 0, 0.011) 1px,
+            rgba(255, 255, 255, 0.008) 1px,
+            rgba(255, 255, 255, 0.008) 3px
+        ),
+        linear-gradient(160deg, var(--paper) 0%, var(--paper-2) 68%, var(--paper-3) 100%);
+
+    /* ------------------------------------------------------------------ masthead --- */
+    /*
+        The rusted steel plate. A 45 degree weave over a rust gradient reads as brushed,
+        pitted metal at this scale, and costs one composited layer.
+    */
+    --mast-bg:
+        repeating-linear-gradient(
+            45deg,
+            rgba(0, 0, 0, 0.10) 0px,
+            rgba(0, 0, 0, 0.10) 2px,
+            rgba(255, 255, 255, 0.035) 2px,
+            rgba(255, 255, 255, 0.035) 5px
+        ),
+        linear-gradient(180deg, var(--rust) 0%, var(--rust-2) 55%, var(--rust-3) 100%);
+
+    --mast-title:       #f2e4c8;
+    --mast-subtitle:    rgba(246, 234, 210, 0.78);
+    --mast-plate:       rgba(20, 14, 9, 0.42);
+    --mast-plate-edge:  rgba(242, 228, 200, 0.22);
+    --mast-bolt:        #d9c9a3;
+    --mast-bolt-edge:   rgba(20, 14, 9, 0.6);
+
+    --stat-bg:          rgba(16, 11, 6, 0.52);
+    --stat-edge:        rgba(246, 234, 210, 0.32);
+    --stat-value:       #fbf1dc;
+    --stat-label:       rgba(246, 234, 210, 0.74);
+
+    --close-fg:         rgba(246, 234, 210, 0.94);
+    --close-bg:         rgba(16, 11, 6, 0.52);
+    --close-edge:       rgba(246, 234, 210, 0.36);
+    --close-bg-hover:   var(--ink);
+    --close-fg-hover:   #f2e4c8;
+
+    /* ---------------------------------------------------------------------- tabs --- */
+    --tabs-bg:          rgba(23, 18, 10, 0.14);
+    --tab-fg:           rgba(23, 18, 10, 0.72);
+    --tab-fg-hover:     var(--ink);
+    --tab-bg-hover:     rgba(255, 252, 244, 0.34);
+    --tab-fg-active:    var(--ink);
+    --tab-bg-active:    rgba(255, 252, 244, 0.55);
+    --tab-divider:      rgba(23, 18, 10, 0.26);
+
+    /* -------------------------------------------------------------------- inputs --- */
+    --input-fg:         var(--ink);
+    --input-bg:         rgba(255, 253, 247, 0.78);
+    --input-bg-focus:   #fffdf7;
+    --input-edge:       rgba(23, 18, 10, 0.52);
+    --input-placeholder:rgba(23, 18, 10, 0.55);
+
+    --option-bg:        #2c241a;
+    --option-fg:        #d6c6a4;
+
+    /*
+        The select arrow, as an inline SVG data URI. A chevron drawn with two strokes and no
+        curve, to match everything else on the page.
+    */
+    --select-arrow: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='6' viewBox='0 0 9 6'%3E%3Cpath d='M0 0 L4.5 6 L9 0' fill='none' stroke='%2317120a' stroke-width='1.8'/%3E%3C/svg%3E");
+
+    /* ------------------------------------------------------------------- buttons --- */
+    /*
+        Buttons were the worst of it: 30% white over a mid board, with a hairline border at
+        40%. They read as labels rather than as controls. They are now a near-opaque plate
+        with a border you can see, which is what a stencilled steel tag on a board looks like
+        anyway.
+    */
+    --btn-fg:           var(--ink);
+    --btn-bg:           rgba(255, 253, 247, 0.72);
+    --btn-edge:         rgba(23, 18, 10, 0.58);
+    --btn-fg-hover:     #fbf1dc;
+    --btn-bg-hover:     var(--ink-2);
+    --btn-edge-hover:   var(--ink);
+
+    --btn-primary-fg:       #f7ecd6;
+    --btn-primary-bg:       var(--rust-2);
+    --btn-primary-bg-hover: var(--rust);
+    --btn-primary-edge:     var(--rust-3);
+
+    --btn-danger-fg:        #f7ecd6;
+    --btn-danger-bg:        var(--blood);
+    --btn-danger-bg-hover:  #a8382a;
+    --btn-danger-edge:      #6b241a;
+
+    /* --------------------------------------------------------------------- table --- */
+    --th-fg:            rgba(248, 238, 216, 0.95);
+    --th-bg:            var(--ink-2);
+    --td-fg:            rgba(23, 18, 10, 0.94);
+    --td-strong:        var(--ink);
+    /* The secondary line under each value. At 50% it was decoration; it carries the plate and
+       the id, which are the two things an admin reads most. */
+    --td-muted:         rgba(23, 18, 10, 0.68);
+
+    --row-alt:          rgba(255, 253, 247, 0.30);
+    --row-hover:        rgba(168, 72, 42, 0.20);
+
+    --label-fg:         var(--ink);
+    --label-bg:         rgba(201, 147, 52, 0.52);
+    --label-edge:       rgba(23, 18, 10, 0.52);
+
+    /* Chips carry a tinted fill as well as their border now. A 1px outline in a mid colour on
+       a light board was the least readable thing on the page. */
+    --chip-live:        #3f5620;
+    --chip-live-bg:     rgba(63, 86, 32, 0.16);
+    --chip-stored:      #55492f;
+    --chip-stored-bg:   rgba(85, 73, 47, 0.14);
+    --chip-wrecked:     #7d2418;
+    --chip-wrecked-bg:  rgba(125, 36, 24, 0.16);
+    --chip-due:         #8a5c00;
+    --chip-due-bg:      rgba(138, 92, 0, 0.18);
+    --chip-grace:       #8c3a20;
+    --chip-grace-bg:    rgba(140, 58, 32, 0.16);
+    --chip-broken:      #5c2660;
+    --chip-broken-bg:   rgba(92, 38, 96, 0.16);
+
+    --meter-track:      rgba(23, 18, 10, 0.30);
+    --meter-fill:       var(--olive);
+    --meter-low:        var(--amber);
+    --meter-dead:       var(--blood);
+
+    /* --------------------------------------------------------------------- menu --- */
+    --menu-bg:          #2c241a;
+    --menu-bg-hover:    #3d3325;
+    --menu-edge:        #1e1912;
+    --menu-divider:     rgba(214, 198, 164, 0.14);
+    --menu-fg:          rgba(214, 198, 164, 0.88);
+    --menu-fg-hover:    #f2e4c8;
+    --menu-danger-fg:   #d98a7a;
+
+    /* -------------------------------------------------------------------- footer --- */
+    --footer-bg:        rgba(23, 18, 10, 0.14);
+
+    /* --------------------------------------------------------------------- toast --- */
+    --toast-fg:         #f2e4c8;
+    --toast-bg:         var(--ink-2);
+    --toast-edge:       var(--olive);
+
+    --toast-error-fg:   #f7dcd6;
+    --toast-error-bg:   #3a1a14;
+    --toast-error-edge: var(--blood);
+
+    /* ---------------------------------------------------------------- scrollbars --- */
+    --scroll-track:     rgba(23, 18, 10, 0.18);
+    --scroll-thumb:     rgba(23, 18, 10, 0.55);
+    --scroll-thumb-hover: rgba(23, 18, 10, 0.78);
+}
+
+/*
+    A worn edge along the top of the sheet, where the paper meets the sign.
+
+    One pseudo-element, no image. It is the sort of detail that makes a flat panel read as a
+    physical object, and it costs a single 3px strip.
+*/
+#panel::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 3px;
+    background: linear-gradient(
+        90deg,
+        var(--rust-3) 0%,
+        var(--rust) 18%,
+        var(--rust-3) 34%,
+        var(--rust-2) 52%,
+        var(--rust) 71%,
+        var(--rust-3) 100%
+    );
+    pointer-events: none;
+    z-index: 5;
+}
+
+/*
+    A very faint vignette on the sheet, so the middle of a long table does not read as flatter
+    than its edges. Kept under 4% or it becomes a gradient somebody notices.
+*/
+#panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(
+        ellipse at 50% 40%,
+        rgba(255, 255, 255, 0.04) 0%,
+        rgba(0, 0, 0, 0.00) 60%,
+        rgba(0, 0, 0, 0.03) 100%
+    );
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* Everything the user can touch sits above the two decorative layers. */
+#masthead,
+#tabs,
+.view,
+#toast,
+#modal {
+    position: relative;
+    z-index: 2;
+}
+
+/*
+    Stencilled section rules. The horizontal line under the toolbar is dashed rather than
+    solid, which is what a stencil edge does and what stops the page reading as a spreadsheet.
+*/
+#toolbar {
+    border-bottom-style: dashed;
+    border-bottom-color: rgba(23, 18, 10, 0.42);
+}

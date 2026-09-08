@@ -1,0 +1,87 @@
+/*
+    html/css/reset.css
+
+    The minimum. Not normalize.css: this page has eleven kinds of element on it and pulling in
+    a library to standardise the other four hundred is weight for nothing.
+*/
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+/*
+    THE ONE LINE THAT MATTERS MOST IN THIS FILE.
+
+    A NUI page paints over the game. A body with a background colour is an opaque rectangle
+    over the whole screen for as long as the resource is running, whether or not the panel is
+    open, and it is the single most common reason a NUI "breaks somebody's game".
+*/
+body {
+    background: transparent;
+    color: inherit;
+    font: 400 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    cursor: default;
+}
+
+button,
+input,
+select,
+textarea {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    outline: none;
+}
+
+button {
+    cursor: pointer;
+}
+
+table {
+    border-collapse: collapse;
+    border-spacing: 0;
+    width: 100%;
+}
+
+th,
+td {
+    text-align: left;
+    vertical-align: middle;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+/* Scrollbars, styled to match rather than left as the Chromium default grey. */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--scroll-track, #241d16);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--scroll-thumb, #6b5c44);
+    border: 2px solid var(--scroll-track, #241d16);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--scroll-thumb-hover, #8a7658);
+}

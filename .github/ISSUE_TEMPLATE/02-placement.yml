@@ -1,0 +1,74 @@
+name: A vehicle came back in the wrong place
+description: The placement engine put a vehicle somewhere other than where it was left
+labels: ["bug", "placement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the resource's headline feature, so these reports get read carefully. The one
+        thing that makes a placement report actionable is the output of `/vparkprobe`.
+
+        **Stand exactly where the vehicle should be**, in the same vehicle if you can, and run
+        `/vparkprobe`. Paste everything it prints to the console.
+
+  - type: textarea
+    id: probe
+    attributes:
+      label: Output of /vparkprobe, standing in the problem spot
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where is it
+      options:
+        - An underground or multi-storey car park
+        - A single-car garage
+        - Inside an MLO
+        - An alley or a tight street space
+        - Open ground
+        - Somewhere else
+    validations:
+      required: true
+
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: What actually happened
+      options:
+        - It came back on a different level
+        - It came back beside the space rather than in it
+        - It came back in the road
+        - It fell through the map
+        - It came back inside a wall
+        - It did not come back at all
+    validations:
+      required: true
+
+  - type: input
+    id: shrink
+    attributes:
+      label: Config.Placement.probe.shrink
+      placeholder: "0.88"
+
+  - type: input
+    id: fallback
+    attributes:
+      label: Config.Placement.fallback
+      placeholder: "place"
+
+  - type: textarea
+    id: mlo
+    attributes:
+      label: Is the space part of a custom MLO?
+      description: If so, which one. A link is ideal.
+
+  - type: textarea
+    id: info
+    attributes:
+      label: Output of /vparkinfo
+      render: text
+    validations:
+      required: true

@@ -1,0 +1,62 @@
+name: Compatibility with another resource
+description: v-park does not get along with something you have installed
+labels: ["compatibility"]
+body:
+  - type: input
+    id: resource
+    attributes:
+      label: Which resource
+      placeholder: "qs-advancedgarages"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Its version
+      placeholder: "3.2.1"
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of resource is it
+      options:
+        - Framework
+        - Garage
+        - Fuel
+        - Vehicle keys
+        - Inventory
+        - Mechanic or tuning
+        - Notifications
+        - Target
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What goes wrong
+      description: |
+        Be specific about which side is losing. "The fuel resets to full on restore" and "the
+        garage lets me take the car out twice" are different bugs with different fixes.
+    validations:
+      required: true
+
+  - type: textarea
+    id: info
+    attributes:
+      label: Output of /vparkinfo
+      description: This line matters most - it says what v-park actually detected.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: exports
+    attributes:
+      label: The exports that resource publishes, if you know them
+      description: |
+        Detection is by resource name plus an export call. If yours publishes something under a
+        different name, that is usually the whole fix.
+      render: lua

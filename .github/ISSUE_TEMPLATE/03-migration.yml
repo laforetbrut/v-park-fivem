@@ -1,0 +1,56 @@
+name: Migration from Advanced Parking
+description: The migration did not map your table correctly
+labels: ["migration"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Advanced Parking's schema is not published, so the migration introspects rather than
+        knowing. The scan output tells us exactly what your table looks like, and it is almost
+        always enough on its own.
+
+        Neither output below contains personal data.
+
+  - type: textarea
+    id: scan
+    attributes:
+      label: Output of /vparkmigrate scan
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: dry
+    attributes:
+      label: Output of /vparkmigrate dry
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Where it went wrong
+      options:
+        - The table was not found at all
+        - Columns were mapped to the wrong fields
+        - Most rows were skipped as "position is at the origin"
+        - Most rows were skipped as "no usable model"
+        - It imported, but the vehicles are wrong
+        - Something else
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Which version of Advanced Parking the table came from
+      placeholder: "4.11.1"
+
+  - type: textarea
+    id: columns
+    attributes:
+      label: The source table's columns
+      description: |
+        `SHOW COLUMNS FROM your_table;` Paste the result. It contains no vehicle data.
+      render: text

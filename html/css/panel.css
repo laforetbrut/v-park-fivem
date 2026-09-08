@@ -1,0 +1,727 @@
+/*
+    html/css/panel.css
+
+    Structure and layout. Everything that decides WHERE a thing is.
+
+    Colours, textures and typography live in the theme file that loads after this one, and are
+    reached only through custom properties. That split is what makes "a theme is one CSS file"
+    true rather than aspirational: nothing below sets a literal colour.
+
+    -------------------------------------------------------------------------------------------
+    NO BORDER RADIUS ANYWHERE IN THIS RESOURCE
+    -------------------------------------------------------------------------------------------
+
+    Not as a style preference but as a rule, because a rounded rectangle with a soft shadow and
+    a gradient is the default shape of every generated interface and reads as one on sight.
+    Every edge here is a hard 90 degree corner, every border is a hairline, and depth comes
+    from overlap and from a hard offset shadow rather than from a blur.
+*/
+
+/* ============================================================================== ROOT === */
+
+#root {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+
+#scrim {
+    position: absolute;
+    inset: 0;
+    background: var(--scrim);
+    /* No blur filter. A backdrop-filter over a full-screen game view costs a real amount of
+       GPU time every frame, for an effect nobody notices behind an opaque panel. */
+}
+
+#panel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+
+    width: min(1180px, 92vw);
+    height: min(760px, 88vh);
+
+    background: var(--sheet);
+    border: var(--edge);
+    box-shadow: var(--panel-shadow);
+
+    /* Clips the masthead's decorative bleed. */
+    overflow: hidden;
+}
+
+/* ========================================================================= MASTHEAD === */
+
+#masthead {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+
+    padding: 14px 18px;
+    background: var(--mast-bg);
+    border-bottom: var(--edge-strong);
+    flex: 0 0 auto;
+}
+
+/* The two rivets on the left of the sign. Pure decoration, and the cheapest kind: two
+   box-shadows on one element rather than two more nodes. */
+.mast-mark {
+    position: relative;
+    width: 14px;
+    height: 44px;
+    flex: 0 0 auto;
+    background: var(--mast-plate);
+    border: 1px solid var(--mast-plate-edge);
+}
+
+.mast-bolt {
+    position: absolute;
+    left: 3px;
+    width: 6px;
+    height: 6px;
+    background: var(--mast-bolt);
+    border: 1px solid var(--mast-bolt-edge);
+}
+
+.mast-bolt:first-child { top: 5px; }
+.mast-bolt:last-child { bottom: 5px; }
+
+.mast-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+#title {
+    font-family: var(--font-display);
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    line-height: 1;
+    color: var(--mast-title);
+    text-transform: uppercase;
+}
+
+#subtitle {
+    margin-top: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--mast-subtitle);
+}
+
+.mast-stats {
+    display: flex;
+    gap: 2px;
+    flex: 0 0 auto;
+}
+
+.stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 78px;
+    padding: 6px 10px;
+    background: var(--stat-bg);
+    border: 1px solid var(--stat-edge);
+}
+
+.stat-value {
+    font-family: var(--font-display);
+    font-size: 20px;
+    line-height: 1;
+    color: var(--stat-value);
+}
+
+.stat-label {
+    margin-top: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--stat-label);
+}
+
+.btn-close {
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    font-size: 15px;
+    line-height: 1;
+    color: var(--close-fg);
+    background: var(--close-bg);
+    border: 1px solid var(--close-edge);
+}
+
+.btn-close:hover {
+    background: var(--close-bg-hover);
+    color: var(--close-fg-hover);
+}
+
+/* ============================================================================= TABS === */
+
+#tabs {
+    display: flex;
+    gap: 0;
+    flex: 0 0 auto;
+    background: var(--tabs-bg);
+    border-bottom: var(--edge);
+}
+
+.tab {
+    padding: 9px 22px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--tab-fg);
+    background: transparent;
+    border-right: 1px solid var(--tab-divider);
+    /* The active marker is a hard 3px bar, drawn inset so it does not shift the layout when
+       it appears. */
+    box-shadow: inset 0 -3px 0 transparent;
+    transition: color 90ms linear, background-color 90ms linear;
+}
+
+.tab:hover {
+    color: var(--tab-fg-hover);
+    background: var(--tab-bg-hover);
+}
+
+.tab.is-active {
+    color: var(--tab-fg-active);
+    background: var(--tab-bg-active);
+    box-shadow: inset 0 -3px 0 var(--accent);
+}
+
+/* ============================================================================ VIEWS === */
+
+.view {
+    display: none;
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-direction: column;
+}
+
+.view.is-active {
+    display: flex;
+}
+
+/* ========================================================================== TOOLBAR === */
+
+#toolbar {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    padding: 12px 16px;
+    flex: 0 0 auto;
+    border-bottom: 1px solid var(--rule);
+}
+
+.field {
+    position: relative;
+    display: flex;
+    flex: 0 0 auto;
+}
+
+.field-search {
+    flex: 1 1 auto;
+}
+
+#search,
+#filter,
+#sort,
+#modal-input,
+#modal-select {
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: var(--input-fg);
+    background: var(--input-bg);
+    border: 1px solid var(--input-edge);
+}
+
+#search::placeholder {
+    color: var(--input-placeholder);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-size: 11px;
+}
+
+#search:focus,
+#filter:focus,
+#sort:focus,
+#modal-input:focus {
+    border-color: var(--accent);
+    background: var(--input-bg-focus);
+}
+
+#filter,
+#sort {
+    min-width: 168px;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    /* The native arrow is a rounded blue thing on some platforms. Removing it and drawing
+       nothing is more consistent than trying to draw our own. */
+    appearance: none;
+    padding-right: 26px;
+    background-image: var(--select-arrow);
+    background-repeat: no-repeat;
+    background-position: right 9px center;
+}
+
+#filter option,
+#sort option,
+#modal-select option {
+    background: var(--option-bg);
+    color: var(--option-fg);
+}
+
+/* ========================================================================== BUTTONS === */
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    height: 32px;
+    padding: 0 14px;
+
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    white-space: nowrap;
+
+    color: var(--btn-fg);
+    background: var(--btn-bg);
+    border: 1px solid var(--btn-edge);
+
+    transition: background-color 80ms linear, color 80ms linear, border-color 80ms linear;
+}
+
+.btn:hover {
+    color: var(--btn-fg-hover);
+    background: var(--btn-bg-hover);
+    border-color: var(--btn-edge-hover);
+}
+
+.btn:active {
+    /* A one-pixel nudge instead of a scale transform: it reads as a physical press and it
+       does not trigger a repaint of the whole subtree. */
+    transform: translateY(1px);
+}
+
+.btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+    transform: none;
+}
+
+.btn-primary {
+    color: var(--btn-primary-fg);
+    background: var(--btn-primary-bg);
+    border-color: var(--btn-primary-edge);
+}
+
+.btn-primary:hover {
+    background: var(--btn-primary-bg-hover);
+}
+
+.btn-danger {
+    color: var(--btn-danger-fg);
+    background: var(--btn-danger-bg);
+    border-color: var(--btn-danger-edge);
+}
+
+.btn-danger:hover {
+    background: var(--btn-danger-bg-hover);
+}
+
+/*
+    Row actions: three inline, the rest behind an overflow menu.
+
+    THE FIRST DRAFT PUT ALL TWELVE IN THE ROW and let them wrap. With a narrow actions column
+    they stacked into a vertical column twelve buttons tall, and every row in the table became
+    three hundred pixels high - which turned a page of twenty-five vehicles into a page of
+    four. It looked like a bug because it was one.
+
+    Three is the number that fits on one line at the width below, and they are the three an
+    admin actually reaches for: go to it, bring it here, mark it.
+*/
+.act {
+    height: 22px;
+    padding: 0 7px;
+    font-size: 9px;
+    letter-spacing: 0.08em;
+}
+
+.row-actions {
+    position: relative;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 3px;
+    justify-content: flex-end;
+    align-items: center;
+}
+
+.act-more {
+    width: 24px;
+    padding: 0;
+    font-size: 12px;
+    letter-spacing: 0;
+}
+
+/*
+    The overflow menu.
+
+    Absolutely positioned inside the row rather than appended to the body, so it scrolls with
+    the table and disappears with the row. `right: 0` anchors it to the column edge; the table
+    scrolls vertically only, so it can never be clipped horizontally.
+*/
+.act-menu {
+    position: absolute;
+    top: calc(100% + 3px);
+    right: 0;
+    z-index: 4;
+
+    display: flex;
+    flex-direction: column;
+    min-width: 132px;
+
+    background: var(--menu-bg);
+    border: 1px solid var(--menu-edge);
+    box-shadow: var(--hard-shadow);
+}
+
+.act-menu .act {
+    height: 26px;
+    justify-content: flex-start;
+    padding: 0 10px;
+    border: 0;
+    border-bottom: 1px solid var(--menu-divider);
+    background: transparent;
+    color: var(--menu-fg);
+}
+
+.act-menu .act:last-child {
+    border-bottom: 0;
+}
+
+.act-menu .act:hover {
+    background: var(--menu-bg-hover);
+    color: var(--menu-fg-hover);
+}
+
+.act-menu .btn-danger {
+    color: var(--menu-danger-fg);
+}
+
+.act-menu .btn-danger:hover {
+    background: var(--btn-danger-bg);
+    color: var(--btn-danger-fg);
+}
+
+/* =========================================================================== TABLE === */
+
+#table-wrap,
+#table-wrap-trash,
+#table-wrap-cleanup {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/*
+    13px, not 12. The table is the whole point of this panel and it is read at a glance across
+    five columns; a point smaller saves one row per screen and costs legibility on every one of
+    them.
+*/
+table {
+    font-size: 13px;
+}
+
+thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+
+    padding: 9px 12px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+
+    color: var(--th-fg);
+    background: var(--th-bg);
+    border-bottom: var(--edge-strong);
+}
+
+tbody td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--rule);
+    color: var(--td-fg);
+    /* An ellipsis needs a definite width to clip against, and a table cell's width is
+       indefinite by default however many percentages are on the column. */
+    max-width: 0;
+}
+
+/* The actions column is sized in pixels and must not be squeezed by the rule above. */
+tbody td.col-actions {
+    max-width: none;
+}
+
+/* Alternating rows, at a very low contrast: enough to follow a long row across, not enough
+   to read as stripes. */
+tbody tr:nth-child(even) {
+    background: var(--row-alt);
+}
+
+tbody tr:hover {
+    background: var(--row-hover);
+}
+
+/*
+    A fixed actions column rather than `width: 1%`, which is the usual trick for "as narrow as
+    the content" and is exactly wrong here: it makes the column as narrow as it can be and
+    then lets the content wrap inside it.
+*/
+.col-actions,
+th.col-actions {
+    text-align: right;
+    width: 200px;
+    white-space: nowrap;
+}
+
+.col-vehicle { width: 28%; }
+.col-owner   { width: 20%; }
+.col-where   { width: 20%; }
+.col-state   { width: 18%; }
+
+/* The row that owns an open menu has to stack above the ones below it. */
+tbody tr.has-menu {
+    position: relative;
+    z-index: 3;
+}
+
+/*
+    The vehicle cell: model over plate.
+
+    Both lines are single-line with an ellipsis rather than wrapping. A wrapped secondary line
+    triples the row height for a plate that was two characters too long, and the row heights
+    then differ down the table, which is what makes a list hard to scan even when every
+    individual row is legible.
+*/
+.v-model {
+    display: block;
+    font-weight: 600;
+    color: var(--td-strong);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.v-sub {
+    display: block;
+    margin-top: 3px;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: var(--td-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.v-label {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--label-fg);
+    background: var(--label-bg);
+    border: 1px solid var(--label-edge);
+}
+
+/*
+    Status chips. Square, uppercase, and now with a tinted fill behind the border.
+
+    A 1px outline in a mid-tone colour on a light board is close to invisible at 9px, which is
+    what the first version of these was. The fill costs nothing and is the difference between
+    a chip you notice and one you have to look for.
+*/
+.chip {
+    display: inline-block;
+    padding: 2px 7px;
+    margin: 0 4px 3px 0;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border: 1px solid currentColor;
+}
+
+.chip-live    { color: var(--chip-live);    background: var(--chip-live-bg); }
+.chip-stored  { color: var(--chip-stored);  background: var(--chip-stored-bg); }
+.chip-wrecked { color: var(--chip-wrecked); background: var(--chip-wrecked-bg); }
+.chip-due     { color: var(--chip-due);     background: var(--chip-due-bg); }
+.chip-grace   { color: var(--chip-grace);   background: var(--chip-grace-bg); }
+.chip-broken  { color: var(--chip-broken);  background: var(--chip-broken-bg); }
+
+/* A two-bar condition meter for body and engine health. No animation, no gradient. */
+.meter {
+    display: flex;
+    gap: 2px;
+    margin-top: 4px;
+    width: 84px;
+}
+
+.meter-bar {
+    position: relative;
+    height: 5px;
+    flex: 1 1 0;
+    background: var(--meter-track);
+    border: 1px solid var(--meter-track);
+}
+
+.meter-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background: var(--meter-fill);
+}
+
+.meter-fill.is-low { background: var(--meter-low); }
+.meter-fill.is-dead { background: var(--meter-dead); }
+
+.empty,
+.note {
+    padding: 34px 20px;
+    text-align: center;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    color: var(--td-muted);
+}
+
+.note {
+    padding: 14px 20px;
+    text-align: left;
+    border-bottom: 1px solid var(--rule);
+    line-height: 1.6;
+}
+
+/* ========================================================================== FOOTER === */
+
+#pager,
+#trash-pager {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    flex: 0 0 auto;
+    border-top: var(--edge-strong);
+    background: var(--footer-bg);
+}
+
+#page-label,
+#trash-page-label {
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--td-muted);
+}
+
+.pager-total {
+    margin-left: auto;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--td-muted);
+}
+
+/* =========================================================================== TOAST === */
+
+#toast {
+    position: absolute;
+    left: 50%;
+    bottom: 60px;
+    transform: translateX(-50%);
+    z-index: 6;
+
+    max-width: 70%;
+    padding: 9px 16px;
+
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    text-align: center;
+
+    color: var(--toast-fg);
+    background: var(--toast-bg);
+    border: 1px solid var(--toast-edge);
+    box-shadow: var(--hard-shadow);
+}
+
+#toast.is-error {
+    color: var(--toast-error-fg);
+    background: var(--toast-error-bg);
+    border-color: var(--toast-error-edge);
+}
+
+/* =========================================================================== MODAL === */
+
+#modal {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 8;
+    background: var(--modal-scrim);
+}
+
+.modal-box {
+    width: min(430px, 80%);
+    padding: 20px;
+    background: var(--sheet);
+    border: var(--edge-strong);
+    box-shadow: var(--hard-shadow);
+}
+
+#modal-title {
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--td-strong);
+}
+
+#modal-body {
+    margin-top: 10px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--td-fg);
+}
+
+#modal-select,
+#modal-input {
+    margin-top: 14px;
+    height: 34px;
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 18px;
+}

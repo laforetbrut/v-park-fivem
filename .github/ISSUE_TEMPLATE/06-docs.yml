@@ -1,0 +1,31 @@
+name: Documentation
+description: Something in the docs is wrong, missing or misleading
+labels: ["documentation"]
+body:
+  - type: dropdown
+    id: where
+    attributes:
+      label: Which document
+      options:
+        - README.md
+        - CONFIG.md
+        - API.md
+        - MIGRATION.md
+        - config.lua comments
+        - A comment in the code
+        - Somewhere else
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What it says, and what is wrong with it
+      description: Quote the passage if you can.
+    validations:
+      required: true
+
+  - type: textarea
+    id: better
+    attributes:
+      label: What it should say

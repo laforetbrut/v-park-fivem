@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>v-park</title>
+
+    <link rel="stylesheet" href="css/reset.css">
+    <link rel="stylesheet" href="css/panel.css">
+    <link rel="stylesheet" href="css/sandy.css">
+</head>
+<body>
+
+<!--
+    The whole panel is hidden until the client tells it to open, and it is REMOVED from the
+    layout rather than merely transparent: a fixed overlay at opacity 0 still composites every
+    frame, which is a measurable cost on a resource that is closed 99.9% of the time.
+-->
+<div id="root" hidden>
+
+    <div id="scrim"></div>
+
+    <main id="panel">
+
+        <!-- The masthead. Rusted steel sign over a bleached board. -->
+        <header id="masthead">
+            <div class="mast-mark">
+                <span class="mast-bolt"></span>
+                <span class="mast-bolt"></span>
+            </div>
+
+            <div class="mast-text">
+                <h1 id="title">V-PARK</h1>
+                <p id="subtitle">Vehicle registry</p>
+            </div>
+
+            <div class="mast-stats">
+                <div class="stat">
+                    <span class="stat-value" id="stat-total">0</span>
+                    <span class="stat-label" id="stat-total-label">Kept</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value" id="stat-live">0</span>
+                    <span class="stat-label" id="stat-live-label">In world</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value" id="stat-pending">0</span>
+                    <span class="stat-label" id="stat-pending-label">Pending</span>
+                </div>
+            </div>
+
+            <button id="close" class="btn btn-close" type="button" title="ESC">&#10005;</button>
+        </header>
+
+        <!-- Tabs, drawn as riveted plates rather than as pills. -->
+        <nav id="tabs">
+            <button class="tab is-active" data-tab="vehicles" type="button">Vehicles</button>
+            <button class="tab" data-tab="trash" type="button">Trash</button>
+            <button class="tab" data-tab="cleanup" type="button">Cleanup</button>
+        </nav>
+
+        <!-- ============================================================ VEHICLES -->
+        <section class="view is-active" data-view="vehicles">
+
+            <div id="toolbar">
+                <div class="field field-search">
+                    <input id="search" type="text" autocomplete="off" spellcheck="false" placeholder="Search">
+                </div>
+
+                <div class="field">
+                    <select id="filter"></select>
+                </div>
+
+                <div class="field">
+                    <select id="sort"></select>
+                </div>
+
+                <button id="refresh" class="btn" type="button">&#8635;</button>
+            </div>
+
+            <div id="table-wrap">
+                <table id="table">
+                    <thead>
+                        <tr>
+                            <th class="col-vehicle">Vehicle</th>
+                            <th class="col-owner">Owner</th>
+                            <th class="col-where">Where</th>
+                            <th class="col-state">State</th>
+                            <th class="col-actions">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rows"></tbody>
+                </table>
+
+                <p id="empty" class="empty" hidden>Nothing matches that.</p>
+            </div>
+
+            <footer id="pager">
+                <button id="prev" class="btn" type="button">&#8592;</button>
+                <span id="page-label">Page 1 of 1</span>
+                <button id="next" class="btn" type="button">&#8594;</button>
+                <span id="total-label" class="pager-total">0 total</span>
+            </footer>
+        </section>
+
+        <!-- =============================================================== TRASH -->
+        <section class="view" data-view="trash">
+            <div id="table-wrap-trash">
+                <table id="trash-table">
+                    <thead>
+                        <tr>
+                            <th>Vehicle</th>
+                            <th>Owner</th>
+                            <th>Removed</th>
+                            <th>Reason</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="trash-rows"></tbody>
+                </table>
+
+                <p id="trash-empty" class="empty" hidden>The trash is empty.</p>
+            </div>
+
+            <footer id="trash-pager">
+                <button id="trash-prev" class="btn" type="button">&#8592;</button>
+                <span id="trash-page-label">Page 1 of 1</span>
+                <button id="trash-next" class="btn" type="button">&#8594;</button>
+            </footer>
+        </section>
+
+        <!-- ============================================================= CLEANUP -->
+        <section class="view" data-view="cleanup">
+            <p id="cleanup-note" class="note"></p>
+
+            <div id="table-wrap-cleanup">
+                <table id="cleanup-table">
+                    <thead>
+                        <tr>
+                            <th>Vehicle</th>
+                            <th>Owner</th>
+                            <th>Idle</th>
+                            <th>Destination</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cleanup-rows"></tbody>
+                </table>
+
+                <p id="cleanup-empty" class="empty" hidden>Nothing is due for cleanup.</p>
+            </div>
+        </section>
+
+        <!-- A single toast slot. Results replace each other rather than stacking. -->
+        <div id="toast" hidden></div>
+    </main>
+
+    <!--
+        One modal, reconfigured per use. Three separate modals would be three places to forget
+        to release the keyboard, and the keyboard is what the game takes back when this closes.
+    -->
+    <div id="modal" hidden>
+        <div class="modal-box">
+            <h2 id="modal-title"></h2>
+            <p id="modal-body"></p>
+
+            <select id="modal-select" hidden></select>
+            <input id="modal-input" type="text" autocomplete="off" hidden>
+
+            <div class="modal-actions">
+                <button id="modal-cancel" class="btn" type="button">Cancel</button>
+                <button id="modal-confirm" class="btn btn-primary" type="button">Confirm</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>

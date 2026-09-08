@@ -1,0 +1,80 @@
+name: Bug report
+description: Something does not work
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before anything else, run `/vparkinfo` in game or in the console. Its output answers
+        half the questions below and is the single most useful thing you can paste here.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+      description: What did you see, and what did you expect instead?
+      placeholder: |
+        Vehicles parked in the Pillbox underground car park come back on the level above.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce it
+      placeholder: |
+        1. Park a car in the second bay of the Pillbox underground car park
+        2. Wait 60 seconds
+        3. restart v-park
+        4. Walk back down
+    validations:
+      required: true
+
+  - type: textarea
+    id: info
+    attributes:
+      label: Output of /vparkinfo
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: stats
+    attributes:
+      label: Output of /vparkstats
+      description: Especially useful for anything about performance or vehicles not appearing.
+      render: text
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: |
+        Any line starting with `[v-park]`. If it is a placement problem, run `/vparkdebug`
+        first, reproduce it, and paste what appears.
+      render: text
+
+  - type: input
+    id: build
+    attributes:
+      label: Game build and artifacts version
+      placeholder: "build 3095, artifacts 11228"
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Anything you changed in config.lua
+      description: The sections you changed, not the whole file.
+      render: lua
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: OneSync is enabled on this server
+          required: true
+        - label: I have read the console for lines starting with `[v-park]`
+          required: true
+        - label: This is not a security problem (those go through the Security tab)
+          required: true
