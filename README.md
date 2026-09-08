@@ -129,6 +129,11 @@ two. On a build without the setter native the RPC path is used and waited on
 (`Config.Streaming.readyTimeout`), which works and is simply not as good as not having the race
 at all.
 
+A setter entity is **orphaned** until a client is within scope: registered with the server,
+not present in the game world, and `DoesEntityExist` answers false for the whole of that
+window. That is normal and is not waited on - the client waits for the entity itself, in the
+restore handler, which is the machine it is waiting for.
+
 > **On a txAdmin server, OneSync is set in the txAdmin settings page, not in `server.cfg`.**
 > txAdmin's config validator comments the line out on every start and leaves a note saying so,
 > which means the obvious place to put it is the one place it does not work. If v-park says

@@ -8,6 +8,60 @@ out of it.
 
 ---
 
+## [2026-09-08 16:00] — The right native, and the wrong reflex kept with it
+
+**Context:** Immediately after 1.0.4 shipped. Reported as "the vehicles appear then disappear,
+and in the wrong place". The log:
+
+    [v-park] WARN: 0TL1SZG01HDUH did not become a usable entity in time - removing it
+    [v-park] WARN: could not spawn 0TL1SZG01HDUH (model PREMIER): the entity never became usable
+
+**Error:** No error. The resource was doing exactly what it had been told to.
+
+**Root cause:** 1.0.4 correctly replaced `CreateVehicle` with
+`CREATE_VEHICLE_SERVER_SETTER`, and incorrectly kept the wait that the old native needed.
+
+The CFX documentation:
+
+> Server setter natives immediately and guaranteed register an entity with the server, but the
+> entity is initially orphaned - it will not be simulated nor exist in the game world until a
+> suitable client is within scope.
+
+`DoesEntityExist` on a setter entity is therefore false BY DESIGN for as long as no client has
+it in scope. Waiting three seconds for it and deleting the vehicle when it did not arrive meant
+deleting the vehicle at roughly the moment a client had streamed it in - which is why they
+appeared and then vanished rather than never appearing. And they were in the wrong place while
+they were there, because the restore instruction that dresses and places them is sent after
+that check.
+
+Two things made it worse than a flicker:
+
+- The configuration ran under one `pcall`, so a pose native refused by an orphaned entity took
+  the identity statebag with it.
+- The external-delete detector reads the same `DoesEntityExist` as "something else removed
+  this", and past its five-second grace period it would have DELETED THE ROW for a vehicle that
+  had simply not reached a client yet.
+
+**Fix:** The setter path is not waited on. The waiting happens on the client, which already
+waits twelve seconds for the entity in `vpark:client:restore` and is the machine the entity is
+actually waiting for. Configuration is split so only the statebag half can fail the creation.
+An entry must have been SEEN to exist before it can be considered externally deleted.
+
+**Prevention:**
+
+> **When you replace a native, re-derive everything that was built around the old one.**
+>
+> The wait was correct, well-reasoned, documented in a thirty-line comment, and verified against
+> another implementation - for `CreateVehicle`. None of that survived the change of native, and
+> none of it was re-checked, because the comment above it read as settled.
+>
+> The specific trap: `DoesEntityExist` answers "is this in the game world", and both natives
+> make it false at first for completely different reasons. One is a race that resolves in a
+> frame; the other is a documented state that resolves only when a player arrives. The same
+> false meant "wait a moment" in one case and "this is normal, carry on" in the other.
+
+---
+
 ## [2026-09-08 12:40] — Server-side `CreateVehicle` is an RPC, and that was the whole bug
 
 **Context:** Three releases of chasing vehicle multiplication. Each one fixed something real

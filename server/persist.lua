@@ -314,6 +314,8 @@ function Persist.adopt(src, payload, explicit)
         placer = src,
         placedAt = Park.ticks(),
         adopted = true,
+        -- A player is sitting in it. It exists. See the note in `sweepVanishing`.
+        seen = true,
     })
 
     -- Marking it means the placement code will never delete it as ambient, and a restart can

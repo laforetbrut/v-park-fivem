@@ -195,26 +195,34 @@ function Spawn.owns(entity)
 end
 
 --[[
-    Wait for a created entity to become one the natives will accept.
+    Wait for an RPC-created entity to become one the natives will accept.
 
     -------------------------------------------------------------------------------------------
-    THIS IS THE FIX 1.0.2 AND 1.0.3 BOTH MISSED
+    THE FALLBACK PATH ONLY. NEVER CALL THIS ON A SERVER-SETTER ENTITY.
     -------------------------------------------------------------------------------------------
 
     `CreateVehicle` returns a handle synchronously and the entity is NOT usable when it does.
     For a frame or two afterwards every native against that handle fails:
 
         script error in native 000000009e35dab6: Tried to access invalid entity: 135949
-        script error in native 00000000635e5289: Tried to access invalid entity: 135949
 
     1.0.1 saw `DoesEntityExist` answer false in that window and concluded the test was
     worthless. 1.0.2 wrapped the configuration in a pcall so the failure was survivable, and
     treated it as the vehicle's fault: warn, delete, back off, try again. The vehicle never
-    spawned, and every attempt leaked a copy.
+    spawned, and every attempt leaked a copy. Waiting is the right answer on THAT path.
 
-    Both readings were wrong. `DoesEntityExist` answering false there is not noise to be
-    ignored or a failure to be reported - it is the entity telling us IT IS NOT READY YET.
-    The answer is to wait for it, which is what every other server-side spawner in FiveM does.
+    IT IS THE WRONG ANSWER ON THE OTHER ONE, and 1.0.4 applied it to both. The CFX
+    documentation on server setter natives:
+
+        "Server setter natives immediately and guaranteed register an entity with the server,
+         but the entity is initially orphaned - it will not be simulated nor exist in the game
+         world until a suitable client is within scope."
+
+    So `DoesEntityExist` on a setter entity is false BY DESIGN until a client takes ownership.
+    Waiting three seconds for it and then deleting the vehicle meant deleting it at about the
+    moment a client had streamed it in, which on a live server read as vehicles appearing and
+    vanishing again - and sitting in the wrong place while they were there, because the restore
+    instruction that dresses and places them was never sent.
 
     Bounded, because an entity nobody ever takes ownership of never becomes ready and this must
     not be an unbounded loop. The one extra frame after it first answers true is deliberate:
@@ -389,19 +397,39 @@ noteFailure = function(record, why)
 end
 
 --[[
-    Everything that is done to a vehicle after it exists.
+    Everything that is done to a vehicle after it is created.
 
-    Separate from `Spawn.create` for one reason: it is called through `pcall`, and a pcall
-    around a named function is a great deal easier to read than a pcall around sixty inline
-    lines. Nothing in here may be assumed to have run.
+    -------------------------------------------------------------------------------------------
+    TWO HALVES, AND ONLY ONE OF THEM IS ALLOWED TO MATTER
+    -------------------------------------------------------------------------------------------
+
+    A server-setter entity is registered and ORPHANED: it does not exist in the game world
+    until a client is within scope, so the natives that touch a world entity - the pose, the
+    routing bucket - may refuse. The natives that touch its SERVER-SIDE record - the statebags
+    - work regardless, because the server owns them.
+
+    1.0.4 ran the whole thing under one pcall, so a pose write that failed on an orphaned
+    entity took the identity statebag down with it and the vehicle was thrown away as
+    unconfigurable.
+
+    So: the world half is best effort and its failure is not reported, and the statebag half
+    decides whether this worked. The pose is not lost by that - the position and heading were
+    arguments to the creation native, and the client's placement pass sets the full rotation
+    from the restore instruction a moment later, which is where the pose is settled anyway.
 ]]
 local function configure(entity, record)
-    SetEntityRoutingBucket(entity, record.bucket or 0)
+    --[[
+        The world half. Best effort.
 
-    -- Full rotation, and never a heading afterwards. See the note in client/placement.lua:
-    -- setting the heading would flatten the pitch a car parked on a slope actually has.
-    SetEntityCoords(entity, record.pos_x, record.pos_y, record.pos_z, false, false, false, false)
-    SetEntityRotation(entity, record.rot_x, record.rot_y, record.rot_z, 2, true)
+        Full rotation, and never a heading afterwards. See the note in client/placement.lua:
+        setting the heading would flatten the pitch a car parked on a slope actually has.
+    ]]
+    pcall(function()
+        SetEntityCoords(entity, record.pos_x, record.pos_y, record.pos_z, false, false, false, false)
+        SetEntityRotation(entity, record.rot_x, record.rot_y, record.rot_z, 2, true)
+    end)
+
+    pcall(SetEntityRoutingBucket, entity, record.bucket or 0)
 
     local entityConfig = streaming().entity or {}
 
@@ -415,39 +443,47 @@ local function configure(entity, record)
         pcall(SetEntityDistanceCullingRadius, entity, culling)
     end
 
-    local state = Entity(entity).state
+    --[[
+        The server-side half. THIS is what has to work.
 
-    -- The id is replicated to everybody in scope. It is how a client knows this entity is
-    -- ours - the placement code refuses to delete a vehicle carrying one, and the panel and
-    -- the API both resolve an entity to a record through it.
-    state:set('vpark:id', record.id, true)
+        The id is replicated to everybody in scope. It is how a client knows this entity is
+        ours - the placement code refuses to delete a vehicle carrying one, and the panel and
+        the API both resolve an entity to a record through it. A vehicle without it is a
+        vehicle nothing can identify, which is the shape of every leak this resource has had.
+    ]]
+    local identified = pcall(function()
+        local state = Entity(entity).state
 
-    if record.plate then
-        state:set('vpark:plate', record.plate, true)
-    end
+        state:set('vpark:id', record.id, true)
 
-    -- Deformation is applied by EVERY client, locally, which is what makes two players see
-    -- the same dents. Hence a replicated bag rather than a targeted event.
-    local deformation = record.properties and record.properties.deformation
-    if deformation and Config.Deformation and Config.Deformation.enabled ~= false then
-        state:set('vpark:deform', {
-            v = record.updated_at,
-            d = deformation.d,
-            g = deformation.g,
-        }, true)
-    end
+        if record.plate then
+            state:set('vpark:plate', record.plate, true)
+        end
 
-    -- Statebags another resource expects on the vehicle. Set server-side because a replicated
-    -- bag can only be written by the server or the entity's owner, and at this moment there
-    -- is no owner.
+        -- Deformation is applied by EVERY client, locally, which is what makes two players see
+        -- the same dents. Hence a replicated bag rather than a targeted event.
+        local deformation = record.properties and record.properties.deformation
+        if deformation and Config.Deformation and Config.Deformation.enabled ~= false then
+            state:set('vpark:deform', {
+                v = record.updated_at,
+                d = deformation.d,
+                g = deformation.g,
+            }, true)
+        end
+    end)
+
+    -- Statebags another resource expects on the vehicle. Individually protected, and never a
+    -- reason to throw the vehicle away: a missing third-party bag is that resource's problem.
     if record.statebags and Config.Save and Config.Save.fields and Config.Save.fields.statebags ~= false then
         for key, value in pairs(record.statebags) do
-            local ok = pcall(function() state:set(key, value, true) end)
+            local ok = pcall(function() Entity(entity).state:set(key, value, true) end)
             if not ok then
                 Park.debug('could not restore statebag `%s` on %s', tostring(key), record.id)
             end
         end
     end
+
+    return identified
 end
 
 --[[
@@ -496,7 +532,8 @@ local function spawnEntity(record)
             record.pos_x, record.pos_y, record.pos_z,
             heading)
 
-        if ok and entity and entity ~= 0 then return entity end
+        -- `true`: the entity is registered and orphaned, and must NOT be waited on.
+        if ok and entity and entity ~= 0 then return entity, true end
 
         Park.debug('the setter native did not create %s as `%s` - falling back', record.id, kind)
     end
@@ -508,9 +545,10 @@ local function spawnEntity(record)
         true,   -- networked
         true)   -- script-owned, so the engine does not treat it as ambient
 
-    if ok and entity and entity ~= 0 then return entity end
+    -- `false`: an RPC handle, which refers to nothing until a client has answered.
+    if ok and entity and entity ~= 0 then return entity, false end
 
-    return nil
+    return nil, false
 end
 
 --[[
@@ -538,7 +576,7 @@ function Spawn.create(record, players)
     local placer = nominate(record, players or onlinePlayers())
     if not placer then return nil end
 
-    local entity = spawnEntity(record)
+    local entity, viaSetter = spawnEntity(record)
 
     --[[
         A HANDLE OF ZERO IS THE ONLY FAILURE HERE.
@@ -584,7 +622,7 @@ function Spawn.create(record, players)
 
     -- The entity is not usable for another frame or two. Everything else happens on its own
     -- thread so the streaming pass keeps its millisecond budget.
-    CreateThread(function() dress(record, entity, placer.src) end)
+    CreateThread(function() dress(record, entity, placer.src, viaSetter) end)
 
     return entity
 end
@@ -596,8 +634,22 @@ end
     working vehicle registered or releases the handle: there is no path that leaves an entity
     in the world and nothing pointing at it.
 ]]
-dress = function(record, entity, placerSrc)
-    local ready = waitUntilReady(entity, tonumber(streaming().readyTimeout) or 3000)
+dress = function(record, entity, placerSrc, viaSetter)
+    --[[
+        THE SETTER PATH IS NOT WAITED ON, AND THAT IS THE WHOLE OF THIS FIX.
+
+        A setter entity is registered the moment the native returns - that is its guarantee -
+        and orphaned until a client comes into scope. `DoesEntityExist` is therefore false by
+        design, and 1.0.4 waited three seconds for it and then deleted the vehicle. On a live
+        server that read as vehicles appearing and disappearing again, because the delete
+        landed at about the moment a client had streamed the entity in.
+
+        The waiting that this vehicle genuinely needs happens on the CLIENT, in
+        `vpark:client:restore`, which already waits up to twelve seconds for the entity to
+        arrive before dressing and placing it. That is the right place for it: the client is
+        the machine the entity is waiting for.
+    ]]
+    local ready = viaSetter or waitUntilReady(entity, tonumber(streaming().readyTimeout) or 5000)
 
     --[[
         Still ours?
@@ -619,7 +671,10 @@ dress = function(record, entity, placerSrc)
         return
     end
 
-    local configured = pcall(configure, entity, record)
+    -- `configure` answers whether the IDENTITY was set, not whether every native worked. On an
+    -- orphaned entity the world-facing half is expected to refuse; see its header.
+    local ok, configured = pcall(configure, entity, record)
+    configured = ok and configured
 
     local gotId, netId = pcall(NetworkGetNetworkIdFromEntity, entity)
     if not gotId then netId = nil end
@@ -642,6 +697,18 @@ dress = function(record, entity, placerSrc)
 
     entry.netId = netId
     entry.ready = true
+
+    --[[
+        Whether the entity is real YET is not a failure and is not waited on - see `dress`.
+        It is worth knowing at debug level, because "the client never took it" and "the client
+        took it immediately" are the two ends of every streaming question this resource gets
+        asked, and the answer is one line in the log rather than a guess.
+    ]]
+    if safeExists(entity) then
+        entry.seen = true
+    else
+        Park.trace('%s is registered and not yet in the world - the client will pick it up', record.id)
+    end
 
     -- It exists, it is dressed and a client can be told about it. THIS is a success, and it is
     -- the only place the failure counter is cleared.
@@ -999,6 +1066,10 @@ RegisterNetEvent('vpark:server:restored', function(id, result)
 
     entry.placedAt = Park.ticks()
     entry.frozen = result.frozen
+
+    -- The client only answers after `waitForEntity` succeeded, so this is proof the entity
+    -- genuinely exists. See the note in `sweepVanishing`.
+    entry.seen = true
 
     if result.outcome then
         stats[result.outcome] = (stats[result.outcome] or 0) + 1

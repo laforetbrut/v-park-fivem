@@ -631,7 +631,27 @@ local function sweepVanishing()
     local grace = (tonumber(lifecycleConfig().externalDeleteGrace) or 5) * 1000
 
     for id, entry in pairs(Store.allLive()) do
-        if not entry.entity or not DoesEntityExist(entry.entity) then
+        local exists = entry.entity ~= nil and DoesEntityExist(entry.entity)
+
+        --[[
+            AN ENTITY THAT HAS NEVER EXISTED HAS NOT BEEN DELETED.
+
+            Since 1.0.4 vehicles are created with `CREATE_VEHICLE_SERVER_SETTER`, which
+            registers the entity immediately and leaves it ORPHANED - not simulated, and not
+            present in the game world - until a client comes into scope. `DoesEntityExist`
+            answers false for the whole of that window, by design.
+
+            Without this flag, a vehicle that took longer than `externalDeleteGrace` to reach a
+            client would be read as "something else deleted it" and its ROW WOULD BE DELETED.
+            That is not a flicker, it is losing somebody's car, and it is the failure this
+            check exists to avoid rather than to cause.
+
+            `seen` is set the first time the entity is genuinely observed - by a client
+            answering the restore, by an adoption, or right here.
+        ]]
+        if exists then entry.seen = true end
+
+        if entry.seen and not exists then
             if not vanishing[id] then
                 vanishing[id] = Park.ticks()
             elseif Park.ticks() - vanishing[id] > grace then

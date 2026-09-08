@@ -1187,18 +1187,22 @@ Config.Streaming = {
     reconcileInterval = 15,
 
     --[[
-        How long to wait for a newly created entity to become usable, in milliseconds.
+        How long to wait for an RPC-created entity to become usable, in milliseconds.
 
-        Since 1.0.4 vehicles are created with `CREATE_VEHICLE_SERVER_SETTER`, which registers
-        the entity immediately and has no such window, so on a normal server this timer is
-        never reached. It matters on a build old enough to lack that native, where the
-        fallback is `CreateVehicle` - an RPC that returns a handle referring to nothing until a
-        client has answered.
+        THIS APPLIES TO THE FALLBACK PATH ONLY, and on a current server build it is never
+        reached because that path is never taken.
 
-        Three seconds is far more than the round trip needs and short enough that a vehicle
-        which is never going to appear does not hold a slot. Reaching it is reported.
+        Vehicles are created with `CREATE_VEHICLE_SERVER_SETTER`, which registers the entity
+        immediately and leaves it orphaned until a client is in scope. `DoesEntityExist` is
+        false for the whole of that window BY DESIGN, so waiting on it there is meaningless -
+        1.0.4 did, and deleted vehicles three seconds after creating them, which is what
+        "vehicles appear and then disappear" was. The waiting that a setter entity needs
+        happens on the client, which already waits up to twelve seconds for it to arrive.
+
+        On a build without the setter native, `CreateVehicle` is used and this is how long its
+        RPC round trip is given. Five seconds, which is what the rest of the ecosystem allows.
     ]]
-    readyTimeout = 3000,
+    readyTimeout = 5000,
 
     -- Server-side entity settings, applied to every vehicle we create.
     entity = {

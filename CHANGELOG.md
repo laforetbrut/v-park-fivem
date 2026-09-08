@@ -7,6 +7,89 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.5] - 2026-09-08
+
+**Vehicles appeared and then disappeared a few seconds later, in the wrong place.** A
+regression in 1.0.4, and the fix is one line of judgement rather than one line of code.
+
+### Fixed
+
+- **A server-setter entity must not be waited on, and 1.0.4 waited on it.**
+
+  1.0.4 changed vehicle creation to `CREATE_VEHICLE_SERVER_SETTER`, which was right, and kept
+  the "wait for `DoesEntityExist`" loop that the old RPC path needed, which was wrong. The CFX
+  documentation on server setter natives:
+
+  > Server setter natives immediately and guaranteed register an entity with the server, but
+  > the entity is initially **orphaned** - it will not be simulated nor exist in the game world
+  > until a suitable client is within scope.
+
+  So `DoesEntityExist` on a setter entity is false **by design** until a client takes
+  ownership. Waiting three seconds for it and then deleting the vehicle meant deleting it at
+  about the moment a client had streamed it in:
+
+  ```
+  [v-park] WARN: 0TL1SZG01HDUH did not become a usable entity in time - removing it
+  [v-park] WARN: could not spawn 0TL1SZG01HDUH (model PREMIER): the entity never became usable
+  ```
+
+  And while they were there they were in the wrong place, because the restore instruction that
+  dresses and places them is sent after that check and never was.
+
+  The setter path is no longer waited on at all. The waiting a vehicle genuinely needs already
+  happens on the **client**, in the restore handler, which waits up to twelve seconds for the
+  entity to arrive before dressing and placing it - the client being the machine the entity is
+  waiting for. The RPC fallback still waits, because on that path the wait is the correct
+  answer; its budget went from three seconds to five.
+
+- **A vehicle that had not reached a client yet could have its row deleted.** The
+  external-delete detector reads `DoesEntityExist` as "something else removed this", and an
+  orphaned entity answers false for the whole of its first few seconds. Past
+  `Config.Lifecycle.externalDeleteGrace` - five seconds by default - it would have concluded
+  the vehicle was gone and **deleted the row**. That is not a flicker, it is losing somebody's
+  car. A vehicle now has to have been *seen* to exist at least once before it can be considered
+  externally deleted.
+
+- **One failed native no longer throws the whole vehicle away.** The configuration ran under a
+  single `pcall`, so a pose write refused by an orphaned entity took the identity statebag down
+  with it and the vehicle was discarded as unconfigurable. It is now two halves: the
+  world-facing natives are best effort, and only the statebag that identifies the vehicle
+  decides whether the creation worked. Nothing is lost by that - the position and heading were
+  arguments to the creation native, and the client's placement pass sets the full pose a moment
+  later anyway.
+
+---
+
+## [1.0.5] - 2026-09-08 (français)
+
+**Les véhicules apparaissaient puis disparaissaient quelques secondes plus tard, au mauvais
+endroit.** Régression de la 1.0.4.
+
+### Corrigé
+
+- **Une entité créée par le natif setter ne doit pas être attendue, et la 1.0.4 l'attendait.**
+  La documentation CFX est explicite : ces natifs enregistrent l'entité immédiatement, mais
+  elle reste **orpheline** et n'existe pas dans le monde tant qu'aucun client n'est à portée.
+  `DoesEntityExist` est donc faux par construction, et attendre trois secondes puis supprimer
+  revenait à supprimer le véhicule au moment précis où un client venait de l'afficher. Et il
+  était au mauvais endroit parce que l'instruction de restauration, qui l'habille et le place,
+  n'était jamais envoyée.
+
+  L'attente qui compte a toujours lieu côté **client**, qui patiente déjà jusqu'à douze
+  secondes. Le chemin RPC de secours attend toujours, lui, et passe de trois à cinq secondes.
+
+- **Un véhicule pas encore parvenu à un client pouvait voir sa ligne supprimée.** Le détecteur
+  de suppression externe lisait `DoesEntityExist` comme « autre chose l'a supprimé ». Passé le
+  délai de grâce de cinq secondes, il aurait effacé la ligne. Ce n'est pas un scintillement,
+  c'est perdre la voiture de quelqu'un. Un véhicule doit maintenant avoir été **vu** au moins
+  une fois avant de pouvoir être considéré comme supprimé de l'extérieur.
+
+- **Un natif en échec ne fait plus jeter tout le véhicule.** La configuration passait par un
+  seul `pcall` : une écriture de pose refusée emportait avec elle le statebag d'identité. Elle
+  est désormais en deux moitiés, et seule celle qui identifie le véhicule décide du succès.
+
+---
+
 ## [1.0.4] - 2026-09-08
 
 **The vehicles multiplied because the wrong native was creating them.** 1.0.1, 1.0.2 and 1.0.3
