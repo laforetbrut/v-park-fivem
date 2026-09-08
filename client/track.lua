@@ -249,6 +249,18 @@ local function onExit(vehicle)
                 y = Park.angle(rotation.y),
                 z = Park.angle(rotation.z),
             })
+
+            --[[
+                And it stops reporting its position again until somebody drives it.
+
+                The rule from 1.0.13 is that only a driven vehicle says where it is, because a
+                merely woken one is simulated and rolls. `driven` was set when the player got
+                in and nothing cleared it, so after they got out the vehicle carried on
+                reporting a position that physics was still free to change.
+
+                The pose above is the answer. Everything after it is drift.
+            ]]
+            tracked.driven = false
         end
     end
 

@@ -8,6 +8,50 @@ out of it.
 
 ---
 
+## [2026-09-09 16:20] — The correct position, then the old one on top of it
+
+**Context:** Reported immediately after 1.0.14: "I get out of the vehicle, I leave, I come back
+and it is at an old place where it was before".
+
+**Error:** None.
+
+**Root cause:** 1.0.14 added `vpark:server:parked` - the client sends the pose the instant the
+driver gets out - and, in the handler, set `entry.driven = true` to record that the vehicle had
+been used.
+
+`driven` is the flag that permits the despawn to read the entity's position back one last time.
+So the sequence was:
+
+    park, get out          -> correct position written by the client's report
+    walk away              -> vehicle leaves the streaming radius
+    despawn                -> reads the entity's SERVER-SIDE coordinates over the top
+
+A server-side entity's position is maintained by its NETWORK OWNER. Once the driver has walked
+away and ownership has lapsed, the value the server holds is stale - and it is stale at the
+position the server created the entity with, which is the position from before the drive.
+
+The release that made the parked position correct is the release that overwrote it, with the one
+line it added to record success.
+
+**Fix:** `entry.parked` marks the report as final and the despawn skips its read for such a
+vehicle; getting in again clears it. And the client clears its own `driven` after sending the
+report, so the capture sweep stops reporting a position that physics is still free to change.
+
+**Prevention:**
+
+> **When you add a better source of a fact, check what the worse sources are still allowed to
+> do with it.**
+>
+> The parked report was strictly better information than the despawn read: newer, from the
+> machine that actually knew, taken at the moment the value settled. It was added alongside the
+> old path rather than in front of it, and the old path ran last.
+>
+> The specific trap was that the new handler set a flag meaning "this vehicle has been used",
+> which happened to be the same flag that means "it is worth re-reading its position on the way
+> out". One word doing two jobs, and the second job undid the first.
+
+---
+
 ## [2026-09-09 14:40] — Nothing was written when the vehicle was actually parked
 
 **Context:** Reported after 1.0.13, and diagnosed by the user: "sometimes the position is saved

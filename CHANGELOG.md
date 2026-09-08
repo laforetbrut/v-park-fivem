@@ -7,6 +7,77 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.15] - 2026-09-09
+
+**The parked position was being written correctly and then overwritten with the old one seconds
+later.** A regression in 1.0.14, in the line that release added.
+
+### What happened
+
+1.0.14 made the client send a vehicle's pose the instant the driver gets out, which was right.
+It also set `driven` on the server entry when that report arrived, to record that the vehicle
+had been used - and `driven` is the flag that lets **the despawn read the entity's position back
+one last time**.
+
+So the sequence was: park, get out, correct position written. Walk away, the vehicle leaves the
+streaming radius, and the despawn reads the entity's server-side coordinates over the top of it.
+
+**A server-side entity's position is maintained by its network owner.** Once the driver has
+walked away and ownership has lapsed, the value the server holds is stale - and what it is stale
+at is the position the server created the entity with, which is the position from **before the
+drive**.
+
+The vehicle came back where it used to live. Which is the symptom 1.0.14 set out to fix, caused
+by 1.0.14.
+
+### Fixed
+
+- **A parked report is the last word.** It is the pose from the machine that was driving, taken
+  at the moment the answer stopped changing, and nothing may overwrite it. The despawn skips its
+  read for a vehicle that has been reported parked. Getting in again clears the mark, because
+  from that moment the vehicle can move and the report is no longer the truth.
+
+- **The client stops reporting a position after it has reported the parked one.** The rule from
+  1.0.13 is that only a driven vehicle says where it is, because a merely woken one is simulated
+  and rolls. `driven` was set when the player got in and nothing cleared it, so after they got
+  out the vehicle carried on reporting a position physics was still free to change. The pose
+  sent at the door is the answer; everything after it is drift.
+
+---
+
+## [1.0.15] - 2026-09-09 (français)
+
+**La position au stationnement était bien écrite, puis écrasée quelques secondes plus tard par
+l'ancienne.** Régression de la 1.0.14, dans la ligne que cette version avait ajoutée.
+
+### Ce qui se passait
+
+La 1.0.14 fait envoyer la pose par le client à l'instant où le conducteur sort, ce qui est
+juste. Elle posait aussi `driven` sur l'entrée serveur à la réception de ce rapport - et
+`driven` est justement le drapeau qui autorise **la relecture de la position de l'entité à la
+disparition**.
+
+La séquence était donc : se garer, sortir, bonne position écrite. S'éloigner, le véhicule quitte
+le rayon de streaming, et la disparition relit les coordonnées serveur par-dessus.
+
+**La position serveur d'une entité est tenue à jour par son propriétaire réseau.** Une fois le
+conducteur parti et la propriété perdue, la valeur que le serveur détient est périmée - et elle
+est périmée à la position avec laquelle le serveur a créé l'entité, c'est-à-dire celle **d'avant
+le trajet**.
+
+Le véhicule revenait donc à son ancien emplacement. Exactement le symptôme que la 1.0.14
+prétendait corriger, causé par la 1.0.14.
+
+### Corrigé
+
+- **Un rapport de stationnement a le dernier mot.** Rien ne peut l'écraser. La disparition ne
+  relit plus la position d'un véhicule déjà rapporté garé. Remonter dedans lève la marque.
+- **Le client cesse de rapporter sa position après le rapport de stationnement.** `driven` était
+  posé à l'entrée et rien ne l'effaçait, donc après la sortie le véhicule continuait de rapporter
+  une position que la physique pouvait encore changer.
+
+---
+
 ## [1.0.14] - 2026-09-09
 
 **A vehicle is written down the moment it is parked**, by the client that was driving it.

@@ -835,7 +835,17 @@ function Spawn.despawn(id, reason)
         `nudged`: it is standing in a spot the search invented rather than the one it belongs
         in, so reading it back would write that spot down. See the `restored` handler.
     ]]
-    local couldHaveMoved = entry.driven == true and entry.seen == true and not entry.nudged
+    --[[
+        `parked`: the client that was driving already told us exactly where it left this, in
+        `vpark:server:parked`. That report is better information than anything readable here.
+
+        A server-side entity's position is maintained by its network owner, so once the driver
+        has walked away the value this function would read is stale - and stale at the position
+        the server created the entity with, which is the position from before the drive. Reading
+        it would replace a correct answer with an old one.
+    ]]
+    local couldHaveMoved = entry.driven == true and entry.seen == true
+        and not entry.nudged and not entry.parked
 
     if record and couldHaveMoved and safeExists(entity) then
         local position = safeCoords(entity)
@@ -1408,8 +1418,27 @@ RegisterNetEvent('vpark:server:parked', function(id, position, rotation)
 
     Store.update(id, patch)
 
-    -- It has been driven and it is where the driver left it. Both facts matter to the despawn.
-    entry.driven = true
+    --[[
+        THIS IS THE LAST WORD ON WHERE THIS VEHICLE IS, AND NOTHING MAY OVERWRITE IT.
+
+        `parked` marks the pose as reported by the machine that was driving, at the moment the
+        answer stopped changing. The despawn must not then read the entity's server-side
+        coordinates over the top of it - see the note on `couldHaveMoved`, and the reason is
+        worth stating here too because this line is what stops it.
+
+        A server-side entity's position is maintained by its NETWORK OWNER. Once the driver has
+        walked away and ownership has lapsed, the value the server holds is stale, and what it
+        is stale AT is the position the server created the entity with - which is the position
+        from BEFORE the drive.
+
+        So 1.0.14 sent the correct position at the door and then, seconds later, overwrote it
+        with the old one on the way out. The vehicle came back where it used to live, which is
+        the same symptom 1.0.14 set out to fix.
+
+        Cleared when somebody gets in again: from that moment the vehicle can move and this
+        report is no longer the truth.
+    ]]
+    entry.parked = true
     entry.seen = true
     entry.nudged = nil
 
@@ -1437,9 +1466,10 @@ RegisterNetEvent('vpark:server:touched', function(id, used)
             entry.seen = true
 
             -- Driven, so wherever it ends up IS its position - including if the restore had
-            -- had to stand it aside.
+            -- had to stand it aside, and including overriding the last parked report.
             entry.driven = true
             entry.nudged = nil
+            entry.parked = nil
 
             -- Somebody is driving it. Nothing may freeze it again.
             if entry.entity then
