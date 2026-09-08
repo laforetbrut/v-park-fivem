@@ -7,6 +7,91 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.7] - 2026-09-08
+
+**Vehicles came back under the map, a few metres from where they were parked, and the wrong
+colour.** Two causes, and both are about doing something to an entity before it was ours to
+touch.
+
+### Fixed
+
+- **A restored vehicle fell through the map before anything could stop it.**
+
+  A server-created entity is simulated by a client from the moment it arrives, and the
+  collision around it may not have streamed in yet. So it falls - and by the time the ground
+  exists, the vehicle is beneath it.
+
+  The placement pass freezes it, but that runs after waiting for the entity, after the model
+  check and after the properties: seconds later. The vehicle has already gone through the floor
+  by then, and the placement then carefully positions something that is somewhere else
+  entirely - which is also why it landed a few metres off rather than exactly below.
+
+  The server now sets a **`vpark:hold` statebag as part of the same replicated write that
+  carries the vehicle's id**, and every client freezes the entity the moment that bag lands.
+  Every client, not just the one the server nominated, because any of them may be the one
+  simulating the fall. The hold is released when the vehicle is placed, when the placement is
+  given up on, and when somebody gets in - so it can never freeze a car under its driver.
+
+  A last check after the settle delay puts a vehicle back if it moved more than half a metre
+  while nobody was looking.
+
+- **The colours were being written into the void.**
+
+  `SetVehicleColours`, `SetVehicleMod` and every other property native applied to an entity the
+  client does not own are applied LOCALLY and then overwritten by the owner's next
+  synchronisation. The car looks right for a moment on the machine that dressed it, and is
+  stock everywhere else - including for the player standing next to it.
+
+  Network control was requested inside the placement, which runs *after* the properties. So on
+  any vehicle where the request took a moment - which is most of them, because a freshly
+  created server entity has no owner yet - the entire dress went nowhere. And the next capture
+  read a stock car and wrote that over the real one.
+
+  **Control is taken before a single property is written.** A restore that cannot get control
+  is not attempted at all: the vehicle stays exactly where it is, held frozen, and the server
+  asks again in four seconds, up to three times. Accepting a half-restore would mean accepting
+  a stock car and then saving it.
+
+---
+
+## [1.0.7] - 2026-09-08 (français)
+
+**Les véhicules revenaient sous la carte, à quelques mètres de leur place, et avec la mauvaise
+couleur.** Deux causes, et les deux consistent à agir sur une entité avant qu'elle ne soit à
+nous.
+
+### Corrigé
+
+- **Un véhicule restauré tombait à travers la carte avant que quoi que ce soit ne l'arrête.**
+  Une entité créée par le serveur est simulée par un client dès son arrivée, et la collision
+  autour d'elle n'est pas forcément chargée. Elle tombe, et quand le sol arrive elle est
+  dessous. Le placement la gèle, mais des secondes plus tard : elle a déjà traversé le sol, et
+  le placement positionne alors soigneusement quelque chose qui est ailleurs - d'où aussi les
+  quelques mètres d'écart.
+
+  Le serveur pose maintenant un statebag **`vpark:hold`** dans la même écriture répliquée que
+  l'identifiant du véhicule, et chaque client gèle l'entité dès que ce bag arrive. Chaque
+  client, pas seulement celui désigné, parce que n'importe lequel peut être celui qui simule la
+  chute. Le hold est levé une fois le véhicule placé, quand on renonce à le placer, et dès que
+  quelqu'un monte dedans.
+
+  Une dernière vérification après le délai de stabilisation remet le véhicule en place s'il a
+  bougé de plus d'un demi-mètre.
+
+- **Les couleurs étaient écrites dans le vide.** Les natifs de propriétés appliqués à une
+  entité que le client ne possède pas sont appliqués **localement** puis écrasés par la
+  synchronisation du propriétaire. La voiture est correcte un instant sur la machine qui l'a
+  habillée, et d'origine partout ailleurs. Le contrôle réseau était demandé dans le placement,
+  qui s'exécute **après** les propriétés : sur la plupart des véhicules, tout l'habillage
+  partait donc à la poubelle - et la capture suivante écrivait cette voiture d'origine
+  par-dessus la vraie.
+
+  **Le contrôle est pris avant la première propriété.** Une restauration qui ne l'obtient pas
+  n'est pas tentée : le véhicule reste exactement où il est, gelé, et le serveur redemande
+  quatre secondes plus tard, jusqu'à trois fois.
+
+---
+
 ## [1.0.6] - 2026-09-08
 
 A pass over the restore path against what a persistence resource is actually for: the vehicle

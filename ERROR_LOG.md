@@ -8,6 +8,53 @@ out of it.
 
 ---
 
+## [2026-09-08 19:10] — Writing to an entity before it was ours to write to
+
+**Context:** Reported after 1.0.6. The multiplication was gone and the vehicles were staying,
+but: "they appeared under the map a few metres from where I had parked them", and "they have
+also changed colour, that is not normal".
+
+**Error:** None. Both are silent.
+
+**Root cause:** Two faults, and the same sentence describes both: something was done to the
+entity before this machine had the right to do it.
+
+**Under the map.** A server-created entity is simulated by a client from the moment it arrives,
+and the collision around it has not necessarily streamed in. So it falls. The placement pass
+freezes it - but that runs after `waitForEntity`, after the model check and after the
+properties, which is seconds later. The vehicle is already below the floor, and the placement
+then carefully positions something that is somewhere else. The few metres of horizontal offset
+are the same fall: it slid before it was caught.
+
+**The colours.** `SetVehicleColours` and every other property native, applied to an entity the
+client does not own, are applied LOCALLY and then overwritten by the owner's next
+synchronisation. Network control was requested inside `Placement.place`, which runs AFTER
+`Properties.apply`. A freshly created server entity has no owner, so the request usually takes
+a moment - and every property written in that moment went nowhere. Then the capture sweep read
+a stock car and wrote it over the stored one.
+
+**Fix:** A `vpark:hold` statebag set in the same replicated write as the vehicle's id, and a
+client handler that freezes the entity the instant it lands - on every client, because any of
+them may be the one simulating the fall. Control is taken before the first property is written,
+and a restore that cannot get control is not attempted at all: the vehicle stays where it is,
+held, and the server asks again.
+
+**Prevention:**
+
+> **On the client, "do I own this entity?" is a precondition, not an error case.**
+>
+> Every native that writes to an entity you do not own is a no-op that returns nothing and logs
+> nothing. There is no failure to catch and no line in any console; the only symptom is that
+> the world does not match what the code plainly says it should. Two of the four things this
+> resource exists to do were broken by it for seven releases.
+>
+> And: **the gap between an entity existing and being under our control is a gap in which
+> physics happens.** Closing it needs something that acts on arrival rather than something that
+> acts when our code gets round to it - which for a networked entity means a replicated bag,
+> not a sequence of instructions.
+
+---
+
 ## [2026-09-08 17:20] — Treating "I could not improve this" as "this is broken"
 
 **Context:** After the orphan fix, a pass over the whole restore path against what a persistence

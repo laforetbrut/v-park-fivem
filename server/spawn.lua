@@ -104,6 +104,27 @@ local bootWindow = 0
 local dress
 local noteFailure
 
+--[[
+    Tell a client to dress and place a vehicle.
+
+    Its own function because it is sent twice: once when the vehicle is created, and again if
+    the client answers that it could not take network control of it. See the note on the
+    re-ask in the `vpark:server:restored` handler.
+]]
+local function sendRestore(record, src, netId)
+    TriggerClientEvent('vpark:client:restore', src, netId, {
+        id = record.id,
+        version = record.updated_at,
+        position = { x = record.pos_x, y = record.pos_y, z = record.pos_z },
+        rotation = { x = record.rot_x, y = record.rot_y, z = record.rot_z },
+        class = record.class,
+        interior = record.interior,
+        room = record.room,
+        frozen = true,
+        properties = record.properties,
+    })
+end
+
 local stats = {
     spawned = 0,
     despawned = 0,
@@ -465,6 +486,26 @@ local function configure(entity, record)
 
         state:set('vpark:id', record.id, true)
 
+        --[[
+            HOLD IT STILL BEFORE ANY CLIENT CAN SIMULATE IT.
+
+            This is what stops a restored vehicle ending up under the map.
+
+            A server-created entity arrives on a client and is simulated immediately, and the
+            collision around it may not have streamed in yet - so it falls, and by the time the
+            ground exists it is beneath it. The placement pass freezes it, but that runs after
+            `waitForEntity`, after the model check and after the properties, which is seconds
+            later. The vehicle has already gone through the floor by then, and the placement
+            then carefully positions a vehicle that is somewhere else entirely.
+
+            A replicated bag is the documented answer for server-setter entities, and it is the
+            only one that acts on EVERY client rather than the one we nominated - which matters,
+            because any of them may be the one simulating the fall. See the handler in
+            client/stream.lua: it freezes on sight and never unfreezes, and the server clears
+            this once the vehicle is placed.
+        ]]
+        state:set('vpark:hold', true, true)
+
         if record.plate then
             state:set('vpark:plate', record.plate, true)
         end
@@ -723,17 +764,7 @@ dress = function(record, entity, placerSrc, viaSetter)
     -- the only place the failure counter is cleared.
     failures[record.id] = nil
 
-    TriggerClientEvent('vpark:client:restore', placerSrc, netId, {
-        id = record.id,
-        version = record.updated_at,
-        position = { x = record.pos_x, y = record.pos_y, z = record.pos_z },
-        rotation = { x = record.rot_x, y = record.rot_y, z = record.rot_z },
-        class = record.class,
-        interior = record.interior,
-        room = record.room,
-        frozen = true,
-        properties = record.properties,
-    })
+    sendRestore(record, placerSrc, netId)
 
     stats.spawned = stats.spawned + 1
     Park.debug('created %s (%s) for player %d', record.id, tostring(record.model_name), placerSrc)
@@ -907,6 +938,25 @@ local function pass()
             -- other three hundred from being.
             pcall(Spawn.despawn, id, 'no placement answer')
             stats.failed = stats.failed + 1
+        end
+    end
+
+    --[[
+        Vehicles waiting to be asked again.
+
+        A client that could not take network control of a vehicle answered without dressing it,
+        and the vehicle is standing frozen where the server put it. This is the second ask.
+        Capped at three by the handler that sets `restoreAt`.
+    ]]
+    for id, entry in pairs(Store.allLive()) do
+        if entry.restoreAt and Park.ticks() >= entry.restoreAt and not pending[id] then
+            entry.restoreAt = nil
+
+            local record = Store.get(id)
+            if record and entry.netId and entry.placer then
+                pending[id] = Park.ticks()
+                sendRestore(record, entry.placer, entry.netId)
+            end
         end
     end
 
@@ -1096,12 +1146,46 @@ RegisterNetEvent('vpark:server:restored', function(id, result)
             return
         end
 
+        --[[
+            NO CONTROL MEANS THE VEHICLE WAS NEVER DRESSED, SO WE ASK AGAIN.
+
+            The client takes network control before it writes a single property, because a
+            property written without control is written into the void - which is what made
+            vehicles come back the wrong colour. So an answer of `no_control` is not a vehicle
+            that was placed imperfectly, it is a vehicle that was not touched at all.
+
+            Accepting it would leave a stock car standing where a modified one belongs, and
+            the next capture would write that stock state over the real one. So the vehicle
+            stays exactly where it is - held frozen by `vpark:hold`, at the coordinates the
+            server created it at - and we ask again in a moment.
+
+            Three tries. A freshly created entity has no owner and the first request usually
+            wins; needing four means something else is holding it, and asking forever is the
+            churn every other fix in this file exists to stop. After the third the vehicle is
+            simply left alone: correctly placed, undressed, and never captured, because the
+            client never tracked it.
+        ]]
+        local tries = (entry.restoreTries or 0) + 1
+        entry.restoreTries = tries
+        entry.seen = true
+
+        if result.retry and tries <= 3 then
+            entry.restoreAt = Park.ticks() + 4000
+            Park.debug('%s: %s on try %d - asking again', id, tostring(result.reason), tries)
+            return
+        end
+
         Park.debug('%s could not be refined (%s) - keeping it where the server put it',
             id, tostring(result.reason))
 
+        entry.restoreAt = nil
         entry.placedAt = Park.ticks()
-        entry.seen = true
         entry.frozen = false
+
+        -- The hold comes off even though we gave up. The vehicle is at the coordinates the
+        -- server created it at, which is where it belongs; leaving the bag set would re-freeze
+        -- it on every client that later came into scope, including under a player driving it.
+        pcall(function() Entity(entry.entity).state:set('vpark:hold', nil, true) end)
 
         stats.forced = (stats.forced or 0) + 1
         return
@@ -1113,6 +1197,10 @@ RegisterNetEvent('vpark:server:restored', function(id, result)
     -- The client only answers after `waitForEntity` succeeded, so this is proof the entity
     -- genuinely exists. See the note in `sweepVanishing`.
     entry.seen = true
+
+    -- Dressed and placed. Nothing left to ask.
+    entry.restoreAt = nil
+    entry.restoreTries = nil
 
     --[[
         RE-ASSERT THE ORPHAN MODE, NOW THAT THE ENTITY DEFINITELY EXISTS.
@@ -1129,6 +1217,16 @@ RegisterNetEvent('vpark:server:restored', function(id, result)
     if SetEntityOrphanMode and (streaming().entity or {}).orphanMode ~= false then
         pcall(SetEntityOrphanMode, entry.entity, 2)
     end
+
+    --[[
+        The vehicle is placed, so the hold comes off.
+
+        Left set, it would re-freeze the vehicle on every client that later came into scope -
+        including a car somebody is driving, which would stop dead under them. Cleared here,
+        the freezing that remains is the placement's own, which is the one that knows whether
+        this vehicle should stay frozen.
+    ]]
+    pcall(function() Entity(entry.entity).state:set('vpark:hold', nil, true) end)
 
     if result.outcome then
         stats[result.outcome] = (stats[result.outcome] or 0) + 1
@@ -1209,6 +1307,11 @@ RegisterNetEvent('vpark:server:touched', function(id, used)
         if entry then
             entry.frozen = false
             entry.seen = true
+
+            -- Somebody is driving it. Nothing may freeze it again.
+            if entry.entity then
+                pcall(function() Entity(entry.entity).state:set('vpark:hold', nil, true) end)
+            end
         end
     end
 

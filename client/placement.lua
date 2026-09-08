@@ -906,11 +906,22 @@ function Placement.placeInner(entity, data)
         So: report success, say the placement was not refined, and leave the vehicle where the
         server put it. That is the right answer and it is also the answer the player wants.
     ]]
-    if not takeControl(entity, 5000) then
+    --[[
+        Control is normally already held: the restore handler takes it before it applies a
+        single property, because a property written without control is written into the void.
+        This is the re-check, and it is cheap when we have it.
+
+        Losing it between there and here means another client took the entity, which is a
+        thing that can happen while a player walks up to a car. Not being able to refine the
+        placement is NOT a failed restore - the server created this vehicle at its saved
+        coordinates, so it is already where it belongs - so this reports success and says the
+        refinement did not happen.
+    ]]
+    if not takeControl(entity, 2000) then
         return {
             ok = true,
             outcome = 'unrefined',
-            frozen = false,
+            frozen = true,
             collision = true,
             position = { x = Park.coord(saved.x), y = Park.coord(saved.y), z = Park.coord(saved.z) },
             heading = Park.angle(heading),
@@ -1016,6 +1027,32 @@ function Placement.placeInner(entity, data)
 
     local settleDelay = tonumber(options().settleDelay) or 250
     if settleDelay > 0 then Wait(settleDelay) end
+
+    --[[
+        THE LAST LOOK. DID IT STAY WHERE WE PUT IT?
+
+        Everything above is careful, and none of it can promise the entity is still there a
+        quarter of a second later. It may have been unfrozen by another resource, pushed by a
+        vehicle streaming in beside it, or dropped through a piece of map that arrived after
+        the collision check said it had not.
+
+        The symptom is unmistakable and it is what this check exists for: a vehicle that
+        "appeared under the map a few metres from where I parked it". Half a metre is beyond
+        anything settling can account for, so anything past that is put back rather than
+        reported.
+
+        Cheap - one position read and, in the overwhelming majority of cases, nothing else.
+    ]]
+    local landed = GetEntityCoords(entity)
+    if landed and #(landed - target) > 0.5 then
+        Park.debug('%s drifted %.2f m while settling - putting it back',
+            tostring(data.id), #(landed - target))
+
+        FreezeEntityPosition(entity, true)
+        SetEntityCoordsNoOffset(entity, target.x, target.y, target.z, false, false, false)
+        SetEntityRotation(entity, rotation.x or 0.0, rotation.y or 0.0, heading, 2, true)
+        SetEntityVelocity(entity, 0.0, 0.0, 0.0)
+    end
 
     -- Whether physics is handed back at all is `freezeUntilTouched`. When it is on, the
     -- vehicle stays frozen until a player interacts with it, which costs no simulation and

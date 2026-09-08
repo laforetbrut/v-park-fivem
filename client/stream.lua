@@ -81,6 +81,61 @@ end
     only one client acts on it and a statebag would replicate the property blob to everybody
     in scope for no reason.
 ]]
+--[[
+    ================================================================================================
+    THE HOLD. FREEZE IT ON SIGHT, ON EVERY CLIENT, BEFORE ANYTHING ELSE HAPPENS TO IT.
+    ================================================================================================
+
+    A server-created entity is simulated by a client from the moment it arrives, and the
+    collision around it may not have streamed in yet. So it falls. By the time the ground
+    exists, the vehicle is beneath it - which is how a car parked on a driveway comes back a
+    few metres away and under the map.
+
+    The placement pass freezes it too, but that runs after `waitForEntity`, after the model
+    check, after taking control and after the properties. Seconds later. The vehicle has
+    already gone through the floor, and the placement then carefully positions something that
+    is somewhere else entirely.
+
+    So the server sets `vpark:hold` as part of the same replicated write that carries the
+    vehicle's id, and this freezes it the moment the bag lands - on EVERY client, not just the
+    one the server nominated, because any of them may be the one simulating the fall.
+
+    -------------------------------------------------------------------------------------------
+    IT ONLY EVER FREEZES
+    -------------------------------------------------------------------------------------------
+
+    Never the reverse. Unfreezing is the placement's decision - it is the only thing that knows
+    whether this vehicle should stay frozen - and the server clears the bag once the vehicle is
+    placed so that a client coming into scope later does not freeze a car somebody is driving.
+]]
+AddStateBagChangeHandler('vpark:hold', '', function(bagName, _, value)
+    if value ~= true then return end
+
+    CreateThread(function()
+        --[[
+            The entity may not exist on this client yet: the bag and the entity arrive
+            together and which lands first is not guaranteed.
+
+            `Wait(0)` rather than a longer poll, and that is the point of this handler. Every
+            frame between the entity arriving and the freeze is a frame it can fall in, so the
+            wait is as tight as it can be for the first second and only then backs off.
+        ]]
+        local entity
+        local deadline = Park.ticks() + 10000
+        local started = Park.ticks()
+
+        repeat
+            entity = GetEntityFromStateBagName(bagName)
+            if entity and entity > 0 then break end
+            Wait(Park.ticks() - started < 1000 and 0 or 100)
+        until Park.ticks() > deadline
+
+        if not entity or entity == 0 or not DoesEntityExist(entity) then return end
+
+        FreezeEntityPosition(entity, true)
+    end)
+end)
+
 RegisterNetEvent('vpark:client:restore', function(netId, data)
     if type(data) ~= 'table' or type(netId) ~= 'number' then return end
 
@@ -115,19 +170,48 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
 
         SetEntityAsMissionEntity(entity, true, true)
 
+        -- Belt and braces with the hold handler above: if the bag has not landed on this
+        -- client yet, this is the same instruction a few milliseconds later.
+        FreezeEntityPosition(entity, true)
+
         --[[
-            Properties BEFORE placement. Two reasons: fitting a body kit changes the model's
-            dimensions, and the probe has to measure the car that will exist rather than the
-            one that does; and a vehicle is invisible for these few frames anyway because it
-            is still a collisionless ghost.
+            ============================================================================
+            NETWORK CONTROL FIRST. EVERYTHING BELOW WRITES TO THE ENTITY.
+            ============================================================================
 
-            Through pcall, because a raise here used to mean NO ANSWER AT ALL. The server
-            waits twenty seconds for one, then despawns the vehicle and nominates somebody
-            else - so one bad property on one car showed up in play as a car that appeared,
-            vanished, and appeared again.
+            THIS IS WHY VEHICLES CAME BACK THE WRONG COLOUR.
 
-            A car that is dressed wrong is a much smaller problem than a car that flickers,
-            and the next save corrects it.
+            `SetVehicleColours`, `SetVehicleMod` and every other property native applied to an
+            entity this client does not own are applied LOCALLY and then overwritten by the
+            owner's next synchronisation. The car looks right for a moment on the machine that
+            dressed it and is stock everywhere else, including for the player standing next to
+            it - and the next capture reads a stock car and writes that over the real one.
+
+            Until 1.0.7 control was requested inside `Placement.place`, which runs AFTER the
+            properties. So on any vehicle where the request took a moment - which is most of
+            them, because a freshly created server entity has no owner yet - the entire dress
+            was written into the void.
+
+            A restore that cannot get control is not attempted. Reporting success would mean
+            accepting a stock car and then saving it; the server keeps the vehicle where it is
+            and asks again.
+        ]]
+        if not Placement.takeControl(entity, 5000) then
+            Park.debug('no control of %s yet - leaving it held and asking again',
+                tostring(data.id))
+            answer('vpark:server:restored', data.id,
+                { ok = false, reason = 'no_control', retry = true })
+            return
+        end
+
+        --[[
+            Properties BEFORE placement. Fitting a body kit changes the model's dimensions, and
+            the probe has to measure the car that will exist rather than the one that does.
+
+            Through pcall, because a raise here used to mean NO ANSWER AT ALL. The server waits
+            twenty seconds for one, then despawns the vehicle and nominates somebody else - so
+            one bad property on one car showed up in play as a car that appeared, vanished, and
+            appeared again.
         ]]
         local dressed = true
 
