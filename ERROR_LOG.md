@@ -8,6 +8,77 @@ out of it.
 
 ---
 
+## [2026-09-08 23:40] — An unanswered restore leaked an entity, and enough of them froze streaming
+
+**Context:** Reading `server/spawn.lua` back before the first in-game test.
+
+**Error:** Found by review, not by symptom. `Spawn.create` marks a vehicle both `live` and
+`pending`. The timeout sweep cleared `pending` after 20 seconds and left the entity alone.
+
+**Root cause:** A vehicle whose nominated client never answered - the client disconnected,
+crashed, or never received the entity - stayed in the world forever, undressed and unplaced,
+and stayed counted in `Store.liveCount()`. That on its own is a leak.
+
+What makes it a freeze is the order of the pass. The entity-ceiling check returns EARLY, before
+the timeout sweep at the bottom. So once enough leaked entities push `liveCount` to
+`Config.Streaming.maximumEntities`, the pass returns at the ceiling every time, the timeout
+sweep never runs again, and nothing is ever released. The resource stops spawning anything,
+permanently, with nothing in the console to say why.
+
+**Fix:** The timeout sweep moved to the TOP of the pass, before any early return, and a timeout
+now calls `Spawn.despawn` rather than only clearing the pending flag.
+
+**Prevention:** An early return in a periodic pass must not sit above the cleanup that the
+condition for that early return depends on. Worth checking the other passes for the same shape:
+`Persist.sweep` and the three lifecycle sweeps have no early return, which is why they are fine.
+
+---
+
+## [2026-09-08 23:35] — A per-class spawn radius larger than the global one did nothing
+
+**Context:** Same review.
+
+**Error:** `Config.Streaming.classRadius[16] = 400` against a `spawnRadius` of 250 had no
+effect at all.
+
+**Root cause:** The grid query asked for `spawnRadius`, and the per-class radius was applied
+afterwards as a filter over the result. A filter can only remove, so a larger class radius could
+never see a vehicle the query had already excluded. The shipped defaults are all *smaller* than
+the global, which is why it worked and why nothing looked wrong.
+
+**Fix:** The query asks for the largest radius in play - the global and every class override -
+and the per-class value still narrows afterwards. Cached, because it is read once per player per
+pass.
+
+**Prevention:** When a broad query is narrowed by a per-item rule, the query has to be at least
+as broad as the loosest rule. Worth stating in the comment, which it now is.
+
+---
+
+## [2026-09-08 23:30] — `SetEntityHeading` after `SetEntityRotation` flattened the pitch
+
+**Context:** Same review, `client/placement.lua` and `server/spawn.lua`.
+
+**Error:** Both calls were there, the second immediately after the first.
+
+**Root cause:** `SetEntityRotation` sets all three axes, which is the point - a car parked on the
+Vinewood hills has a real pitch, and storing the full rotation rather than a heading is a
+deliberate design decision stated in the config header. `SetEntityHeading` straight afterwards
+sets the yaw and, on several builds, zeroes the other two.
+
+The symptom would have been every restored vehicle sitting perfectly level, which on flat ground
+is invisible and on a slope is obviously wrong - so it would have been reported as "cars on
+hills come back flat" rather than as anything to do with heading.
+
+**Fix:** The heading call removed from both sites, with a comment saying why it must not come
+back.
+
+**Prevention:** The full rotation is stored on purpose. Anything that sets orientation after it
+undoes that, and there is no reason to set a heading on a vehicle whose rotation has just been
+set exactly.
+
+---
+
 ## [2026-09-08 22:30] — The admin panel was atmospheric and hard to read
 
 **Context:** First render of the Sandy Shores theme, reviewed against real data in a browser.

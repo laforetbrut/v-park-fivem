@@ -286,6 +286,18 @@ function Placement.probe(model, position, heading, ignore)
         return true, 'clear'
     end
 
+    --[[
+        The three size arguments are HALF-extents, measured from the centre.
+
+        That is the community reading of an undocumented native, and it is the single
+        assumption the world half of this probe rests on. If it were wrong - if they were full
+        extents - the tested box would be twice the size of the car and almost every tight
+        space would report as blocked.
+
+        `/vparkprobe` is how it gets checked rather than guessed at: stand in a space the car
+        demonstrably fits in and see whether it reads FREE. Obviously free spaces reading as
+        BLOCKED, consistently and everywhere, is the tell.
+    ]]
     local handle = StartShapeTestBox(
         centre.x, centre.y, centre.z + headroom * 0.5,
         half.x, half.y, half.z,
@@ -692,9 +704,13 @@ function Placement.place(entity, data)
     end
 
     -- ANSWER TO PROBLEM 3: exact placement, no ground snap, full rotation.
+    --
+    -- `SetEntityRotation`, and NOT a `SetEntityHeading` after it. Heading sets the yaw and, on
+    -- several builds, zeroes the pitch and roll with it - which is precisely what storing the
+    -- full rotation was for. A car parked on a hill has a real pitch, and flattening it is the
+    -- most visible way to get a restore subtly wrong.
     SetEntityCoordsNoOffset(entity, target.x, target.y, target.z, false, false, false)
     SetEntityRotation(entity, rotation.x or 0.0, rotation.y or 0.0, heading, 2, true)
-    SetEntityHeading(entity, heading)
 
     SetEntityCollision(entity, true, true)
 

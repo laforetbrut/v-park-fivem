@@ -110,6 +110,40 @@ local function radiusFor(record)
     return tonumber(streaming().spawnRadius) or 250.0
 end
 
+--[[
+    The largest radius any vehicle could be wanted at.
+
+    The grid query has to ask for THIS, not for `spawnRadius`, because the per-class radius is
+    applied afterwards as a narrowing filter. A class radius larger than the global one would
+    otherwise do nothing at all: the query would already have cut the set at the smaller
+    distance, and a filter can only ever remove more.
+
+    Cached, because it is read once per player per pass and the config does not change between
+    them. A resource restart rebuilds it.
+]]
+local queryRadiusCache
+
+local function queryRadius()
+    if queryRadiusCache then return queryRadiusCache end
+
+    local largest = tonumber(streaming().spawnRadius) or 250.0
+
+    local perClass = streaming().classRadius
+    if type(perClass) == 'table' then
+        for _, value in pairs(perClass) do
+            local radius = tonumber(value)
+            if radius and radius > largest then largest = radius end
+        end
+    end
+
+    queryRadiusCache = largest
+    return largest
+end
+
+function Spawn.invalidateRadius()
+    queryRadiusCache = nil
+end
+
 -- ---------------------------------------------------------------------------------------
 -- Creating
 -- ---------------------------------------------------------------------------------------
@@ -176,6 +210,8 @@ function Spawn.create(record, players)
     -- Everything the server can set, set before any client is told about it.
     SetEntityRoutingBucket(entity, record.bucket or 0)
 
+    -- Full rotation, and never a heading afterwards. See the note in client/placement.lua:
+    -- setting the heading would flatten the pitch a car parked on a slope actually has.
     SetEntityCoords(entity, record.pos_x, record.pos_y, record.pos_z, false, false, false, false)
     SetEntityRotation(entity, record.rot_x, record.rot_y, record.rot_z, 2, true)
 
@@ -319,9 +355,8 @@ local function wantedSet(players)
 
     for _, player in ipairs(players) do
         local bucket = streaming().matchRoutingBucket ~= false and player.bucket or nil
-        local playerRadius = tonumber(streaming().spawnRadius) or 250.0
 
-        local candidates = Store.near(player.x, player.y, playerRadius, bucket)
+        local candidates = Store.near(player.x, player.y, queryRadius(), bucket)
 
         -- Per-player cap, applied after sorting so the cap keeps the NEAREST rather than
         -- whichever the grid happened to iterate first.
@@ -369,6 +404,25 @@ local function pass()
             Spawn.despawn(id, 'no players online')
         end
         return
+    end
+
+    -- ------------------------------------------------------------- timeouts FIRST ---
+    --
+    -- Before anything else, and before the early return at the entity ceiling below, because
+    -- this is the sweep that releases a leaked entity.
+    --
+    -- A vehicle whose nominated client never answered is still `live` and still `pending`.
+    -- Clearing the pending flag without despawning it would leave the entity in the world,
+    -- undressed and unplaced, forever - and once enough of those accumulate, `liveCount` hits
+    -- the ceiling, the pass returns early, and this sweep never runs again. The resource stops
+    -- spawning anything, permanently, with nothing in the console to say why.
+    for id, sentAt in pairs(pending) do
+        if Park.ticks() - sentAt > 20000 then
+            pending[id] = nil
+            Park.debug('no placement answer for %s after 20s - removing it and re-nominating', id)
+            Spawn.despawn(id, 'no placement answer')
+            stats.failed = stats.failed + 1
+        end
     end
 
     -- ONE call, not two. An earlier draft asked for the wanted set here and asked again
@@ -436,17 +490,6 @@ local function pass()
                     created = created + 1
                 end
             end
-        end
-    end
-
-    -- ------------------------------------------------------------------ timeouts ---
-    -- A restore instruction that was never answered. The client may have disconnected,
-    -- crashed, or never received the entity. Clearing the pending flag lets the next pass
-    -- nominate somebody else.
-    for id, sentAt in pairs(pending) do
-        if Park.ticks() - sentAt > 20000 then
-            pending[id] = nil
-            Park.debug('no placement answer for %s after 20s - it will be re-nominated', id)
         end
     end
 
