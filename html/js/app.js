@@ -310,8 +310,23 @@ function stateCell(row) {
     return cell;
 }
 
-// How many actions sit on the row itself. The rest go behind the overflow button.
-const INLINE_ACTIONS = 3;
+/*
+    How many actions sit on the row itself. The rest go behind the overflow button.
+
+    Three is what fits when the table has the panel to itself, and they are the three an admin
+    reaches for: go to it, bring it here, mark it.
+
+    ONE while the detail sheet is open, because the table is then three hundred and sixty
+    pixels narrower and something has to give. Squeezing the other columns instead pushed the
+    state chips onto three lines and took the row height from 52 pixels to 96 - a page of five
+    vehicles instead of nine, to keep two buttons that the sheet is already showing for the row
+    being read.
+
+    Nothing becomes unreachable: the actions that come off the row go into the overflow menu.
+*/
+function inlineActions() {
+    return state.detailId ? 1 : 3;
+}
 
 /*
     Close any open overflow menu.
@@ -328,31 +343,73 @@ document.addEventListener('click', (event) => {
     if (!event.target.closest('.row-actions')) closeMenus();
 });
 
+/*
+    Which actions this server allows. Shared by the row, the overflow menu and the detail sheet,
+    because three copies of the same gate check is three places for them to disagree.
+*/
+function allowedActions() {
+    const allowed = (state.context && state.context.actions) || {};
+    return ACTIONS.filter((action) => !(action.gate && allowed[action.gate] === false));
+}
+
+function actionButton(action, row) {
+    const button = el('button', 'btn act' + (action.danger ? ' btn-danger' : ''), t(action.label));
+    button.type = 'button';
+    button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        closeMenus();
+        runAction(action, row);
+    });
+    return button;
+}
+
+/*
+    Open the overflow menu on whichever side of the button it fits.
+
+    THE MENU USED TO ONLY EVER OPEN DOWNWARDS, and `#table-wrap` clips its overflow. On the
+    last row of a full page that put 239 measured pixels of the menu below the visible area:
+    To garage, Impound and Delete were rendered and unreachable.
+
+    Measured rather than guessed from a row index, because how many rows fit depends on the
+    panel height, which depends on the player's resolution.
+*/
+function placeMenu(menu, anchor) {
+    const wrap = anchor.closest('#table-wrap') || anchor.closest('.view');
+    if (!wrap) return;
+
+    const bounds = wrap.getBoundingClientRect();
+    const button = anchor.getBoundingClientRect();
+
+    // 3px is the gap in the stylesheet, 8px is a margin so the menu never sits flush against
+    // the edge of the table and look clipped when it is not.
+    const below = bounds.bottom - button.bottom - 3 - 8;
+    const above = button.top - bounds.top - 3 - 8;
+
+    const height = menu.scrollHeight;
+
+    // Downwards while it fits. Flipping a menu that had room is more disorienting than a
+    // menu that opens the way it always does.
+    if (height > below && above > below) {
+        menu.classList.add('is-up');
+        menu.style.maxHeight = Math.max(96, Math.floor(above)) + 'px';
+    } else {
+        menu.classList.remove('is-up');
+        menu.style.maxHeight = Math.max(96, Math.floor(below)) + 'px';
+    }
+}
+
 function actionsCell(row) {
     const cell = el('td', 'col-actions');
     const wrap = el('div', 'row-actions');
 
-    const allowed = (state.context && state.context.actions) || {};
+    const available = allowedActions();
+    const makeButton = (action) => actionButton(action, row);
 
-    const available = ACTIONS.filter((action) => {
-        if (action.gate && allowed[action.gate] === false) return false;
-        return true;
-    });
+    const inline = inlineActions();
 
-    const makeButton = (action) => {
-        const button = el('button', 'btn act' + (action.danger ? ' btn-danger' : ''), t(action.label));
-        button.type = 'button';
-        button.addEventListener('click', (event) => {
-            event.stopPropagation();
-            closeMenus();
-            runAction(action, row);
-        });
-        return button;
-    };
+    available.slice(0, inline).forEach((action) => wrap.appendChild(makeButton(action)));
 
-    available.slice(0, INLINE_ACTIONS).forEach((action) => wrap.appendChild(makeButton(action)));
-
-    const overflow = available.slice(INLINE_ACTIONS);
+    const overflow = available.slice(inline);
 
     if (overflow.length) {
         const more = el('button', 'btn act act-more', '⋯');
@@ -374,6 +431,9 @@ function actionsCell(row) {
 
             const tr = cell.closest('tr');
             if (tr) tr.classList.add('has-menu');
+
+            // After it is in the document: the decision needs its measured height.
+            placeMenu(menu, more);
         });
 
         wrap.appendChild(more);
@@ -467,6 +527,9 @@ function renderRows() {
         tr.appendChild(actionsCell(row));
         body.appendChild(tr);
     });
+
+    // The rows the mark was on have just been destroyed and rebuilt.
+    markDetailRow();
 
     // The select-all box reflects THIS page, not the whole selection.
     const pageIds = rows.map((row) => row.id);
@@ -730,14 +793,28 @@ async function runBulk(action) {
 */
 function renderDetail(detail) {
     const body = $('detail-body');
+    const actions = $('detail-actions');
+
     clear(body);
+    clear(actions);
 
     if (!detail) {
+        $('detail-sub').textContent = '';
         body.appendChild(el('p', 'd-empty', t('panel.no_results')));
         return;
     }
 
     const row = detail.row || {};
+
+    // Which vehicle this is, in the header. The sheet used to say "Vehicle detail" and nothing
+    // else, so opening two in a row gave no way to tell them apart.
+    const identity = [row.plate, row.model].filter(Boolean).join(' \u00b7 ');
+    $('detail-sub').textContent = identity;
+
+    // The row's own actions, so reading a vehicle and acting on it are the same place.
+    allowedActions()
+        .filter((action) => action.id !== 'detail')
+        .forEach((action) => actions.appendChild(actionButton(action, row)));
 
     const section = (titleKey) => {
         const wrap = el('div', 'd-section');
@@ -755,15 +832,15 @@ function renderDetail(detail) {
     };
 
     // Identity, reusing the row the list already renders.
-    const identity = section('panel.col_vehicle');
-    line(identity, t('panel.col_vehicle'), row.model || '?');
-    line(identity, 'ID', row.id);
-    line(identity, 'Plate', row.plate);
-    line(identity, t('panel.col_owner'), row.owner);
-    line(identity, 'Type', row.ownerType);
-    line(identity, t('panel.detail_source'), detail.source);
-    if (detail.netId) line(identity, t('panel.detail_netid'), detail.netId);
-    if (detail.bucket) line(identity, 'Bucket', detail.bucket);
+    const ident = section('panel.col_vehicle');
+    line(ident, t('panel.col_vehicle'), row.model || '?');
+    line(ident, 'ID', row.id);
+    line(ident, 'Plate', row.plate);
+    line(ident, t('panel.col_owner'), row.owner);
+    line(ident, 'Type', row.ownerType);
+    line(ident, t('panel.detail_source'), detail.source);
+    if (detail.netId) line(ident, t('panel.detail_netid'), detail.netId);
+    if (detail.bucket) line(ident, 'Bucket', detail.bucket);
 
     // Colours, as swatches where they are custom RGB and as indexes otherwise.
     const colours = section('panel.detail_colours');
@@ -802,15 +879,38 @@ function renderDetail(detail) {
 }
 
 function openDetail(id) {
+    const wasOpen = !!state.detailId;
+
     state.detailId = id;
     $('detail').hidden = false;
     clear($('detail-body'));
+    clear($('detail-actions'));
+    $('detail-sub').textContent = '';
+
+    // The table just lost the sheet's width, so the rows are rebuilt with fewer inline
+    // actions. Clicking straight through from one vehicle to the next does not need it: the
+    // width has not changed and re-rendering would throw away the scroll position.
+    if (wasOpen) markDetailRow(); else renderRows();
+
     post('detail', { id });
 }
 
 function closeDetail() {
     state.detailId = null;
     $('detail').hidden = true;
+    renderRows();
+}
+
+/*
+    Mark the row the sheet is showing.
+
+    The sheet is docked beside a table an admin can scroll independently, so without this there
+    is no way to tell which of twenty-five rows it belongs to.
+*/
+function markDetailRow() {
+    document.querySelectorAll('#rows tr').forEach((tr) => {
+        tr.classList.toggle('is-detail', !!state.detailId && tr.dataset.id === state.detailId);
+    });
 }
 
 // ------------------------------------------------------------------------------------ query ---
@@ -821,6 +921,10 @@ function refresh() {
 
 function setTab(name) {
     state.tab = name;
+
+    // The sheet shows a vehicle from the vehicles list. Leaving it open beside the trash or
+    // the cleanup preview shows an admin a detail for a row that is not on screen any more.
+    if (name !== 'vehicles' && state.detailId) closeDetail();
 
     document.querySelectorAll('.tab').forEach((tab) => {
         tab.classList.toggle('is-active', tab.dataset.tab === name);
@@ -1011,6 +1115,9 @@ window.addEventListener('message', (event) => {
             $('root').hidden = true;
             $('modal').hidden = true;
             $('detail').hidden = true;
+            // Cleared as well as hidden: it decides how many actions sit on a row, and a
+            // stale id would give the next open a one-action table until the first render.
+            state.detailId = null;
             state.selected.clear();
             clearInterval(state.refreshTimer);
             clearTimeout(state.searchTimer);
@@ -1026,6 +1133,11 @@ window.addEventListener('message', (event) => {
                 state.query.sort = state.data.sort;
             }
             renderRows();
+
+            // An open sheet goes stale otherwise: the auto-refresh replaces the table every
+            // fifteen seconds and the detail keeps showing the fuel level from when it was
+            // opened. One extra query, only while somebody is looking at one.
+            if (state.detailId) post('detail', { id: state.detailId });
             break;
         }
 

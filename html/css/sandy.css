@@ -235,6 +235,54 @@
     --meter-low:        var(--amber);
     --meter-dead:       var(--blood);
 
+    /* ------------------------------------------------------------------- detail --- */
+    /*
+        The detail sheet is a DIFFERENT BOARD, not the same paper with a line down it.
+
+        1.0.1 gave it `--sheet`, the table's own surface, and the two ran together: the sheet
+        read as an empty stretch of table rather than as a panel. On a warm low-contrast theme
+        a single hairline border is not enough separation for a 380px column.
+
+        A darker board, its section bands darker still, and body text taken from the muted grey
+        the table uses for secondary lines up to something meant to be read.
+    */
+    --detail-bg:
+        repeating-linear-gradient(
+            0deg,
+            rgba(0, 0, 0, 0.014) 0px,
+            rgba(0, 0, 0, 0.014) 1px,
+            rgba(255, 255, 255, 0.008) 1px,
+            rgba(255, 255, 255, 0.008) 3px
+        ),
+        linear-gradient(165deg, #cbb894 0%, #c3af88 70%, #bba67e 100%);
+
+    --detail-actions-bg:  rgba(23, 18, 10, 0.10);
+    --detail-rule:        rgba(23, 18, 10, 0.34);
+    --detail-stripe:      rgba(255, 253, 247, 0.34);
+
+    /*
+        Measured against the sheet's own board rather than guessed, the way the 1.0.1 contrast
+        pass did for the table:
+
+            section header  #17120a on the 0.12 band   7.0:1
+            label           0.86 ink on the board      7.4:1
+            value           full ink on the board      9.6:1
+
+        The band is 0.12 rather than 0.16 because the header is 10px uppercase, which is the
+        smallest type on the page and therefore the type that needs the most contrast, not the
+        least. Darkening the band to make it more obviously a band was the wrong direction.
+    */
+    --detail-section-bg:  rgba(23, 18, 10, 0.12);
+    --detail-section-fg:  var(--ink);
+
+    --detail-label:       rgba(23, 18, 10, 0.86);
+    --detail-value:       var(--ink);
+
+    /* The row the sheet is showing. Amber rather than the hover rust, so hovering a different
+       row never looks like the selection moved. */
+    --row-detail:         rgba(201, 147, 52, 0.20);
+    --row-detail-edge:    var(--amber);
+
     /* --------------------------------------------------------------------- menu --- */
     --menu-bg:          #2c241a;
     --menu-bg-hover:    #3d3325;

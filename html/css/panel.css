@@ -200,10 +200,37 @@
 
 /* ============================================================================ VIEWS === */
 
+/*
+    The stage: the views and the detail sheet, side by side.
+
+    -------------------------------------------------------------------------------------------
+    WHY THE SHEET IS DOCKED AND NOT FLOATED
+    -------------------------------------------------------------------------------------------
+
+    1.0.1 gave the detail an absolutely positioned panel on the right-hand edge of the whole
+    panel: `top: 0; right: 0; bottom: 0`. That put it on top of the summary counts in the
+    masthead, on top of the filter and sort controls, and on top of the entire actions column
+    of every visible row.
+
+    The comment above it claimed the list stayed visible. Half of it did.
+
+    Docking it in a flex row means it CANNOT cover anything: the table gets the space that is
+    left and reflows into it. Opening the detail costs the width of the sheet and nothing else.
+*/
+#stage {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
 .view {
     display: none;
     flex: 1 1 auto;
+    /* Both matter. `min-height` lets the table scroll rather than stretching the panel;
+       `min-width` lets the table narrow when the sheet opens rather than overflowing. A flex
+       item's default `min-width: auto` refuses to shrink below its content. */
     min-height: 0;
+    min-width: 0;
     flex-direction: column;
 }
 
@@ -385,6 +412,19 @@
     Absolutely positioned inside the row rather than appended to the body, so it scrolls with
     the table and disappears with the row. `right: 0` anchors it to the column edge; the table
     scrolls vertically only, so it can never be clipped horizontally.
+
+    -------------------------------------------------------------------------------------------
+    IT CAN VERY MUCH BE CLIPPED VERTICALLY, AND WAS
+    -------------------------------------------------------------------------------------------
+
+    `#table-wrap` is `overflow-y: auto`, and a menu that only ever opened downwards ran straight
+    out of the bottom of it. Measured on the last row of a full page: 239 pixels of the menu
+    below the visible area, which is the bottom five entries - To garage, Impound and Delete
+    among them - simply unreachable.
+
+    So `.is-up` flips it above the button, and JS sets a max-height from whichever side has
+    more room. `.is-up` is applied by measurement rather than by guessing at a row index,
+    because the number of rows that fit depends on the panel height.
 */
 .act-menu {
     position: absolute;
@@ -396,9 +436,18 @@
     flex-direction: column;
     min-width: 132px;
 
+    /* Set from JS to whatever the space allows; this is the ceiling, not the usual value. */
+    max-height: 320px;
+    overflow-y: auto;
+
     background: var(--menu-bg);
     border: 1px solid var(--menu-edge);
     box-shadow: var(--hard-shadow);
+}
+
+.act-menu.is-up {
+    top: auto;
+    bottom: calc(100% + 3px);
 }
 
 .act-menu .act {
@@ -587,6 +636,18 @@ th.col-actions {
 .col-where   { width: 20%; }
 .col-state   { width: 18%; }
 
+/*
+    The row the detail sheet is showing.
+
+    Without it, an admin who scrolls the table while the sheet is open has no way to tell which
+    of twenty-five rows the sheet belongs to. The left bar is drawn with a box-shadow rather
+    than a border so it does not shift the row by a pixel when it appears.
+*/
+tbody tr.is-detail {
+    background: var(--row-detail);
+    box-shadow: inset 3px 0 0 var(--row-detail-edge);
+}
+
 /* The row that owns an open menu has to stack above the ones below it. */
 tbody tr.has-menu {
     position: relative;
@@ -760,85 +821,147 @@ tbody tr.has-menu {
 
 /* ========================================================================== DETAIL === */
 
-#detail {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 7;
+/*
+    A DIFFERENT SURFACE, NOT THE SAME ONE WITH A LINE DOWN IT.
 
+    The old sheet used `--sheet`, the same paper as the table behind it, separated by a single
+    border. On a warm low-contrast board that read as more table rather than as a panel, which
+    is most of what "barely visible" meant: the eye had nothing to catch on and the whole thing
+    looked like an odd empty column.
+
+    It now sits on its own darker board with a hard edge, exactly the way the masthead and the
+    footer are separated from the sheet.
+*/
+#detail {
     display: flex;
     flex-direction: column;
+    flex: 0 0 clamp(300px, 31%, 380px);
+    min-height: 0;
 
-    width: min(380px, 45%);
-
-    background: var(--sheet);
+    background: var(--detail-bg);
     border-left: var(--edge-strong);
-    box-shadow: var(--hard-shadow);
 }
 
 #detail-head {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 14px;
+    padding: 9px 14px;
     background: var(--mast-bg);
     border-bottom: var(--edge-strong);
     flex: 0 0 auto;
 }
 
-#detail-title {
+.detail-ident {
     flex: 1 1 auto;
+    min-width: 0;
+}
+
+#detail-title {
     font-family: var(--font-display);
     font-size: 15px;
     letter-spacing: 0.14em;
     text-transform: uppercase;
     color: var(--mast-title);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The plate and the model, so two vehicles opened in a row are told apart at a glance. */
+#detail-sub {
+    margin-top: 1px;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--mast-subtitle);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/*
+    The actions, repeated from the row.
+
+    Not duplication for its own sake: the row's actions are one table-width away while the
+    sheet is open, and an admin who has just read that a car is wrecked wants to repair it
+    without hunting back across the table for the right line.
+*/
+#detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px 10px;
+    flex: 0 0 auto;
+    background: var(--detail-actions-bg);
+    border-bottom: 1px solid var(--detail-rule);
+}
+
+#detail-actions:empty {
+    display: none;
 }
 
 #detail-body {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
-    padding: 14px;
-    font-size: 12.5px;
+    padding: 0 0 14px;
+    /* 13px, matching the table. The old 12.5 was small enough that the labels, which are the
+       muted half of every line, sat under the size at which this colour is comfortable. */
+    font-size: 13px;
 }
 
 .d-section {
-    margin-bottom: 16px;
+    margin-bottom: 4px;
 }
 
+/*
+    A banded header rather than an underlined word. The sheet is a list of forty short lines
+    and the bands are what let the eye jump to the right group instead of reading all of them.
+*/
 .d-section h3 {
-    margin-bottom: 6px;
-    padding-bottom: 4px;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    margin-bottom: 4px;
+    padding: 6px 14px;
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.16em;
     text-transform: uppercase;
-    color: var(--td-muted);
-    border-bottom: 1px solid var(--rule);
+    color: var(--detail-section-fg);
+    background: var(--detail-section-bg);
+    border-top: 1px solid var(--detail-rule);
+    border-bottom: 1px solid var(--detail-rule);
 }
 
 .d-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 3px 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    gap: 10px;
+    padding: 4px 14px;
+}
+
+/* Zebra striping. Across a 300px column with a right-aligned value, a band is what stops the
+   eye pairing a label with the wrong line. */
+.d-row:nth-child(even) {
+    background: var(--detail-stripe);
 }
 
 .d-row span:first-child {
-    color: var(--td-muted);
+    color: var(--detail-label);
 }
 
 .d-row span:last-child {
-    color: var(--td-strong);
+    color: var(--detail-value);
     font-weight: 600;
     text-align: right;
     word-break: break-word;
 }
 
 .d-empty {
-    color: var(--td-muted);
+    padding: 4px 14px;
+    color: var(--detail-label);
     font-style: italic;
 }
 
@@ -846,6 +969,7 @@ tbody tr.has-menu {
     display: flex;
     gap: 4px;
     margin-top: 4px;
+    padding: 0 14px;
 }
 
 .d-swatch {

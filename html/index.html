@@ -59,6 +59,17 @@
             <button class="tab" data-tab="cleanup" type="button">Cleanup</button>
         </nav>
 
+        <!--
+            THE STAGE. A ROW, NOT A STACK.
+
+            The three views and the detail sheet are side by side inside this element, which is
+            the whole reason the sheet no longer covers anything. Before 1.0.3 the sheet was
+            absolutely positioned over the right-hand edge of the panel, where it sat on top of
+            the summary counts, the filter and sort controls and the entire actions column -
+            everything an admin needs while they are reading a detail.
+        -->
+        <div id="stage">
+
         <!-- ============================================================ VEHICLES -->
         <section class="view is-active" data-view="vehicles">
 
@@ -162,20 +173,33 @@
             </div>
         </section>
 
-        <!-- A single toast slot. Results replace each other rather than stacking. -->
-        <div id="toast" hidden></div>
-
         <!--
-            The detail view. A side sheet rather than a modal, so the list stays visible and an
-            admin can click straight through several vehicles without closing anything.
+            The detail view. Docked beside the list rather than floating over it, so an admin
+            can read a vehicle and act on the table in the same glance, and click straight
+            through several vehicles without closing anything.
         -->
         <aside id="detail" hidden>
             <header id="detail-head">
-                <h2 id="detail-title">Vehicle detail</h2>
+                <div class="detail-ident">
+                    <h2 id="detail-title">Vehicle detail</h2>
+                    <!-- Which vehicle this is. The old sheet said "Vehicle detail" and nothing
+                         else, so an admin who opened two in a row could not tell them apart. -->
+                    <p id="detail-sub"></p>
+                </div>
                 <button id="detail-close" class="btn btn-close" type="button">&#10005;</button>
             </header>
+
+            <!-- The same actions as the row, so reading a vehicle and acting on it are not two
+                 different places to be. -->
+            <div id="detail-actions"></div>
+
             <div id="detail-body"></div>
         </aside>
+
+        </div><!-- #stage -->
+
+        <!-- A single toast slot. Results replace each other rather than stacking. -->
+        <div id="toast" hidden></div>
     </main>
 
     <!--

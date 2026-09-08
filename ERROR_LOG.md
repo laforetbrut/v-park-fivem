@@ -8,6 +8,48 @@ out of it.
 
 ---
 
+## [2026-09-08 04:10] — Two panels opened on the right, both in the wrong place
+
+**Context:** Reported after 1.0.2: "when you click on certain things a box appears on the right,
+barely visible and badly placed". Two different boxes, both true.
+
+**Error:** No error. Both rendered exactly as written.
+
+**Root cause:**
+
+The **detail sheet** was `position: absolute; top: 0; right: 0; bottom: 0` inside `#panel`. That
+is the full height of the panel, over the masthead's summary counts, over the filter and sort
+controls, and over the actions column of every visible row. The comment above it in
+`index.html` claimed the list stayed visible; half of it did, and not the useful half.
+
+It also used `--sheet`, the same paper as the table behind it, with one hairline border between
+them. On a deliberately warm, low-contrast theme that is not enough separation for a 380px
+column: it read as an empty stretch of table.
+
+The **row overflow menu** was `position: absolute; top: calc(100% + 3px)` inside the row, and
+`#table-wrap` is `overflow-y: auto`. It only ever opened downwards. Measured on the last row of
+a full page at 1280x720: 239 pixels of the menu below the visible area, which is the last five
+entries - To garage, Impound, Delete among them - rendered and unreachable. The comment beside
+it reasoned carefully about horizontal clipping and never mentioned vertical.
+
+**Fix:** The views and the sheet live in a `#stage` flex row, so the sheet is docked and the
+table reflows into what is left. The sheet gets its own darker board, banded section headers,
+zebra rows and measured contrast. The menu gets an `.is-up` variant chosen by measuring the
+space above and below the button, plus a max-height from whichever side it uses.
+
+**Prevention:**
+
+> **An overlay has to be measured against what it lands on, not just positioned.** Both of these
+> were written with a clear intention - "a side sheet so the list stays visible", "anchored to
+> the column edge" - and neither was ever opened next to the thing it would cover. A comment
+> stating the intention is not evidence that the intention was met.
+>
+> The practical rule that came out of it: a panel that has something to say about a row belongs
+> **beside** the table in a flex row, not on top of it in absolute coordinates. Docking cannot
+> cover anything by construction, and it needs no reasoning about which edges are safe.
+
+---
+
 ## [2026-09-08 21:40] — Vehicles still multiplied, because the entity was recorded sixty lines too late
 
 **Context:** Reported from the same live server that reported the 1.0.1 multiplication. The

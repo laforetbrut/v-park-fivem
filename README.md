@@ -242,9 +242,12 @@ and paints nothing while it is closed - a player who never runs the command neve
   refuel, unlock, send to a garage, impound or delete the lot in one action with one
   confirmation. Capped at 100 and **refused rather than truncated** past that, because a
   truncated bulk action is the worst outcome: the operator believes it all happened.
-- **A detail view** as a side sheet, so the list stays visible: every fitted part, the colours,
-  the damage breakdown including the deformation point count, the network id, and the four
-  timestamps that decide when the vehicle expires.
+- **A detail sheet docked beside the list**, not floating over it - it cannot cover the
+  controls or the actions column, because the table reflows into the space that is left. Every
+  fitted part, the colours, the damage breakdown including the deformation point count, the
+  network id, and the four timestamps that decide when the vehicle expires. It names the
+  vehicle it is showing, marks that vehicle's row, carries the row's actions so reading and
+  acting are the same place, and stays current through the auto-refresh.
 - **Keyboard**: `/` search, `R` refresh, `A` select page, arrows to page, `ESC` to back out one
   level at a time.
 - **Trash tab**: everything removed in the last week, with who removed it and why, and a

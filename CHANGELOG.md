@@ -7,6 +7,93 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.3] - 2026-09-08
+
+The admin panel. Two things appeared on the right-hand side of it and both were in the wrong
+place, one of them badly enough to make part of the panel unusable.
+
+### Fixed
+
+- **The detail sheet covered the panel instead of sitting beside it.** It was absolutely
+  positioned at `top: 0; right: 0; bottom: 0`, which put it on top of the summary counts in the
+  masthead, on top of the filter and sort controls, and on top of the entire actions column of
+  every visible row. The comment above it said the list stayed visible. Half of it did.
+
+  It is now **docked** in a flex row beside the table, so it cannot cover anything: the table
+  reflows into the space that is left. Opening a detail costs the width of the sheet and
+  nothing else.
+
+- **The detail sheet was barely visible.** It used `--sheet` - the same paper as the table
+  behind it - separated by a single hairline border, so on a warm low-contrast board it read as
+  more table rather than as a panel. It now sits on its own darker board with a hard edge, the
+  way the masthead and the footer already did.
+
+  Its contents were low-contrast too: 12.5px labels in the table's muted grey, on a surface
+  that grey was never measured against. Measured and corrected - section headers 7.0:1, labels
+  7.4:1, values 9.6:1 - with banded section headers, zebra rows and 13px body text matching the
+  table.
+
+- **The row overflow menu opened off the bottom of the table.** `#table-wrap` clips its
+  overflow and the menu only ever opened downwards. Measured on the last row of a full page:
+  **239 pixels below the visible area**, which is To garage, Impound and Delete rendered and
+  unreachable. It now opens upwards when there is more room above, and takes a max-height from
+  whichever side it uses. Verified at 1920x1080, 1280x720 and 1024x600, on the first, middle
+  and last rows: nothing clipped on any of them.
+
+### Changed
+
+- **The sheet says which vehicle it is showing.** It said "Vehicle detail" and nothing else, so
+  opening two in a row gave no way to tell them apart. The plate and the model are now in the
+  header.
+- **The row the sheet is showing is marked** with an amber bar, so scrolling the table does not
+  lose track of it.
+- **The sheet carries the row's actions.** Reading that a car is wrecked and repairing it were
+  a table-width apart; they are now the same place.
+- **A row keeps one inline action while the sheet is open**, not three, and the other two move
+  into the overflow menu. Keeping all three squeezed the state chips onto three lines and took
+  the row height from 52 pixels to 96 - a page of five vehicles instead of nine - to keep two
+  buttons the sheet was already showing.
+- **The sheet stays current.** The fifteen-second auto-refresh replaced the table underneath it
+  and left the detail showing the fuel level from whenever it was opened.
+- **Switching to Trash or Cleanup closes it**, rather than leaving a vehicle detail beside a
+  list that vehicle is not in.
+
+---
+
+## [1.0.3] - 2026-09-08 (français)
+
+Le panneau admin. Deux choses apparaissaient à droite et les deux étaient mal placées, dont une
+au point de rendre une partie du panneau inutilisable.
+
+### Corrigé
+
+- **La fiche de détail recouvrait le panneau au lieu de se placer à côté.** Positionnée en
+  absolu sur tout le bord droit, elle passait par-dessus les compteurs, les filtres, le tri et
+  toute la colonne des actions. Elle est maintenant **ancrée** à côté du tableau, qui se
+  redimensionne : ouvrir un détail coûte la largeur de la fiche et rien d'autre.
+
+- **La fiche était très peu visible.** Elle utilisait le même papier que le tableau, séparée par
+  un simple filet, donc elle se lisait comme une colonne vide plutôt que comme un panneau. Elle
+  a maintenant son propre fond, plus sombre, avec un bord franc. Contrastes mesurés et
+  corrigés : en-têtes 7,0:1, libellés 7,4:1, valeurs 9,6:1, texte à 13px comme le tableau.
+
+- **Le menu déroulant d'une ligne sortait par le bas du tableau.** Mesuré sur la dernière ligne
+  d'une page pleine : **239 pixels hors de la zone visible**, soit Vers garage, Fourrière et
+  Supprimer affichés et inatteignables. Il s'ouvre désormais vers le haut quand il y a plus de
+  place au-dessus. Vérifié en 1920x1080, 1280x720 et 1024x600.
+
+### Changé
+
+- La fiche indique **quel véhicule** elle montre (plaque et modèle dans l'en-tête).
+- La ligne concernée est **marquée** d'une barre ambre.
+- La fiche **reprend les actions** de la ligne.
+- Une ligne garde **une action directe** quand la fiche est ouverte, les autres passent dans le
+  menu ; les garder toutes les trois faisait passer la hauteur de ligne de 52 à 96 pixels.
+- La fiche **reste à jour** avec le rafraîchissement automatique.
+- Passer sur Corbeille ou Nettoyage **la referme**.
+
+---
+
 ## [1.0.2] - 2026-09-08
 
 Three bugs, all of them serious, all of them reported from a live server. Two were introduced
