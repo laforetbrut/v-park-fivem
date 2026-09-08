@@ -7,6 +7,121 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.1] - 2026-09-09
+
+A stability and performance release, and one fix that matters more than everything else in it.
+
+### Fixed
+
+- **Vehicles multiplied until the server hit its entity limit.** `CreateVehicle` returns a
+  handle before the entity is registered, so `DoesEntityExist` on it answers false for a tick or
+  two. The creation path tested it immediately, concluded the creation had failed, and returned
+  **without deleting the entity it had just created**. `SetEntityOrphanMode(entity, 2)` then
+  guaranteed nothing would ever collect it, so every streaming pass added another copy.
+
+  The spawn budget counted successes rather than attempts, so a pass in which everything
+  "failed" carried on down the whole candidate list - hundreds of creations a second instead of
+  six. Once the entity limit was reached, `CreateVehicle` really did start failing and the
+  console filled with a warning that had been wrong for the entire run.
+
+  Four changes: a zero handle is the only failure and every other path owns what it made; the
+  budget counts attempts; a per-vehicle failure counter with a backoff replaces the retry storm;
+  and a new reconciliation sweep deletes any vehicle in the world carrying one of our ids that is
+  not the entity registered for it. It runs at boot and every 30 seconds, and
+  `/vparkadmin reconcile` runs it on demand - which also cleans up a server that already has
+  duplicates.
+
+- **v-park hung at boot when the database was not running.** It printed the framework line and
+  then nothing: no error, no memory-mode fallback, no banner, and every timer waiting on a ready
+  flag that never came. `Citizen.Await` cannot time out, so with nothing listening the very first
+  handshake query never returned and the connect deadline was never reached. The handshake now
+  runs in its own thread and the deadline is enforced from outside it.
+
+- **`SetEntityHeading` after `SetEntityRotation`** flattened the pitch of a vehicle parked on a
+  slope, which is precisely what storing the full rotation exists to prevent. Removed from both
+  the client placement and the server creation path.
+
+- **An unanswered restore leaked its entity**, and enough of them froze streaming permanently:
+  the timeout sweep sat below the entity-ceiling early return, so once the ceiling was reached it
+  never ran again. It now runs first and despawns rather than only forgetting.
+
+- **A per-class spawn radius larger than the global one did nothing**, because the grid query
+  asked for the global radius and a filter can only narrow. The query now asks for the largest
+  radius in play.
+
+### Changed - performance
+
+- **A parked vehicle is no longer captured at all.** A frozen vehicle is not simulated, cannot be
+  damaged and cannot be occupied, so one that has not been touched since its last capture is
+  provably identical to what the server already has. The client returns no snapshot for it, which
+  the server already treats as "no news". On a fleet that is mostly parked this is most of the
+  sweep cost gone rather than reduced.
+
+- **The expensive half of a capture is cached against a fingerprint.** Every mod slot, the
+  colours, the extras and the neons are about seventy-five native calls describing things that
+  only change at a mechanic. Twelve cheap calls now decide whether to re-read them.
+
+- **One placement scans the vehicle pool once, not forty-five times.** A blocked placement probes
+  the saved pose, four vertical retries and up to forty ring candidates, and each probe used to
+  allocate a table of every vehicle on the server. A snapshot is taken once per placement and
+  every probe reads from it.
+
+- **The spiral search starts every candidate's shape tests before reading any of them.** Shape
+  tests are asynchronous, so forty-five candidates now cost one yield instead of forty-five -
+  the difference between a placement that resolves in two frames and one that visibly takes most
+  of a second on a busy street.
+
+- **The semi-persistence sweep walks an ownership index** rather than the whole store. On a
+  twenty-thousand vehicle server it was twenty thousand iterations a minute to look at perhaps
+  forty cruisers.
+
+### Changed - placement
+
+- **The world probe uses perimeter rays rather than a box shape test.** `StartShapeTestBox`'s
+  size arguments are undocumented; the community reading is half-extents, and if that reading
+  were wrong the tested volume would be twice the size of the car and almost every tight space
+  would report as blocked. 1.0.0 had to ship that as a stated limit.
+
+  Six rays trace the footprint - the four sides at body height and the two diagonals, so a pillar
+  in the middle of an otherwise clear bay is caught. A ray is two points and nothing about it is
+  open to interpretation. The stated limit is gone.
+
+### Added
+
+- **Owned vehicles are kept the moment somebody gets in.** No settle timer, no command. The
+  forty-five second timer answers "did they leave it there or are they coming back", which is a
+  real question for a car nobody owns and not a question at all for one that is already in the
+  player's garage list - and making them wait meant a player who took their car out and
+  disconnected thirty seconds later lost it. `Config.Persistence.ownedImmediately`.
+
+- **The admin panel gained selection and bulk actions.** Tick rows, or press A for the whole
+  page, then repair, clean, refuel, unlock, send to a garage, impound or delete the lot in one
+  action with one confirmation. Capped at 100, refused rather than truncated past that, and it
+  writes one audit row and one webhook post rather than a hundred.
+
+- **A detail view.** Every fitted part, the colours, the damage breakdown including the
+  deformation point count, the network id, and the four timestamps that decide when a vehicle
+  expires. It opens as a side sheet, so the list stays visible.
+
+- **Sortable column headers**, an **owner online / owner offline filter**, and **keyboard
+  shortcuts**: `/` to search, `R` to refresh, `A` to select the page, arrows to page, ESC to
+  back out one level at a time.
+
+- **`/vparkadmin reconcile`**, which runs the stray-vehicle sweep on demand and reports what it
+  removed.
+
+- **`Config.Streaming.reconcileInterval`** and **`Config.Persistence.ownedImmediately`**.
+
+- **`tools/check.py` check 11**, which fails on any `ipairs` or `pairs` over `Store.toValues`.
+
+### Documentation
+
+- README now says where OneSync actually lives on a txAdmin server: the txAdmin settings page.
+  txAdmin's config validator comments out `set onesync` in `server.cfg` on every start, so the
+  obvious place to put it is the one place it does not work.
+
+---
+
 ## [1.0.0] - 2026-09-08
 
 First release.

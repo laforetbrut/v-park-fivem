@@ -8,6 +8,103 @@ out of it.
 
 ---
 
+## [2026-09-09 03:20] — Vehicles multiplied until the server hit its entity limit
+
+**Context:** Reported from a live server. The console filled with
+
+    WARN: could not create vehicle 0TL0UEP01QT7G (model BISON)
+
+several times a second, and copies of the same vehicle were piling up in the world.
+
+**Error:** Two faults compounding, and the warning was a symptom of both rather than a cause.
+
+**Root cause:** `CreateVehicle` returns a handle immediately, but the entity is not registered
+synchronously - `DoesEntityExist` on that handle answers FALSE for a tick or two afterwards.
+`Spawn.create` tested it straight away, concluded the creation had failed, logged a warning and
+returned nil **without deleting the entity it had just successfully created**.
+
+`SetEntityOrphanMode(entity, 2)` then guaranteed nothing would ever collect it: that native is
+precisely an instruction to keep an entity nobody is near. So every streaming pass created
+another copy of every vehicle, and none of them ever went away.
+
+The second fault made it fast. The spawn budget counted SUCCESSES, so a pass in which every
+creation "failed" counted zero and carried on down the entire candidate list - hundreds of
+creations per second rather than the configured six.
+
+Once the server reached its entity limit, `CreateVehicle` genuinely did start returning zero,
+and the warning that had been wrong for the whole run became true.
+
+**Fix:** Four changes.
+
+- **A zero handle is the only failure.** Anything else is created and is ours - including ours
+  to delete if we then decide not to keep it. Every early return after creation now deletes.
+- **The budget counts attempts**, so a pass costs at most `spawnsPerPass` calls whether they
+  work or not.
+- **A per-vehicle failure counter and a ten-second backoff.** Five consecutive failures stops
+  the retries for the session and says why once, instead of a wall of identical lines.
+- **A reconciliation sweep**, `Spawn.reconcile`, which deletes any vehicle in the world carrying
+  one of our ids that is not the entity registered for that id. That covers orphans nothing else
+  will collect and duplicate copies of a vehicle we already have. It runs at boot and every
+  thirty seconds, and `/vparkadmin reconcile` runs it on demand.
+
+**Prevention:** Two rules. Never test `DoesEntityExist` on a handle in the same tick it was
+created. And any function that creates an entity owns it from that moment: every path out has
+to either register it or delete it, and there is no third option.
+
+The reconciliation sweep is the belt to that braces. `orphanMode` means anything we lose track
+of is ours to find again, and something has to go looking.
+
+---
+
+## [2026-09-09 03:45] — v-park hung at boot when the database was not running
+
+**Context:** Found while re-running the smoke test after MariaDB had stopped.
+
+**Error:** v-park printed `framework: qb (qb-core)` and then nothing at all. No error, no
+memory-mode warning, no boot banner. Every timer in the resource waits on `Runtime.ready()`,
+which never became true, so nothing ran and nothing said why.
+
+**Root cause:** `Database.boot` polls `SELECT 1` in a loop until `connectTimeout`. But
+`Citizen.Await` cannot be cancelled and cannot time out: if the database server is not listening
+at all, oxmysql never invokes the callback the promise waits on, so the FIRST await never
+returned and the loop's deadline was never reached.
+
+The documented behaviour - fall back to memory and say so, loudly, once - was unreachable in
+exactly the case it exists for.
+
+**Fix:** The handshake query runs in its own thread and sets a flag; the deadline is enforced
+outside it, where it can be. The orphaned thread stays parked on its await for the life of the
+resource, holding one coroutine and no timer.
+
+**Prevention:** A timeout around an await has to be enforced by something that is not itself
+awaiting. Anywhere this resource waits on another resource, the wait needs a watcher rather than
+a loop.
+
+---
+
+## [2026-09-09 03:05] — txAdmin comments out `set onesync` in server.cfg
+
+**Context:** Enabling OneSync on the test server so the smoke test could run.
+
+**Error:** The line was added, the server started, and OneSync was off. The config then read:
+
+    ## [txAdmin CFG validator]: onesync MUST only be set in the txAdmin settings page.
+    # set onesync on
+
+**Root cause:** Not a v-park bug at all, and worth recording because it will reach the issue
+tracker as one. txAdmin validates `server.cfg` on start and comments out settings it owns.
+OneSync is one of them: on a txAdmin server it is set in the txAdmin settings page, and a line
+in `server.cfg` is removed every time.
+
+**Fix:** Nothing in the resource. For the test, `+set onesync on` on the FXServer command line,
+which txAdmin does not touch. For operators, README now says where the setting actually lives.
+
+**Prevention:** v-park's boot check already distinguishes "explicitly off" from "not set", so it
+reports this accurately rather than refusing on a server that has it enabled elsewhere. That
+distinction was added for a different reason and turned out to cover this one.
+
+---
+
 ## [2026-09-09 01:20] — A nil in the parameter list scrambled every insert batch
 
 **Context:** First real server run. Four rows written, the migration importing two more.

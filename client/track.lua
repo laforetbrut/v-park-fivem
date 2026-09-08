@@ -110,6 +110,14 @@ Track.describe = describe
 -- Entering and leaving
 -- ---------------------------------------------------------------------------------------
 
+--[[
+    Vehicles this client has already offered on entry, so getting in and out of the same car
+    repeatedly is one message rather than one per entry.
+
+    Not cleared on exit: the point is to offer each vehicle once per session.
+]]
+local offeredOnEntry = {}
+
 local function onEnter(vehicle)
     current.entity = vehicle
     current.netId = NetworkGetNetworkIdFromEntity(vehicle)
@@ -119,10 +127,36 @@ local function onEnter(vehicle)
     settling[vehicle] = nil
 
     local record, id = Stream.byEntity(vehicle)
+
     if record then
         -- `true`: somebody got IN it. See `Config.Cleanup` for why that is a different fact
         -- from the vehicle merely having been interacted with.
         TriggerServerEvent('vpark:server:touched', id, true)
+        return
+    end
+
+    --[[
+        Not one of ours yet. Offer it on ENTRY, so that a vehicle the framework says this
+        player owns is kept from the moment they sit in it rather than forty-five seconds
+        after they walk away from it.
+
+        The SERVER decides. It looks the plate up in the framework's owned-vehicles table and
+        adopts only if it is genuinely owned; anything else is ignored here and goes through
+        the ordinary settle path on exit. `Config.Persistence.ownedImmediately` is the switch.
+
+        Sent once per vehicle per session, and only when the local rules would allow it at
+        all - so a bicycle, a blacklisted model or a car inside a garage zone costs nothing.
+    ]]
+    if not (Config.Persistence and Config.Persistence.ownedImmediately ~= false) then return end
+    if offeredOnEntry[vehicle] then return end
+    if not worthReporting(vehicle) then return end
+
+    offeredOnEntry[vehicle] = true
+
+    local payload = describe(vehicle)
+    if payload then
+        payload.onEntry = true
+        TriggerServerEvent('vpark:server:candidate', payload)
     end
 end
 

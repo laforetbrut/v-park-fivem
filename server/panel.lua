@@ -72,6 +72,7 @@ local function toRow(record, from)
         className = Classes.key(record.class),
         owner = record.owner_name or record.owner,
         ownerType = record.owner_type,
+        ownerOnline = record.owner ~= nil and Ownership.isOnline(record.owner) or false,
         job = record.job,
         label = record.statebags and record.statebags['vpark:label'] or nil,
 
@@ -164,6 +165,13 @@ function Panel.query(src, query)
             keep = record.owner_type == 'job'
         elseif filter == 'broken' then
             keep = record.invalidModel == true
+        elseif filter == 'online' then
+            -- Whose owner is connected right now. The most useful filter there is for a staff
+            -- member dealing with a live situation: it is the set of vehicles somebody could
+            -- walk out and drive in the next minute.
+            keep = record.owner ~= nil and Ownership.isOnline(record.owner)
+        elseif filter == 'offline' then
+            keep = record.owner ~= nil and not Ownership.isOnline(record.owner)
         end
 
         if keep and search ~= '' then
@@ -230,7 +238,90 @@ function Panel.query(src, query)
             dirty = store.dirty,
             wrecked = store.wrecked,
             byType = store.byType,
+            matched = total,
         },
+    }
+end
+
+--[[
+    Everything about one vehicle, for the detail view.
+
+    A separate call rather than more fields on every row: the property table is several hundred
+    bytes of mod slots that no list renders, and sending it for twenty-five rows on every
+    refresh would be most of the payload for none of the value.
+]]
+function Panel.detail(src, id)
+    local record = Store.get(id)
+    if not record then return nil end
+
+    local properties = record.properties or {}
+
+    -- The mod slots that are actually fitted, named, so the view is a list of parts rather
+    -- than fifty rows of -1.
+    local fitted = {}
+    for key, value in pairs(properties) do
+        if key:sub(1, 3) == 'mod' and type(value) == 'number' and value >= 0 then
+            fitted[#fitted + 1] = { name = key:sub(4), value = value }
+        elseif key:sub(1, 3) == 'mod' and value == true then
+            fitted[#fitted + 1] = { name = key:sub(4), value = 'on' }
+        end
+    end
+    table.sort(fitted, function(a, b) return a.name < b.name end)
+
+    local damage = {}
+    if type(properties.windows) == 'table' and #properties.windows > 0 then
+        damage[#damage + 1] = { name = 'windows broken', value = #properties.windows }
+    end
+    if type(properties.doors) == 'table' and #properties.doors > 0 then
+        damage[#damage + 1] = { name = 'doors damaged', value = #properties.doors }
+    end
+    if type(properties.tyres) == 'table' and next(properties.tyres) then
+        damage[#damage + 1] = { name = 'tyres burst', value = Park.count(properties.tyres) }
+    end
+    if type(properties.deformation) == 'table' then
+        local points = properties.deformation.d
+        damage[#damage + 1] = {
+            name = 'deformation points',
+            value = type(points) == 'table' and math.floor(#points / 2) or 'external',
+        }
+    end
+
+    local live = Store.live(id)
+    local now = Park.now()
+
+    return {
+        row = toRow(record, nil),
+
+        colours = {
+            primary = properties.color1,
+            secondary = properties.color2,
+            pearlescent = properties.pearlescentColor,
+            wheel = properties.wheelColor,
+            custom = properties.customPrimary ~= nil,
+        },
+
+        fitted = fitted,
+        damage = damage,
+
+        extras = properties.extras and Park.count(properties.extras) or 0,
+        windowTint = properties.windowTint,
+        plateIndex = properties.plateIndex,
+        lockState = properties.lockState,
+
+        source = record.source,
+        bucket = record.bucket,
+        interior = record.interior,
+        netId = live and live.netId or nil,
+        placer = live and live.placer or nil,
+
+        createdAgo = now > 0 and Park.duration(now - (record.created_at or now)) or nil,
+        updatedAgo = now > 0 and Park.duration(now - (record.updated_at or now)) or nil,
+        touchedAgo = now > 0 and Park.duration(now - (record.touched_at or now)) or nil,
+        usedAgo = (now > 0 and (record.last_used_at or 0) > 0)
+            and Park.duration(now - record.last_used_at) or nil,
+
+        offlineSecs = record.offline_secs,
+        statebags = record.statebags,
     }
 end
 
@@ -284,6 +375,7 @@ function Panel.context(src)
         version = Runtime.state().version,
         framework = Bridge.kind(),
         canRestore = (tonumber(Config.Database.trashRetentionDays) or 0) > 0,
+        bulkLimit = 100,
     }
 end
 
@@ -382,6 +474,105 @@ end)
     A separate query because it reads a different table and is only ever looked at
     deliberately - paying for it on every panel refresh would be a query nobody asked for.
 ]]
+--[[
+    Run one action across a selection.
+
+    -------------------------------------------------------------------------------------------
+    WHY THIS IS NOT JUST A LOOP IN THE BROWSER
+    -------------------------------------------------------------------------------------------
+
+    It could be, and it would be worse in three ways. Fifty separate events is fifty permission
+    checks, fifty audit rows written one at a time, and fifty refreshes racing each other. More
+    importantly, a bulk delete is the single most destructive thing this panel can do and it
+    deserves one place that counts what it did and says so.
+
+    The cap is real. A selection larger than it is refused rather than truncated, because a
+    truncated bulk action is the worst possible outcome: the operator believes it all happened.
+]]
+local BULK_LIMIT = 100
+
+local BULK_ALLOWED = {
+    repair = true,
+    clean = true,
+    refuel = true,
+    unlock = true,
+    lock = true,
+    toGarage = true,
+    impound = true,
+    delete = true,
+}
+
+RegisterNetEvent('vpark:server:panelBulk', function(action, ids, value)
+    local src = source
+
+    if not Actions.requireAdmin(src) then
+        TriggerClientEvent('vpark:client:panelResult', src, false, L('error.no_permission'))
+        return
+    end
+
+    if not Runtime.ready() then
+        TriggerClientEvent('vpark:client:panelResult', src, false, L('error.not_ready'))
+        return
+    end
+
+    if type(action) ~= 'string' or type(ids) ~= 'table' then return end
+    if not BULK_ALLOWED[action] then
+        TriggerClientEvent('vpark:client:panelResult', src, false, L('error.unknown_action'))
+        return
+    end
+
+    local gate = action == 'lock' and 'unlock' or action
+    local actions = panelConfig().actions or {}
+    if actions[gate] == false then
+        TriggerClientEvent('vpark:client:panelResult', src, false, L('error.action_disabled'))
+        return
+    end
+
+    if #ids > BULK_LIMIT then
+        TriggerClientEvent('vpark:client:panelResult', src, false, L('panel.bulk_too_many', BULK_LIMIT))
+        return
+    end
+
+    local handler = DISPATCH[action]
+    if not handler then return end
+
+    Database.thread(function()
+        local done, failed = 0, 0
+
+        for index = 1, #ids do
+            local id = ids[index]
+
+            if type(id) == 'string' then
+                local ok = handler(src, id, value)
+                if ok then done = done + 1 else failed = failed + 1 end
+            end
+
+            -- Yield every few, so a hundred repairs do not hold the server thread. Each one
+            -- awaits the database anyway; this makes the yielding explicit and bounded.
+            if index % 5 == 0 then Wait(0) end
+        end
+
+        Database.audit('bulk_' .. action, Bridge.characterId(src), Bridge.name(src), nil,
+            { count = done, failed = failed })
+        Webhook.admin(action, src, ('%d vehicle(s)'):format(done),
+            { bulk = true, failed = failed })
+
+        TriggerClientEvent('vpark:client:panelResult', src, failed == 0,
+            L('panel.bulk_done', done, failed))
+
+        local session = sessions[src] or {}
+        TriggerClientEvent('vpark:client:panelData', src, Panel.query(src, session))
+    end)
+end)
+
+RegisterNetEvent('vpark:server:panelDetail', function(id)
+    local src = source
+    if not Actions.requireAdmin(src) then return end
+    if type(id) ~= 'string' then return end
+
+    TriggerClientEvent('vpark:client:panelDetail', src, Panel.detail(src, id))
+end)
+
 RegisterNetEvent('vpark:server:panelTrash', function(page)
     local src = source
     if not Actions.requireAdmin(src) then return end

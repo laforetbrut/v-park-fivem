@@ -674,23 +674,50 @@ function Database.boot()
     ready = true
 
     local timeout = (tonumber(Config.Database and Config.Database.connectTimeout) or 30) * 1000
-    local deadline = Park.ticks() + timeout
-    local connected = false
 
-    while Park.ticks() < deadline do
+    --[[
+        THE HANDSHAKE RUNS IN ITS OWN THREAD, AND THE TIMEOUT WATCHES A FLAG.
+
+        `Citizen.Await` cannot be cancelled and cannot time out. If the database server is not
+        listening at all, oxmysql never calls the callback the promise is waiting on, so the
+        await never returns - and an earlier version of this loop blocked inside its FIRST
+        `Database.scalar` forever.
+
+        The visible symptom was v-park printing `framework: qb` and then nothing. No error, no
+        memory-mode warning, no boot banner, and every timer in the resource waiting on
+        `Runtime.ready()` which never became true. Measured with MariaDB stopped.
+
+        So the query goes in its own thread and sets a flag, and the deadline is enforced out
+        here where it can actually be enforced. The orphaned thread stays parked on its await
+        for the life of the resource, which costs nothing: it holds one coroutine and no timer.
+    ]]
+    local answered, connected = false, false
+
+    CreateThread(function()
         local answer = Database.scalar('SELECT 1')
-        if tonumber(answer) == 1 then
-            connected = true
-            break
-        end
-        Wait(500)
+        connected = tonumber(answer) == 1
+        answered = true
+    end)
+
+    local deadline = Park.ticks() + timeout
+    while not answered and Park.ticks() < deadline do
+        Wait(250)
     end
 
     if not connected then
         ready = false
         driver = nil
         memoryMode = true
-        Park.error('%s did not answer within %d seconds - v-park is running IN MEMORY', kind, timeout / 1000)
+
+        if answered then
+            Park.error('%s answered but not with a working connection - v-park is running IN MEMORY', kind)
+        else
+            Park.error('%s did not answer within %d seconds - v-park is running IN MEMORY',
+                kind, timeout / 1000)
+            Park.error('the database server is most likely not running, or not reachable from here')
+        end
+
+        Park.error('vehicles will survive a resource restart and NOT a server restart')
         return false
     end
 

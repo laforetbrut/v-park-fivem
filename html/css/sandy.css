@@ -206,6 +206,10 @@
 
     --row-alt:          rgba(255, 253, 247, 0.30);
     --row-hover:        rgba(168, 72, 42, 0.20);
+    --row-picked:       rgba(201, 147, 52, 0.26);
+
+    --bulk-bg:          var(--ink-2);
+    --bulk-fg:          #f2e4c8;
 
     --label-fg:         var(--ink);
     --label-bg:         rgba(201, 147, 52, 0.52);

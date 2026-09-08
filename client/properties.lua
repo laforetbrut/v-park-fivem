@@ -76,6 +76,94 @@ local MOD_SLOTS = {
 Properties.MOD_SLOTS = MOD_SLOTS
 
 --[[
+    entity -> { fingerprint, tuning }
+
+    The tuning half of a capture - every mod slot, the colours, the extras, the neons, the
+    wheels - is about seventy-five native calls and describes things that only change at a
+    mechanic. The rest of a capture is thirty calls and describes things that change while
+    somebody drives.
+
+    So the expensive half is cached against a cheap fingerprint, and re-read only when the
+    fingerprint moves. A parked car being swept costs the fingerprint plus the dynamic half;
+    the seventy-five calls happen when somebody has actually fitted something.
+
+    Bounded by `Config.Performance.propertyCache`, evicted oldest-first, and cleared for an
+    entity when it stops existing.
+]]
+local tuningCache = {}
+local tuningOrder = {}
+local tuningCount = 0
+
+local function cacheLimit()
+    return math.max(16, math.floor(tonumber(Config.Performance and Config.Performance.propertyCache) or 200))
+end
+
+local function rememberTuning(vehicle, fingerprint, tuning)
+    if not tuningCache[vehicle] then
+        tuningCount = tuningCount + 1
+        tuningOrder[tuningCount] = vehicle
+    end
+
+    tuningCache[vehicle] = { fingerprint = fingerprint, tuning = tuning }
+
+    -- Evict oldest-first once over the limit. A plain table would grow for the life of the
+    -- session on a server where players drive a lot of different vehicles.
+    local limit = cacheLimit()
+    if tuningCount > limit then
+        local drop = tuningCount - limit
+        for index = 1, drop do
+            local victim = tuningOrder[index]
+            if victim and tuningCache[victim] then tuningCache[victim] = nil end
+        end
+
+        local shifted = {}
+        local count = 0
+        for index = drop + 1, tuningCount do
+            count = count + 1
+            shifted[count] = tuningOrder[index]
+        end
+        tuningOrder = shifted
+        tuningCount = count
+    end
+end
+
+function Properties.forget(vehicle)
+    if tuningCache[vehicle] then tuningCache[vehicle] = nil end
+end
+
+--[[
+    A cheap summary of everything the tuning half describes.
+
+    Twelve native calls chosen to move whenever anything in that half does: the colour indices
+    and the paint type, the wheel type, the livery, the window tint, three sample mod slots
+    across the visual, performance and wheel ranges, the turbo toggle, and the neon state.
+
+    It is not a hash of the whole thing and does not need to be. Fitting a spoiler changes slot
+    0; fitting an engine changes slot 11; a respray changes the colours. The one case it would
+    miss is a mod changing in a slot nothing samples while every sampled value stays identical,
+    which requires a deliberate effort to construct.
+]]
+local function tuningFingerprint(vehicle)
+    local primary, secondary = GetVehicleColours(vehicle)
+    local pearlescent, wheelColour = GetVehicleExtraColours(vehicle)
+
+    return ('%d.%d.%d.%d.%d.%d.%d.%d.%d.%d.%s.%s'):format(
+        primary or 0, secondary or 0,
+        pearlescent or 0, wheelColour or 0,
+        GetVehicleWheelType(vehicle) or 0,
+        GetVehicleLivery(vehicle) or -1,
+        GetVehicleWindowTint(vehicle) or 0,
+        GetVehicleMod(vehicle, 0) or -1,
+        GetVehicleMod(vehicle, 11) or -1,
+        GetVehicleMod(vehicle, 23) or -1,
+        tostring(IsToggleModOn(vehicle, 18)),
+        tostring(IsVehicleNeonLightEnabled(vehicle, 0))
+    )
+end
+
+Properties.fingerprint = tuningFingerprint
+
+--[[
     Call whichever of two native spellings this game build actually has.
 
     CFX is inconsistent about `Colour` and `Color`, and which one exists varies by build. A
@@ -191,6 +279,23 @@ function Properties.capture(vehicle)
     properties.extras = extras
 
     -- ------------------------------------------------------------- modifications ---
+    --
+    -- The expensive half. Read from cache when the fingerprint says nothing about it has
+    -- changed, which on a parked car is always.
+    local fingerprint = tuningFingerprint(vehicle)
+    local cached = tuningCache[vehicle]
+
+    if cached and cached.fingerprint == fingerprint then
+        for key, value in pairs(cached.tuning) do
+            properties[key] = value
+        end
+
+        -- Everything below the tuning block still runs: damage, doors, deformation and the
+        -- dynamic values are cheap and change while somebody is driving.
+        goto tuningDone
+    end
+
+    do
     properties.wheels = GetVehicleWheelType(vehicle)
 
     -- CFX additions rather than base game natives, and absent on an old build. A nil here is
@@ -220,6 +325,22 @@ function Properties.capture(vehicle)
 
     properties.livery = GetVehicleLivery(vehicle)
     properties.roofLivery = GetVehicleRoofLivery and GetVehicleRoofLivery(vehicle) or -1
+
+    -- Remember the expensive half against the fingerprint that produced it.
+    do
+        local tuning = {}
+        for _, group in ipairs({ 'modifications', 'colours', 'customPaint', 'windowTint',
+                                 'xenon', 'neons', 'tyreSmoke', 'livery', 'extras',
+                                 'wheelType' }) do
+            for _, key in ipairs(Schema.keys[group] or {}) do
+                tuning[key] = properties[key]
+            end
+        end
+        rememberTuning(vehicle, fingerprint, tuning)
+    end
+    end
+
+    ::tuningDone::
 
     -- -------------------------------------------------------------------- damage ---
     local windows = {}

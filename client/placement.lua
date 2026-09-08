@@ -141,6 +141,71 @@ end
 -- ---------------------------------------------------------------------------------------
 
 --[[
+    A snapshot of every vehicle in the world, taken once and reused for a whole placement.
+
+    -------------------------------------------------------------------------------------------
+    WHY THIS EXISTS
+    -------------------------------------------------------------------------------------------
+
+    A blocked placement runs the probe once for the saved pose, again for up to four vertical
+    retries, and again for every candidate the spiral search offers - which at the shipped
+    settings is five rings of eight, so up to forty-five probes. Each one used to call
+    `GetGamePool('CVehicle')`, allocate a table of every vehicle on the server, and read
+    `GetEntityCoords` and `GetModelDimensions` for all of them.
+
+    On a busy street with two hundred vehicles in the pool, that is nine thousand coordinate
+    reads and forty-five table allocations to place one car.
+
+    The snapshot reads the pool ONCE, at the start of the placement, and every probe below
+    reads from it. Positions are read once too, which is correct as well as cheap: every probe
+    in a single placement should be measuring against the same world, not against one that
+    moved between candidates.
+]]
+local snapshot
+
+local function takeSnapshot(ignore)
+    local pool = GetGamePool('CVehicle')
+    local entries = {}
+    local count = 0
+
+    for index = 1, #pool do
+        local vehicle = pool[index]
+
+        if vehicle ~= ignore and DoesEntityExist(vehicle) then
+            local position = GetEntityCoords(vehicle)
+            local dims = dimensions(GetEntityModel(vehicle))
+
+            count = count + 1
+            entries[count] = {
+                entity = vehicle,
+                x = position.x,
+                y = position.y,
+                z = position.z,
+                half = dims and dims.half or vector3(2.0, 2.0, 1.0),
+            }
+        end
+    end
+
+    snapshot = { entries = entries, count = count, ignore = ignore }
+    return snapshot
+end
+
+--[[
+    Open and close a placement batch.
+
+    Everything between them shares one view of the world. `endBatch` is called unconditionally
+    in the caller's cleanup, because a snapshot left behind would be used by the NEXT placement
+    and would describe a world that has moved on.
+]]
+function Placement.beginBatch(ignore)
+    takeSnapshot(ignore)
+end
+
+function Placement.endBatch()
+    snapshot = nil
+end
+
+--[[
     Every vehicle whose bounding box overlaps the target volume.
 
     The entity pool rather than a shape test, for three reasons: it is exact where a shape
@@ -157,10 +222,17 @@ local function overlappingVehicles(centre, half, heading, ignore, margin)
 
     local out = {}
 
-    for _, vehicle in ipairs(GetGamePool('CVehicle')) do
-        if vehicle ~= ignore and DoesEntityExist(vehicle) then
-            local other = GetEntityCoords(vehicle)
-            local dx, dy = other.x - centre.x, other.y - centre.y
+    -- The batch snapshot when there is one, a fresh read when there is not. A caller outside
+    -- a placement - the probe command, the API - still works and simply pays for its own scan.
+    local source = snapshot
+    if not source or source.ignore ~= ignore then
+        source = takeSnapshot(ignore)
+    end
+
+    for index = 1, source.count do
+        local entry = source.entries[index]
+        do
+            local dx, dy = entry.x - centre.x, entry.y - centre.y
 
             if dx * dx + dy * dy < reachSq then
                 -- Into the target box's own frame, so the test is an axis-aligned comparison
@@ -169,15 +241,14 @@ local function overlappingVehicles(centre, half, heading, ignore, margin)
                 local cos, sin = math.cos(radians), math.sin(radians)
                 local localX = dx * cos - dy * sin
                 local localY = dx * sin + dy * cos
-                local localZ = other.z - centre.z
+                local localZ = entry.z - centre.z
 
-                local otherDims = dimensions(GetEntityModel(vehicle))
-                local otherHalf = otherDims and otherDims.half or vector3(2.0, 2.0, 1.0)
+                local otherHalf = entry.half
 
                 if math.abs(localX) < half.x + otherHalf.x + margin
                     and math.abs(localY) < half.y + otherHalf.y + margin
                     and math.abs(localZ) < half.z + otherHalf.z + margin then
-                    out[#out + 1] = vehicle
+                    out[#out + 1] = entry.entity
                 end
             end
         end
@@ -228,6 +299,75 @@ end
 Placement.isAmbient = isAmbient
 
 --[[
+    The world-space endpoints of the rays that trace a model's footprint.
+
+    -------------------------------------------------------------------------------------------
+    WHY RAYS AND NOT A BOX SHAPE TEST
+    -------------------------------------------------------------------------------------------
+
+    v1.0.0 used `StartShapeTestBox`, whose three size arguments are undocumented. The community
+    reading is that they are half-extents; if that reading were wrong the tested volume would be
+    twice the size of the car and almost every tight space would report as blocked. The release
+    had to carry that as a stated limit, which is not a good place for the resource's headline
+    feature to be.
+
+    Rays have no such ambiguity. A ray is two points, and nothing about it is open to
+    interpretation. Six of them trace the footprint: the four sides at body height, and the two
+    diagonals so that a pillar standing in the middle of an otherwise clear bay is caught.
+
+    They are also cheaper than they look. The engine runs shape tests asynchronously, so all six
+    - and all of the spiral search's candidates as well - are started together and read together,
+    which is what `Placement.probeMany` below is for.
+
+    What this trades away: an obstacle floating entirely inside the footprint without touching a
+    side or a diagonal is missed. For a vehicle-sized volume that is a very small object in a
+    very particular place, and the settle watch catches the consequence anyway.
+]]
+local function perimeterRays(model, position, heading, out)
+    local centre, dims = boxCentre(model, position, heading)
+    if not centre then return 0 end
+
+    local shrink = tonumber(probeOptions().shrink) or 0.88
+    local halfX = dims.half.x * shrink
+    local halfY = dims.half.y * shrink
+
+    -- Body height rather than the middle of the bounding box: the box includes the aerial and
+    -- the roof, and a ray through the roofline hits the ceiling of every underground car park.
+    local z = centre.z - dims.half.z * 0.35
+
+    local radians = math.rad(heading)
+    local cos, sin = math.cos(radians), math.sin(radians)
+
+    local function corner(lx, ly)
+        return vector3(
+            centre.x + lx * cos - ly * sin,
+            centre.y + lx * sin + ly * cos,
+            z
+        )
+    end
+
+    local frontLeft  = corner(-halfX,  halfY)
+    local frontRight = corner( halfX,  halfY)
+    local backLeft   = corner(-halfX, -halfY)
+    local backRight  = corner( halfX, -halfY)
+
+    local count = 0
+    local function ray(from, to)
+        count = count + 1
+        out[count] = { from = from, to = to }
+    end
+
+    ray(frontLeft, frontRight)   -- across the nose
+    ray(backLeft, backRight)     -- across the tail
+    ray(frontLeft, backLeft)     -- down the left flank
+    ray(frontRight, backRight)   -- down the right flank
+    ray(frontLeft, backRight)    -- the two diagonals, for anything standing in the middle
+    ray(frontRight, backLeft)
+
+    return count
+end
+
+--[[
     Is the volume free?
 
     Returns `free, reason, blocker`.
@@ -235,11 +375,6 @@ Placement.isAmbient = isAmbient
         free      boolean
         reason    'clear' | 'vehicle' | 'world'
         blocker   the entity, when the reason is 'vehicle'
-
-    The world test is a box shape test, polled to completion. It is asynchronous by design in
-    the engine, so a bounded poll is the correct way to read it; the bound exists because a
-    shape test that never resolves - which happens when the area is not streamed - must not
-    hang the placement thread forever.
 ]]
 function Placement.probe(model, position, heading, ignore)
     if probeOptions().enabled == false then
@@ -286,40 +421,38 @@ function Placement.probe(model, position, heading, ignore)
         return true, 'clear'
     end
 
-    --[[
-        The three size arguments are HALF-extents, measured from the centre.
+    -- The world. Six rays, started together and read together after one yield.
+    local rays = {}
+    local count = perimeterRays(model, position, heading, rays)
+    if count == 0 then return true, 'clear' end
 
-        That is the community reading of an undocumented native, and it is the single
-        assumption the world half of this probe rests on. If it were wrong - if they were full
-        extents - the tested box would be twice the size of the car and almost every tight
-        space would report as blocked.
-
-        `/vparkprobe` is how it gets checked rather than guessed at: stand in a space the car
-        demonstrably fits in and see whether it reads FREE. Obviously free spaces reading as
-        BLOCKED, consistently and everywhere, is the tell.
-    ]]
-    local handle = StartShapeTestBox(
-        centre.x, centre.y, centre.z + headroom * 0.5,
-        half.x, half.y, half.z,
-        0.0, 0.0, heading,
-        2,          -- rotation order; 2 is the one that matches a heading in degrees
-        flags,
-        ignore or 0,
-        4           -- the standard options value for a box test
-    )
-
-    -- Poll. A shape test resolves within a frame or two when the area is streamed, and never
-    -- when it is not - which is why the bound exists and why running out of it means "free".
-    -- An unstreamed area cannot be blocked by anything the player can see.
-    local result, hit = 0, false
-    for _ = 1, 20 do
-        result, hit = GetShapeTestResult(handle)
-        if result ~= 1 then break end
-        Wait(0)
+    local handles = {}
+    for index = 1, count do
+        local ray = rays[index]
+        handles[index] = StartShapeTestRay(
+            ray.from.x, ray.from.y, ray.from.z,
+            ray.to.x, ray.to.y, ray.to.z,
+            flags, ignore or 0, 0
+        )
     end
 
-    if result == 2 and hit then
-        return false, 'world'
+    -- One yield for all six rather than a poll per ray. A shape test resolves within a frame
+    -- or two when the area is streamed and never when it is not, so a bounded read is right;
+    -- reading them as a group is what makes it one frame instead of six.
+    Wait(0)
+
+    for index = 1, count do
+        local result, hit = GetShapeTestResult(handles[index])
+
+        if result == 1 then
+            -- Not resolved yet. One more frame, once, for the whole group.
+            Wait(0)
+            result, hit = GetShapeTestResult(handles[index])
+        end
+
+        if result == 2 and hit then
+            return false, 'world'
+        end
     end
 
     return true, 'clear'
@@ -433,13 +566,26 @@ function Placement.search(model, position, heading, ignore)
     local keepHeading = search.keepHeading ~= false
     local vertical = tonumber(search.verticalRetry) or 0
 
+    -- ------------------------------------------------------------ the candidates ---
+    --
+    -- Built as one ordered list rather than tested as they are generated. Order IS the
+    -- preference: vertical retries first, then rings outwards, and the first free candidate
+    -- in this list is the one that gets used.
+    local candidates = {}
+    local count = 0
+
+    local function add(x, y, z, candidateHeading, note)
+        count = count + 1
+        candidates[count] = {
+            position = vector3(x, y, z),
+            heading = candidateHeading,
+            note = note,
+        }
+    end
+
     if vertical > 0 then
         for _, dz in ipairs({ vertical, -vertical, vertical * 2, -vertical * 2 }) do
-            local candidate = vector3(position.x, position.y, position.z + dz)
-            if Placement.probe(model, candidate, heading, ignore) then
-                Park.debug('placed %.2f m vertically from the saved position', dz)
-                return candidate, heading
-            end
+            add(position.x, position.y, position.z + dz, heading, ('%.2f m vertically'):format(dz))
         end
     end
 
@@ -447,27 +593,126 @@ function Placement.search(model, position, heading, ignore)
     while ring <= maximum do
         for i = 0, perRing - 1 do
             local angle = (i / perRing) * math.pi * 2.0
-            local candidate = vector3(
-                position.x + math.cos(angle) * ring,
-                position.y + math.sin(angle) * ring,
-                position.z
-            )
 
             -- Keeping the heading is what makes the result look parked rather than crashed.
             -- A car at forty degrees to the kerb reads as abandoned mid-accident, however
             -- geometrically valid the spot is.
-            local candidateHeading = heading
-            if not keepHeading then
-                candidateHeading = math.deg(angle) + 90.0
-            end
+            local candidateHeading = keepHeading and heading or (math.deg(angle) + 90.0)
 
-            if Placement.probe(model, candidate, candidateHeading, ignore) then
-                Park.debug('placed %.2f m from the saved position', ring)
-                return candidate, candidateHeading
-            end
+            add(position.x + math.cos(angle) * ring,
+                position.y + math.sin(angle) * ring,
+                position.z,
+                candidateHeading,
+                ('%.2f m away'):format(ring))
         end
 
         ring = ring + step
+    end
+
+    if count == 0 then return nil end
+
+    -- ------------------------------------------------------------ the cheap pass ---
+    --
+    -- Vehicles first, for every candidate, with no yield at all: it reads the batch snapshot
+    -- and is pure arithmetic. On a busy street this alone rejects most of the list, and every
+    -- candidate it rejects is a group of six rays never started.
+    local dims = dimensions(model)
+    local shrink = tonumber(probeOptions().shrink) or 0.88
+    local headroom = tonumber(probeOptions().headroom) or 0.15
+    local checkVehicles = (probeOptions().blockedBy or {}).vehicles ~= false
+
+    local surviving = {}
+    local survivors = 0
+
+    for index = 1, count do
+        local candidate = candidates[index]
+        local blocked = false
+
+        if checkVehicles and dims then
+            local centre = boxCentre(model, candidate.position, candidate.heading)
+            if centre then
+                local half = vector3(
+                    dims.half.x * shrink,
+                    dims.half.y * shrink,
+                    dims.half.z * shrink + headroom * 0.5
+                )
+                blocked = #overlappingVehicles(centre, half, candidate.heading, ignore, 0.0) > 0
+            end
+        end
+
+        if not blocked then
+            survivors = survivors + 1
+            surviving[survivors] = candidate
+        end
+    end
+
+    if survivors == 0 then return nil end
+
+    local flags = blockFlags()
+    if flags == 0 then
+        -- Nothing to ask the world. The first survivor wins.
+        Park.debug('placed %s from the saved position', surviving[1].note)
+        return surviving[1].position, surviving[1].heading
+    end
+
+    -- ----------------------------------------------------------- the world pass ---
+    --
+    -- THE REASON THIS FUNCTION WAS REWRITTEN FOR 1.0.1.
+    --
+    -- Every surviving candidate's six rays are STARTED before any of them is read. The engine
+    -- runs shape tests asynchronously, so forty-five candidates cost one yield rather than
+    -- forty-five - which is the difference between a placement that resolves in two frames and
+    -- one that visibly takes most of a second on a busy street.
+    --
+    -- Capped, because starting several hundred shape tests in one frame is its own problem.
+    -- The cap is generous next to the shipped ring settings and exists so an operator who sets
+    -- a very large `maximumRadius` gets a slower search rather than a stalled frame.
+    local budget = math.min(survivors, 64)
+
+    local started = {}
+    for index = 1, budget do
+        local candidate = surviving[index]
+        local rays = {}
+        local rayCount = perimeterRays(model, candidate.position, candidate.heading, rays)
+
+        local handles = {}
+        for r = 1, rayCount do
+            local ray = rays[r]
+            handles[r] = StartShapeTestRay(
+                ray.from.x, ray.from.y, ray.from.z,
+                ray.to.x, ray.to.y, ray.to.z,
+                flags, ignore or 0, 0
+            )
+        end
+
+        started[index] = { candidate = candidate, handles = handles, count = rayCount }
+    end
+
+    Wait(0)
+
+    for index = 1, budget do
+        local entry = started[index]
+        local blocked = false
+
+        for r = 1, entry.count do
+            local result, hit = GetShapeTestResult(entry.handles[r])
+
+            if result == 1 then
+                -- Not resolved. One extra frame for the whole set, once, then read again.
+                Wait(0)
+                result, hit = GetShapeTestResult(entry.handles[r])
+            end
+
+            if result == 2 and hit then
+                blocked = true
+                break
+            end
+        end
+
+        if not blocked then
+            Park.debug('placed %s from the saved position', entry.candidate.note)
+            return entry.candidate.position, entry.candidate.heading
+        end
     end
 
     return nil
@@ -620,6 +865,25 @@ function Placement.place(entity, data)
         return { ok = false, reason = 'gone' }
     end
 
+    -- One view of the world for the whole placement. See `Placement.beginBatch`: without it
+    -- every probe and every search candidate re-scanned the entire vehicle pool.
+    Placement.beginBatch(entity)
+
+    local ok, result = pcall(Placement.placeInner, entity, data)
+
+    -- Unconditionally, including after a raise. A snapshot left behind would be used by the
+    -- next placement and would describe a world that has moved on.
+    Placement.endBatch()
+
+    if not ok then
+        Park.error('placement raised: %s', tostring(result))
+        return { ok = false, reason = 'raised' }
+    end
+
+    return result
+end
+
+function Placement.placeInner(entity, data)
     local model = data.model or GetEntityModel(entity)
     local saved = vector3(data.position.x, data.position.y, data.position.z)
     local rotation = data.rotation or { x = 0.0, y = 0.0, z = 0.0 }

@@ -631,7 +631,7 @@ end)
 
 register('admin', {
     description = 'Open the v-park admin panel',
-    params = { { name = 'subcommand', help = 'cleanup | garages | migrate - or nothing for the panel' } },
+    params = { { name = 'subcommand', help = 'cleanup | garages | reconcile - or nothing for the panel' } },
 }, function(src, args)
     local sub = (args[1] or ''):lower()
 
@@ -647,6 +647,17 @@ register('admin', {
         end
 
         Panel.open(src)
+        return
+    end
+
+    if sub == 'reconcile' then
+        -- Deletes vehicles in the world that carry one of our ids and are not the entity we
+        -- have registered for that id: orphans, and duplicate copies. Runs on a timer anyway;
+        -- this is for when you want to watch it happen.
+        Database.thread(function()
+            local removed = Spawn.reconcile()
+            reply(src, L('reconcile.done', removed))
+        end)
         return
     end
 

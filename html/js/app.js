@@ -61,6 +61,12 @@ const state = {
     searchTimer: null,
     toastTimer: null,
     modalResolve: null,
+
+    // 1.0.1. Selection survives a refresh and a page change, because an admin picking through
+    // three pages of results and losing the lot to the fifteen-second auto-refresh is the
+    // single most annoying thing a table like this can do.
+    selected: new Set(),
+    detailId: null,
 };
 
 const FILTERS = [
@@ -73,6 +79,8 @@ const FILTERS = [
     ['owned', 'panel.filter_owned'],
     ['job', 'panel.filter_job'],
     ['unowned', 'panel.filter_unowned'],
+    ['online', 'panel.filter_online'],
+    ['offline', 'panel.filter_offline'],
     ['broken', 'panel.filter_broken'],
 ];
 
@@ -90,12 +98,25 @@ const ACTIONS = [
     { id: 'teleportTo', gate: 'teleportTo', label: 'panel.act_goto' },
     { id: 'bringHere', gate: 'bringHere', label: 'panel.act_bring' },
     { id: 'mark', gate: null, label: 'panel.act_mark' },
+    { id: 'detail', gate: null, label: 'panel.act_detail' },
     { id: 'repair', gate: 'repair', label: 'panel.act_repair' },
     { id: 'clean', gate: 'clean', label: 'panel.act_clean' },
     { id: 'refuel', gate: 'refuel', label: 'panel.act_refuel', prompt: 'number' },
     { id: 'unlock', gate: 'unlock', label: 'panel.act_unlock' },
     { id: 'rename', gate: 'rename', label: 'panel.act_rename', prompt: 'text' },
     { id: 'setOwner', gate: 'setOwner', label: 'panel.act_owner', prompt: 'text' },
+    { id: 'toGarage', gate: 'toGarage', label: 'panel.act_garage', prompt: 'garage' },
+    { id: 'impound', gate: 'impound', label: 'panel.act_impound', confirm: true },
+    { id: 'delete', gate: 'delete', label: 'panel.act_delete', confirm: true, danger: true },
+];
+
+// Which actions make sense across a selection. Deliberately a subset: "go to" and "bring
+// here" are about one vehicle, and a bulk waypoint is meaningless.
+const BULK_ACTIONS = [
+    { id: 'repair', gate: 'repair', label: 'panel.act_repair' },
+    { id: 'clean', gate: 'clean', label: 'panel.act_clean' },
+    { id: 'refuel', gate: 'refuel', label: 'panel.act_refuel', prompt: 'number' },
+    { id: 'unlock', gate: 'unlock', label: 'panel.act_unlock' },
     { id: 'toGarage', gate: 'toGarage', label: 'panel.act_garage', prompt: 'garage' },
     { id: 'impound', gate: 'impound', label: 'panel.act_impound', confirm: true },
     { id: 'delete', gate: 'delete', label: 'panel.act_delete', confirm: true, danger: true },
@@ -164,11 +185,16 @@ function applyStrings() {
     $('stat-live-label').textContent = t('panel.summary_live');
     $('stat-pending-label').textContent = t('panel.summary_pending');
 
-    const headers = ['panel.col_vehicle', 'panel.col_owner', 'panel.col_where',
+    // The first header holds the select-all checkbox and gets no text.
+    const headers = [null, 'panel.col_vehicle', 'panel.col_owner', 'panel.col_where',
         'panel.col_state', 'panel.col_actions'];
     document.querySelectorAll('#table thead th').forEach((th, index) => {
-        th.textContent = t(headers[index]);
+        if (headers[index]) th.textContent = t(headers[index]);
     });
+
+    $('bulk-clear').textContent = t('panel.clear_selection');
+    $('detail-title').textContent = t('panel.detail_title');
+    $('shortcuts').textContent = t('panel.shortcuts');
 
     document.querySelectorAll('.tab').forEach((tab) => {
         tab.textContent = t('panel.tab_' + tab.dataset.tab);
@@ -237,6 +263,8 @@ function ownerCell(row) {
 
     const sub = [row.ownerType];
     if (row.job) sub.push(row.job);
+    if (row.owner) sub.push(row.ownerOnline ? t('panel.owner_online') : t('panel.owner_offline'));
+
     cell.appendChild(el('span', 'v-sub', sub.join('  ·  ')));
 
     return cell;
@@ -355,6 +383,64 @@ function actionsCell(row) {
     return cell;
 }
 
+/*
+    The selection bar.
+
+    Rebuilt whenever the selection changes rather than toggled, because the set of actions it
+    offers comes from the config and could differ between two servers.
+*/
+function renderBulkBar() {
+    const bar = $('bulkbar');
+    const count = state.selected.size;
+
+    bar.hidden = count === 0;
+    if (count === 0) return;
+
+    $('bulk-count').textContent = t('panel.selected').replace('%d', count);
+
+    const holder = $('bulk-actions');
+    clear(holder);
+
+    const allowed = (state.context && state.context.actions) || {};
+
+    BULK_ACTIONS.forEach((action) => {
+        if (action.gate && allowed[action.gate] === false) return;
+
+        const button = el('button', 'btn act' + (action.danger ? ' btn-danger' : ''), t(action.label));
+        button.type = 'button';
+        button.addEventListener('click', () => runBulk(action));
+        holder.appendChild(button);
+    });
+}
+
+function togglePick(id, on) {
+    if (on) state.selected.add(id); else state.selected.delete(id);
+    renderBulkBar();
+
+    document.querySelectorAll('#rows tr').forEach((tr) => {
+        if (tr.dataset.id === id) tr.classList.toggle('is-picked', on);
+    });
+}
+
+function clearSelection() {
+    state.selected.clear();
+    $('pick-all').checked = false;
+    document.querySelectorAll('#rows tr').forEach((tr) => tr.classList.remove('is-picked'));
+    document.querySelectorAll('#rows input[type="checkbox"]').forEach((box) => { box.checked = false; });
+    renderBulkBar();
+}
+
+function pickCell(row) {
+    const cell = el('td', 'col-pick');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = state.selected.has(row.id);
+    box.addEventListener('click', (event) => event.stopPropagation());
+    box.addEventListener('change', () => togglePick(row.id, box.checked));
+    cell.appendChild(box);
+    return cell;
+}
+
 function renderRows() {
     const body = $('rows');
 
@@ -370,12 +456,26 @@ function renderRows() {
 
     rows.forEach((row) => {
         const tr = el('tr');
+        tr.dataset.id = row.id;
+        if (state.selected.has(row.id)) tr.classList.add('is-picked');
+
+        tr.appendChild(pickCell(row));
         tr.appendChild(vehicleCell(row));
         tr.appendChild(ownerCell(row));
         tr.appendChild(whereCell(row));
         tr.appendChild(stateCell(row));
         tr.appendChild(actionsCell(row));
         body.appendChild(tr);
+    });
+
+    // The select-all box reflects THIS page, not the whole selection.
+    const pageIds = rows.map((row) => row.id);
+    $('pick-all').checked = pageIds.length > 0 && pageIds.every((id) => state.selected.has(id));
+
+    renderBulkBar();
+
+    document.querySelectorAll('#table thead th[data-sort]').forEach((th) => {
+        th.classList.toggle('is-sorted', th.dataset.sort === state.query.sort);
     });
 
     if (data) {
@@ -523,6 +623,11 @@ async function runAction(action, row) {
         return;
     }
 
+    if (action.id === 'detail') {
+        openDetail(row.id);
+        return;
+    }
+
     let value;
 
     if (action.prompt === 'garage') {
@@ -565,6 +670,147 @@ async function runAction(action, row) {
     }
 
     post('action', { action: action.id, id: row.id, value });
+}
+
+/*
+    Run one action across the selection.
+
+    The prompt and the confirmation come first and once, rather than per vehicle - which is the
+    whole point of a bulk action - and the confirmation names the count, because "delete 47
+    vehicles" and "delete this vehicle" deserve different levels of hesitation.
+*/
+async function runBulk(action) {
+    const ids = Array.from(state.selected);
+    if (ids.length === 0) return;
+
+    const limit = (state.context && state.context.bulkLimit) || 100;
+    if (ids.length > limit) {
+        toast(t('panel.bulk_too_many').replace('%d', limit), true);
+        return;
+    }
+
+    let value;
+
+    if (action.prompt === 'garage') {
+        const picked = await ask({
+            kind: 'garage',
+            title: t(action.label),
+            body: t('panel.choose_garage'),
+        });
+        if (picked === null) return;
+        value = $('modal-select').value;
+
+    } else if (action.prompt === 'number') {
+        value = await ask({
+            kind: 'number',
+            title: t(action.label),
+            body: t('panel.refuel_prompt'),
+            value: 100,
+        });
+        if (value === null) return;
+
+    } else if (action.confirm) {
+        const confirmed = await ask({
+            title: t(action.label),
+            body: t('panel.confirm_bulk').replace('%s', t(action.label)).replace('%d', ids.length),
+            danger: !!action.danger,
+        });
+        if (confirmed === null) return;
+    }
+
+    post('bulk', { action: action.id, ids, value });
+    clearSelection();
+}
+
+/*
+    The detail sheet.
+
+    A side sheet rather than a modal: the list stays visible, so an admin can click straight
+    through several vehicles without closing anything.
+*/
+function renderDetail(detail) {
+    const body = $('detail-body');
+    clear(body);
+
+    if (!detail) {
+        body.appendChild(el('p', 'd-empty', t('panel.no_results')));
+        return;
+    }
+
+    const row = detail.row || {};
+
+    const section = (titleKey) => {
+        const wrap = el('div', 'd-section');
+        wrap.appendChild(el('h3', null, t(titleKey)));
+        body.appendChild(wrap);
+        return wrap;
+    };
+
+    const line = (into, label, value) => {
+        if (value === undefined || value === null || value === '') return;
+        const node = el('div', 'd-row');
+        node.appendChild(el('span', null, label));
+        node.appendChild(el('span', null, String(value)));
+        into.appendChild(node);
+    };
+
+    // Identity, reusing the row the list already renders.
+    const identity = section('panel.col_vehicle');
+    line(identity, t('panel.col_vehicle'), row.model || '?');
+    line(identity, 'ID', row.id);
+    line(identity, 'Plate', row.plate);
+    line(identity, t('panel.col_owner'), row.owner);
+    line(identity, 'Type', row.ownerType);
+    line(identity, t('panel.detail_source'), detail.source);
+    if (detail.netId) line(identity, t('panel.detail_netid'), detail.netId);
+    if (detail.bucket) line(identity, 'Bucket', detail.bucket);
+
+    // Colours, as swatches where they are custom RGB and as indexes otherwise.
+    const colours = section('panel.detail_colours');
+    line(colours, 'Primary', detail.colours && detail.colours.primary);
+    line(colours, 'Secondary', detail.colours && detail.colours.secondary);
+    line(colours, 'Pearlescent', detail.colours && detail.colours.pearlescent);
+    line(colours, 'Wheels', detail.colours && detail.colours.wheel);
+    line(colours, 'Window tint', detail.windowTint);
+    line(colours, 'Extras fitted', detail.extras);
+
+    const fittedSection = section('panel.detail_fitted');
+    const fitted = detail.fitted || [];
+    if (fitted.length === 0) {
+        fittedSection.appendChild(el('p', 'd-empty', t('panel.detail_none')));
+    } else {
+        fitted.forEach((part) => line(fittedSection, part.name, part.value));
+    }
+
+    const damageSection = section('panel.detail_damage');
+    const damage = detail.damage || [];
+    line(damageSection, 'Body', row.bodyHealth);
+    line(damageSection, 'Engine', row.engineHealth);
+    if (damage.length === 0) {
+        damageSection.appendChild(el('p', 'd-empty', t('panel.detail_none')));
+    } else {
+        damage.forEach((entry) => line(damageSection, entry.name, entry.value));
+    }
+
+    const timing = section('panel.detail_timing');
+    line(timing, t('panel.detail_created'), detail.createdAgo);
+    line(timing, t('panel.detail_updated'), detail.updatedAgo);
+    line(timing, t('panel.detail_touched'), detail.touchedAgo);
+    line(timing, t('panel.detail_used'), detail.usedAgo || t('panel.never_used'));
+    if (row.graceText) line(timing, t('panel.grace'), row.graceText);
+    if (row.lastGarage) line(timing, t('panel.act_garage'), row.lastGarage);
+}
+
+function openDetail(id) {
+    state.detailId = id;
+    $('detail').hidden = false;
+    clear($('detail-body'));
+    post('detail', { id });
+}
+
+function closeDetail() {
+    state.detailId = null;
+    $('detail').hidden = true;
 }
 
 // ------------------------------------------------------------------------------------ query ---
@@ -643,6 +889,34 @@ document.querySelectorAll('.tab').forEach((tab) => {
     tab.addEventListener('click', () => setTab(tab.dataset.tab));
 });
 
+// Select every row on this page, or clear the page's rows from the selection.
+$('pick-all').addEventListener('change', (event) => {
+    const rows = (state.data && state.data.rows) || [];
+    rows.forEach((row) => {
+        if (event.target.checked) state.selected.add(row.id);
+        else state.selected.delete(row.id);
+    });
+    renderRows();
+});
+
+$('bulk-clear').addEventListener('click', clearSelection);
+
+$('detail-close').addEventListener('click', closeDetail);
+
+// Sortable headers. Clicking one that is already active does nothing rather than reversing:
+// every sort here has an obvious direction, and a hidden reverse state is a thing to explain.
+document.querySelectorAll('#table thead th[data-sort]').forEach((th) => {
+    th.addEventListener('click', () => {
+        const wanted = th.dataset.sort;
+        if (state.query.sort === wanted) return;
+
+        state.query.sort = wanted;
+        state.query.page = 1;
+        $('sort').value = wanted;
+        refresh();
+    });
+});
+
 $('modal-cancel').addEventListener('click', () => closeModal(null));
 
 $('modal-confirm').addEventListener('click', () => {
@@ -665,14 +939,34 @@ $('modal-input').addEventListener('keydown', (event) => {
     closing the whole panel.
 */
 document.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape') return;
+    if (!state.open) return;
 
-    if (!$('modal').hidden) {
-        closeModal(null);
+    if (event.key === 'Escape') {
+        if (!$('modal').hidden) { closeModal(null); return; }
+        if (!$('detail').hidden) { closeDetail(); return; }
+        post('close', {});
         return;
     }
 
-    if (state.open) post('close', {});
+    // Everything below is a bare key, so it must not fire while somebody is typing.
+    const typing = document.activeElement
+        && ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName);
+    if (typing || !$('modal').hidden) return;
+
+    if (event.key === '/') {
+        event.preventDefault();
+        $('search').focus();
+        $('search').select();
+    } else if (event.key === 'r' || event.key === 'R') {
+        refresh();
+    } else if (event.key === 'a' || event.key === 'A') {
+        $('pick-all').checked = !$('pick-all').checked;
+        $('pick-all').dispatchEvent(new Event('change'));
+    } else if (event.key === 'ArrowLeft') {
+        $('prev').click();
+    } else if (event.key === 'ArrowRight') {
+        $('next').click();
+    }
 });
 
 // --------------------------------------------------------------------------- messages in ---
@@ -688,6 +982,9 @@ window.addEventListener('message', (event) => {
             state.strings = message.locale || {};
             state.query = { page: 1, filter: 'all', sort: 'recent', search: '' };
             state.trashPage = 1;
+            state.selected.clear();
+            state.detailId = null;
+            $('detail').hidden = true;
 
             applyStrings();
             setTab('vehicles');
@@ -713,6 +1010,8 @@ window.addEventListener('message', (event) => {
             state.open = false;
             $('root').hidden = true;
             $('modal').hidden = true;
+            $('detail').hidden = true;
+            state.selected.clear();
             clearInterval(state.refreshTimer);
             clearTimeout(state.searchTimer);
             state.modalResolve = null;
@@ -742,6 +1041,11 @@ window.addEventListener('message', (event) => {
 
         case 'cleanup': {
             renderCleanup(message.data);
+            break;
+        }
+
+        case 'detail': {
+            renderDetail(message.data);
             break;
         }
 

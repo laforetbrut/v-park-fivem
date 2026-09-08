@@ -78,14 +78,25 @@
                 <button id="refresh" class="btn" type="button">&#8635;</button>
             </div>
 
+            <!--
+                The selection bar. Hidden until something is selected, so it costs no vertical
+                space in the ordinary case of an admin looking something up.
+            -->
+            <div id="bulkbar" hidden>
+                <span id="bulk-count">0 selected</span>
+                <div id="bulk-actions"></div>
+                <button id="bulk-clear" class="btn" type="button">Clear</button>
+            </div>
+
             <div id="table-wrap">
                 <table id="table">
                     <thead>
                         <tr>
-                            <th class="col-vehicle">Vehicle</th>
+                            <th class="col-pick"><input id="pick-all" type="checkbox"></th>
+                            <th class="col-vehicle" data-sort="model">Vehicle</th>
                             <th class="col-owner">Owner</th>
-                            <th class="col-where">Where</th>
-                            <th class="col-state">State</th>
+                            <th class="col-where" data-sort="distance">Where</th>
+                            <th class="col-state" data-sort="idle">State</th>
                             <th class="col-actions">Actions</th>
                         </tr>
                     </thead>
@@ -99,6 +110,7 @@
                 <button id="prev" class="btn" type="button">&#8592;</button>
                 <span id="page-label">Page 1 of 1</span>
                 <button id="next" class="btn" type="button">&#8594;</button>
+                <span id="shortcuts"></span>
                 <span id="total-label" class="pager-total">0 total</span>
             </footer>
         </section>
@@ -152,6 +164,18 @@
 
         <!-- A single toast slot. Results replace each other rather than stacking. -->
         <div id="toast" hidden></div>
+
+        <!--
+            The detail view. A side sheet rather than a modal, so the list stays visible and an
+            admin can click straight through several vehicles without closing anything.
+        -->
+        <aside id="detail" hidden>
+            <header id="detail-head">
+                <h2 id="detail-title">Vehicle detail</h2>
+                <button id="detail-close" class="btn btn-close" type="button">&#10005;</button>
+            </header>
+            <div id="detail-body"></div>
+        </aside>
     </main>
 
     <!--

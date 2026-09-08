@@ -440,7 +440,33 @@ Config.Persistence = {
     -- 45 seconds says "they left it there".
     --
     -- Set to 0 to persist the moment a player leaves the vehicle.
+    --
+    -- IT DOES NOT APPLY TO OWNED VEHICLES. See `ownedImmediately` directly below.
     settleSeconds = 45,
+
+    --[[
+        A vehicle the framework says somebody OWNS is kept the moment they get into it.
+
+        No settle timer, no command, no waiting for them to walk away. It is theirs; it is
+        kept. That is the whole rule.
+
+        WHY THIS IS SEPARATE FROM `settleSeconds`. The settle timer answers "did they leave
+        it there or are they coming back", which is a real question for a car nobody owns -
+        the alternative is every vehicle a player steps out of at a red light becoming a
+        permanent fixture of the map.
+
+        It is not a question at all for a car that is already in the player's garage list.
+        That car is theirs whether they walk away or not, and making them wait forty-five
+        seconds for it to be kept means a player who takes their car out and disconnects
+        thirty seconds later loses it. Which is exactly the case where losing it hurts most.
+
+        The check is one indexed lookup against the framework's owned-vehicles table, on
+        entry, once per vehicle. A vehicle that is not owned falls through to the settle
+        timer as before.
+
+        Turn it off only if you genuinely want owned vehicles to wait as well.
+    ]]
+    ownedImmediately = true,
 
     -- Also persist a vehicle the moment its driver disconnects, without waiting for
     -- `settleSeconds`.
@@ -1105,6 +1131,20 @@ Config.Streaming = {
     -- Leave true. False means an instanced apartment full of vehicles streams into the main
     -- world, which is exactly the bug this setting exists to prevent.
     matchRoutingBucket = true,
+
+    -- Seconds between reconciliation sweeps.
+    --
+    -- The sweep deletes vehicles in the world that carry one of our ids and are not the entity
+    -- we have registered for that id: orphans nothing else will ever collect, and duplicate
+    -- copies of a vehicle we already have.
+    --
+    -- It exists because `entity.orphanMode` below tells the engine NOT to collect an entity
+    -- nobody is near, which is correct and which means anything we lose track of is ours to
+    -- find again. 30 seconds is cheap - one pass over the server's vehicle list - and is the
+    -- difference between one stray vehicle and a car park full of them.
+    --
+    -- 0 disables it. Do not, unless orphanMode is also off.
+    reconcileInterval = 30,
 
     -- Server-side entity settings, applied to every vehicle we create.
     entity = {

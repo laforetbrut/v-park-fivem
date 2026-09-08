@@ -152,6 +152,7 @@ RegisterNetEvent('vpark:client:forget', function(id)
 
     if record.entity and DoesEntityExist(record.entity) then
         Deformation.clear(record.entity)
+        Properties.forget(record.entity)
     end
 
     if record.netId then byNet[record.netId] = nil end
@@ -253,6 +254,9 @@ CreateThread(function()
                         if Placement.wake(record.entity) then
                             record.frozen = false
                             record.awaySince = nil
+                            -- Awake means it can move and be damaged again, so it is worth
+                            -- capturing again.
+                            record.captureClean = false
                         end
                     elseif shouldSleep(record, playerPosition) then
                         if Placement.sleep(record.entity) then
@@ -294,8 +298,9 @@ AddEventHandler('gameEventTriggered', function(name, args)
     if not id then return end
 
     local record = tracked[id]
-    if record and record.frozen then
-        if Placement.wake(vehicle) then
+    if record then
+        record.captureClean = false
+        if record.frozen and Placement.wake(vehicle) then
             record.frozen = false
         end
     end
@@ -321,8 +326,9 @@ AddEventHandler('gameEventTriggered', function(name, args)
     if not id then return end
 
     local record = tracked[id]
-    if record and record.frozen then
-        if Placement.wake(victim) then
+    if record then
+        record.captureClean = false
+        if record.frozen and Placement.wake(victim) then
             record.frozen = false
         end
     end
@@ -363,9 +369,39 @@ end
     `Deformation.shouldRecapture` - and the record's `restoredHealth` is what that decision is
     made against.
 ]]
+--[[
+    Mark a tracked vehicle as worth capturing again.
+
+    Called when anything happens that could change it: a player entering it, damage, a wake, an
+    admin action. Everything else leaves it clean.
+]]
+function Stream.dirty(id)
+    local record = tracked[id]
+    if record then record.captureClean = false end
+end
+
 function Stream.snapshot(id)
     local record = tracked[id]
     if not record or not record.entity or not DoesEntityExist(record.entity) then return nil end
+
+    --[[
+        THE BIGGEST SAVING IN THE RESOURCE, AND THE SIMPLEST.
+
+        A frozen vehicle is not simulated. Nothing can move it, nothing can damage it, and
+        nobody can be inside it - the wake triggers fire before any of that is possible. So a
+        frozen vehicle that has not been touched since its last capture is, provably, identical
+        to what the server already has.
+
+        Returning nil is not an error and not a failure: the server treats an absent snapshot
+        as "no news", which is exactly what this is. On a server whose persisted fleet is mostly
+        parked, this is most of the sweep cost gone - not reduced, gone.
+
+        `captureClean` is cleared by `Stream.dirty`, which every wake, entry and damage handler
+        calls.
+    ]]
+    if record.frozen and record.captureClean then
+        return nil
+    end
 
     local entity = record.entity
     local properties = Properties.capture(entity)
@@ -377,6 +413,9 @@ function Stream.snapshot(id)
 
     local position = GetEntityCoords(entity)
     local rotation = GetEntityRotation(entity, 2)
+
+    -- Clean until something touches it again.
+    record.captureClean = true
 
     return {
         id = id,

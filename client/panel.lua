@@ -90,6 +90,11 @@ RegisterNetEvent('vpark:client:panelCleanup', function(report)
     send({ action = 'cleanup', data = report })
 end)
 
+RegisterNetEvent('vpark:client:panelDetail', function(detail)
+    if not open then return end
+    send({ action = 'detail', data = detail })
+end)
+
 -- ---------------------------------------------------------------------------------------
 -- Callbacks from the page
 -- ---------------------------------------------------------------------------------------
@@ -129,6 +134,28 @@ end)
 RegisterNUICallback('cleanupPreview', function(_, cb)
     TriggerServerEvent('vpark:server:panelCleanupPreview')
     cb({ ok = true })
+end)
+
+--[[
+    One action across a selection.
+
+    The ids are sent as they came from the page, and the server validates every one of them and
+    caps the count. Nothing here decides anything - see the header of `server/panel.lua`.
+]]
+RegisterNUICallback('bulk', function(data, cb)
+    cb({ ok = true })
+
+    if type(data) ~= 'table' or type(data.action) ~= 'string' or type(data.ids) ~= 'table' then
+        return
+    end
+
+    TriggerServerEvent('vpark:server:panelBulk', data.action, data.ids, data.value)
+end)
+
+RegisterNUICallback('detail', function(data, cb)
+    cb({ ok = true })
+    if type(data) ~= 'table' or type(data.id) ~= 'string' then return end
+    TriggerServerEvent('vpark:server:panelDetail', data.id)
 end)
 
 --[[
@@ -201,6 +228,7 @@ function Panel.strings()
         'panel.filter_all', 'panel.filter_near', 'panel.filter_live', 'panel.filter_idle',
         'panel.filter_wrecked', 'panel.filter_semi', 'panel.filter_owned', 'panel.filter_job',
         'panel.filter_unowned', 'panel.filter_broken',
+        'panel.filter_online', 'panel.filter_offline',
         'panel.sort_recent', 'panel.sort_distance', 'panel.sort_idle', 'panel.sort_plate',
         'panel.sort_model',
         'panel.col_vehicle', 'panel.col_owner', 'panel.col_where', 'panel.col_state',
@@ -217,6 +245,16 @@ function Panel.strings()
         'panel.rename_prompt', 'panel.owner_prompt', 'panel.refuel_prompt',
         'panel.summary_total', 'panel.summary_live', 'panel.summary_pending',
         'panel.grace', 'panel.idle', 'panel.never_used',
+
+        -- 1.0.1: selection, bulk actions and the detail view.
+        'panel.act_detail', 'panel.selected', 'panel.select_all', 'panel.clear_selection',
+        'panel.bulk_done', 'panel.bulk_too_many', 'panel.confirm_bulk',
+        'panel.owner_online', 'panel.owner_offline',
+        'panel.detail_title', 'panel.detail_fitted', 'panel.detail_damage',
+        'panel.detail_timing', 'panel.detail_colours', 'panel.detail_none',
+        'panel.detail_created', 'panel.detail_updated', 'panel.detail_touched',
+        'panel.detail_used', 'panel.detail_source', 'panel.detail_netid',
+        'panel.matched', 'panel.shortcuts',
     }
 
     local out = {}

@@ -41,6 +41,11 @@ local pending = {}
 -- ids that failed placement in a way that says "try again later" rather than "give up".
 local deferred = {}
 
+-- id -> consecutive creation failures. Cleared on the first success. A vehicle that cannot be
+-- created five times running is not going to be created on the sixth, and retrying it every
+-- second forever is how one bad row fills a console.
+local failures = {}
+
 local stats = {
     spawned = 0,
     despawned = 0,
@@ -51,6 +56,7 @@ local stats = {
     grounded = 0,
     passes = 0,
     lastPassMs = 0,
+    reconciled = 0,
 }
 
 local function streaming()
@@ -190,6 +196,9 @@ function Spawn.create(record, players)
     if Store.isLive(record.id) then return nil end
     if pending[record.id] then return nil end
 
+    -- Nominated BEFORE anything is created. An early return after `CreateVehicle` has to
+    -- delete what it made, and the cheapest way not to get that wrong is to have nothing to
+    -- delete.
     local placer = nominate(record, players or onlinePlayers())
     if not placer then return nil end
 
@@ -201,11 +210,56 @@ function Spawn.create(record, players)
         true    -- script-owned, so the engine does not treat it as ambient
     )
 
-    if not entity or entity == 0 or not DoesEntityExist(entity) then
-        Park.warn('could not create vehicle %s (model %s)', record.id, tostring(record.model_name or record.model))
+    --[[
+        A HANDLE OF ZERO IS THE ONLY FAILURE. `DoesEntityExist` IS NOT ASKED HERE.
+
+        This is the bug that multiplied vehicles across a live server, and it is worth stating
+        exactly.
+
+        `CreateVehicle` returns a handle immediately, but the entity is not registered
+        synchronously: `DoesEntityExist` on that handle answers FALSE for a tick or two
+        afterwards. The first version treated that as a failed creation, logged a warning, and
+        returned - WITHOUT DELETING the entity it had just successfully created.
+
+        So every pass created another one. And because `SetEntityOrphanMode(entity, 2)` tells
+        the engine to keep an entity nobody is near, none of them were ever collected. The
+        server filled with copies of the same car until it hit its entity limit, at which point
+        `CreateVehicle` really did start returning zero and the console filled with
+
+            WARN: could not create vehicle 0TL0UEP01QT7G (model BISON)
+
+        several times a second. The warning was true by then; it was a symptom, not the cause.
+
+        A zero handle is a genuine failure and nothing was created. Anything else IS created and
+        is ours to manage - including ours to delete if we then decide not to keep it, which is
+        what every early return below does.
+    ]]
+    if not entity or entity == 0 then
+        failures[record.id] = (failures[record.id] or 0) + 1
         stats.failed = stats.failed + 1
+
+        -- Logged once per vehicle rather than once per attempt. The old code warned on every
+        -- pass, which on a full entity pool is a wall of identical lines that hides the one
+        -- line that would have explained it.
+        if failures[record.id] == 1 then
+            Park.warn('could not create vehicle %s (model %s)',
+                record.id, tostring(record.model_name or record.model))
+        end
+
+        if failures[record.id] >= 5 then
+            Park.error('%s (%s) failed to create %d times - it will not be retried this session',
+                record.id, tostring(record.model_name or record.model), failures[record.id])
+            Park.error('the usual causes are an entity limit already reached, or a model this build does not have')
+            record.invalidModel = true
+        end
+
+        -- Back off regardless. Retrying the same creation on the very next pass, every pass,
+        -- is how a single failing vehicle becomes a wall of console output.
+        deferred[record.id] = Park.ticks() + 10000
         return nil
     end
+
+    failures[record.id] = nil
 
     -- Everything the server can set, set before any client is told about it.
     SetEntityRoutingBucket(entity, record.bucket or 0)
@@ -228,6 +282,23 @@ function Spawn.create(record, players)
     end
 
     local netId = NetworkGetNetworkIdFromEntity(entity)
+
+    --[[
+        No network id, no way for a client to find it.
+
+        The restore instruction is addressed by network id, so an entity without one can never
+        be dressed or placed - it would sit in the world as an undressed, unplaced copy that
+        nothing owns. That is the same shape as the duplication bug, so it gets the same
+        answer: delete what we made and report it, rather than leaving it behind.
+    ]]
+    if not netId or netId == 0 then
+        Park.warn('%s was created but has no network id - removing it', record.id)
+        DeleteEntity(entity)
+        stats.failed = stats.failed + 1
+        deferred[record.id] = Park.ticks() + 10000
+        return nil
+    end
+
     local state = Entity(entity).state
 
     -- The id is replicated to everybody in scope. It is how a client knows this entity is
@@ -475,8 +546,18 @@ local function pass()
     local spawnBudget = tonumber(streaming().spawnsPerPass) or 6
     local created = 0
 
+    --[[
+        `attempted`, not `created`.
+
+        The budget used to count successes, so a pass in which every creation FAILED counted
+        zero and carried on down the whole candidate list - hundreds of attempts per second,
+        each one logging. Counting attempts means a pass costs at most `spawnsPerPass` calls
+        whether they work or not, which is what a budget is for.
+    ]]
+    local attempted = 0
+
     for _, record in ipairs(order) do
-        if created >= spawnBudget then break end
+        if attempted >= spawnBudget then break end
         if Park.ticks() - started > budget then break end
         if Store.liveCount() >= maximumEntities and maximumEntities > 0 then break end
 
@@ -486,6 +567,8 @@ local function pass()
             local retryAt = deferred[record.id]
             if not retryAt or Park.ticks() > retryAt then
                 deferred[record.id] = nil
+                attempted = attempted + 1
+
                 if Spawn.create(record, players) then
                     created = created + 1
                 end
@@ -622,6 +705,101 @@ RegisterNetEvent('vpark:server:touched', function(id, used)
         Database.thread(function()
             Database.execute(sql, params)
         end)
+    end
+end)
+
+--[[
+    Delete every vehicle in the world that carries one of our ids and is not the entity we
+    have registered for it.
+
+    -------------------------------------------------------------------------------------------
+    WHAT THIS IS FOR
+    -------------------------------------------------------------------------------------------
+
+    Two things, and the second is why it exists at all.
+
+    ORPHANS. An entity we created and then lost track of - because a creation was misjudged as
+    a failure, because a resource restart dropped the live table while the entities survived
+    `SetEntityOrphanMode(2)`, or because something else deleted our record and not our entity.
+    Nothing else will ever collect these: orphan mode is precisely an instruction not to.
+
+    DUPLICATES. Several entities carrying the SAME `vpark:id`. That is the shape the
+    multiplication bug took, and it is the one an operator actually sees: four Bisons in one
+    parking space. The registered entity survives, every other copy goes.
+
+    It runs on its own slow timer and at boot, and it is cheap: one pass over the server's
+    vehicle list, a statebag read each. On a server with four hundred vehicles that is four
+    hundred reads every thirty seconds.
+]]
+function Spawn.reconcile()
+    if not GetAllVehicles then return 0 end
+
+    local ok, all = pcall(GetAllVehicles)
+    if not ok or type(all) ~= 'table' then return 0 end
+
+    local removed = 0
+    local duplicates = 0
+    local orphans = 0
+
+    for index = 1, #all do
+        local entity = all[index]
+
+        if entity and entity ~= 0 and DoesEntityExist(entity) then
+            local id
+            local read = pcall(function() id = Entity(entity).state['vpark:id'] end)
+
+            if read and type(id) == 'string' then
+                local record = Store.get(id)
+                local live = Store.live(id)
+
+                if not record then
+                    -- Ours by its statebag, unknown to the store. Nothing will ever claim it.
+                    orphans = orphans + 1
+                    DeleteEntity(entity)
+                    removed = removed + 1
+
+                elseif not live then
+                    -- The record exists but we have no entity registered for it, so this one
+                    -- is left over. Adopting it would be tempting and wrong: it has not been
+                    -- dressed or placed, and we cannot tell whether it ever was.
+                    orphans = orphans + 1
+                    DeleteEntity(entity)
+                    removed = removed + 1
+
+                elseif live.entity ~= entity then
+                    -- A second copy of a vehicle we already have. THE ONE AN OPERATOR SEES.
+                    duplicates = duplicates + 1
+                    DeleteEntity(entity)
+                    removed = removed + 1
+                end
+            end
+        end
+
+        -- Yield periodically. A server at its entity limit has a long list here, and this
+        -- runs on a timer rather than in response to anything urgent.
+        if index % 200 == 0 then Wait(0) end
+    end
+
+    if removed > 0 then
+        Park.warn('reconciliation removed %d stray vehicle(s): %d orphan(s), %d duplicate(s)',
+            removed, orphans, duplicates)
+        stats.reconciled = (stats.reconciled or 0) + removed
+    end
+
+    return removed
+end
+
+CreateThread(function()
+    while not Runtime.ready() do Wait(500) end
+
+    -- Once at boot, before the first streaming pass, so a restart that left entities behind
+    -- starts clean rather than adding to them.
+    Wait(2000)
+    pcall(Spawn.reconcile)
+
+    while true do
+        Wait((tonumber(streaming().reconcileInterval) or 30) * 1000)
+        pcall(Spawn.reconcile)
     end
 end)
 

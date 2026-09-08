@@ -39,6 +39,9 @@ what it found, and changes nothing until you say so.
 - **Vehicles stay where they were left.** Across a resource restart, a server restart, and a
   crash. Position, rotation, modifications, colours, damage, fuel, dirt, plate, extras, neons,
   livery and lock state.
+- **A player's own car is kept from the moment they get in.** No command, no waiting. If the
+  framework says it is theirs, it is kept - which matters most in the case that used to lose
+  it: taking the car out and disconnecting a minute later.
 - **They come back in the SAME SPACE.** A four-stage placement engine handles the tight cases:
   underground car parks, single-car garages, alleyways, MLO interiors, multi-storey ramps. It
   is the section of the config worth reading, and it has its own heading below.
@@ -75,7 +78,7 @@ else. **Four separate mechanisms move it**, and each needs a different answer:
 | # | What moves it | The answer here |
 |---|---|---|
 | 1 | **Collision is not loaded yet.** The entity is created before the map streams in, so it falls, and by the time the ground arrives it is under it. The engine pops it out - into the road, usually. | Create it frozen and with collision off, wait for `HasCollisionLoadedAroundEntity`, then hand physics back. |
-| 2 | **Something is already there.** Ambient traffic spawns while the server is empty and the game parks an NPC car exactly where the player left theirs. | Probe the target volume before placing, and clear only vehicles that are provably disposable - empty, unowned, not ours, not a mission entity. Then suppress traffic generation there for a few seconds. |
+| 2 | **Something is already there.** Ambient traffic spawns while the server is empty and the game parks an NPC car exactly where the player left theirs. | Probe the target volume before placing - the entity pool for vehicles, six perimeter rays for the world - and clear only vehicles that are provably disposable: empty, unowned, not ours, not a mission entity. Then suppress traffic generation there for a few seconds. |
 | 3 | **The engine ground-snaps it.** `SetVehicleOnGroundProperly` probes downwards, finds the level below in a car park, and drops the car through the floor. | Never call it. Place with `SetEntityCoordsNoOffset` at the exact saved Z, and consult the ground only when the saved Z is provably wrong - more than 1.5 m *below* it. |
 | 4 | **It is in an interior.** An entity at MLO coordinates without being told which room renders through the wall or falls to the world below. | Store the interior and the room key, and force them on restore. |
 
@@ -116,6 +119,12 @@ Everything below is detected at runtime and optional. **Nothing is required exce
 **OneSync is required** and it is checked at boot. Server-created entities do not exist without
 it, and a persistence resource that quietly keeps a per-client fiction is worse than one that
 refuses to start. `Config.General.requireOneSync = false` if you know exactly why.
+
+> **On a txAdmin server, OneSync is set in the txAdmin settings page, not in `server.cfg`.**
+> txAdmin's config validator comments the line out on every start and leaves a note saying so,
+> which means the obvious place to put it is the one place it does not work. If v-park says
+> OneSync is switched off on a server you believe has it on, that is why. Check the txAdmin
+> settings page.
 
 ### What differs by framework
 
@@ -220,11 +229,22 @@ resource. Rename any of them in `Config.Commands`; set `enabled = false` to remo
 and paints nothing while it is closed - a player who never runs the command never loads it.
 
 - **Search** by plate, model, owner name, owner id or vehicle id.
-- **Filter**: near me, in world, idle, wrecked, semi-persistent, owned, job, unowned, missing
-  model.
-- **Sort**: most recent, nearest, longest idle, plate, model.
-- **Per row**: go to it, bring it here, drop a waypoint, and behind the overflow menu - repair,
-  clean, refuel, unlock, rename, set owner, send to a garage, impound, delete.
+- **Filter**: near me, in world, idle, wrecked, semi-persistent, owned, job, unowned, **owner
+  online**, **owner offline**, missing model.
+- **Sort**: most recent, nearest, longest idle, plate, model - from the dropdown or by clicking
+  a column header.
+- **Per row**: go to it, bring it here, drop a waypoint, open its details, and behind the
+  overflow menu - repair, clean, refuel, unlock, rename, set owner, send to a garage, impound,
+  delete.
+- **Select and act in bulk.** Tick rows, or press `A` for the whole page, and repair, clean,
+  refuel, unlock, send to a garage, impound or delete the lot in one action with one
+  confirmation. Capped at 100 and **refused rather than truncated** past that, because a
+  truncated bulk action is the worst outcome: the operator believes it all happened.
+- **A detail view** as a side sheet, so the list stays visible: every fitted part, the colours,
+  the damage breakdown including the deformation point count, the network id, and the four
+  timestamps that decide when the vehicle expires.
+- **Keyboard**: `/` search, `R` refresh, `A` select page, arrows to page, `ESC` to back out one
+  level at a time.
 - **Trash tab**: everything removed in the last week, with who removed it and why, and a
   restore button that rebuilds the vehicle exactly - modifications, damage and dents included.
 - **Cleanup tab**: exactly which vehicles the idle sweep would move and where to, before it
@@ -351,21 +371,30 @@ restored vehicle is not re-captured until its body health actually moves.
 
 ## Performance
 
-The design, in three sentences:
+The design, in four sentences:
 
 - **Nothing is spawned until somebody is near it.** One grid lookup per player per second, not
   a scan. Five thousand rows and one player is about thirty entities.
 - **A vehicle is written when it changed and not otherwise.** Every record carries an FNV-1a
   hash of its own state; a parked car does not change, so a server with three thousand parked
   cars writes zero rows a minute.
+- **A parked vehicle is not even read.** A frozen vehicle cannot move, cannot be damaged and
+  cannot be occupied, so one that has not been touched since its last capture is provably
+  identical to what the server already has - and the client sends nothing at all for it. On a
+  fleet that is mostly parked, that is most of the sweep gone rather than reduced.
 - **A frozen entity is not simulated.** With `freezeUntilTouched` on, the restored fleet at
   rest costs the client almost nothing.
 
 Beyond that: the save sweep is sliced into quarters so the cost is a trickle rather than a
-sawtooth; writes are batched into one upsert per 200 vehicles inside a transaction; the client
-has **one** timer whose interval comes from how far the nearest tracked vehicle is (200 ms in a
-car park, 2 s in an empty field); and there is no `Wait(0)` in the client code outside a
-placement in progress and the debug overlay.
+sawtooth; the expensive half of a capture - seventy-five native calls of mod slots, colours,
+extras and neons - is cached against a twelve-call fingerprint and re-read only when somebody
+has actually fitted something; writes are batched into one upsert per 200 vehicles inside a
+transaction; the semi-persistence sweep walks an ownership index rather than the whole store;
+a placement takes one snapshot of the vehicle pool and every probe reads from it; the spiral
+search starts all of its shape tests before reading any of them, so forty-five candidates cost
+one frame rather than forty-five; the client has **one** timer whose interval comes from how far
+the nearest tracked vehicle is (200 ms in a car park, 2 s in an empty field); and there is no
+`Wait(0)` in the client code outside a placement in progress and the debug overlay.
 
 `/vparkstats` prints what it is actually costing you, which beats any number written here.
 
@@ -469,6 +498,13 @@ webhooks off, after which the next real error goes unread for a fortnight.
   `GetVehicleDeformationAtPos`; putting a shape back is a search, and it reproduces damage that
   *reads* as the same, not the same vertices. `recaptureDelta` stops that compounding over
   repeated save cycles, and it is why re-capture is guarded rather than continuous.
+
+- **The world probe traces the footprint's perimeter, not its volume.** Six rays: the four sides
+  at body height and the two diagonals. An obstacle floating entirely inside the footprint
+  without touching a side or a diagonal is missed - which for a vehicle-sized volume is a very
+  small object in a very particular place, and the settle watch catches the consequence anyway.
+  This replaced a box shape test in 1.0.1, whose size arguments are undocumented; rays are two
+  points and have no interpretation to get wrong.
 - **A blocked space with no free spot nearby ends in an intersection.** With the default
   `fallback = 'place'` the vehicle goes exactly where it was, frozen, possibly clipping
   geometry. That is deliberate - see the tight-space section - but it is a trade, not a
@@ -536,6 +572,9 @@ y a trouvé, et ne change rien tant que vous ne le demandez pas.
   joueur connecté, cela fait une trentaine d'entités dans le monde. Le reste, ce sont des lignes.
 - **Les déformations sont sauvegardées et synchronisées.** Les bosses reviennent, et tous les
   joueurs voient les mêmes, ce que le moteur ne garantit pas autrement.
+- **La voiture d'un joueur est conservée dès qu'il monte dedans.** Aucune commande, aucune
+  attente. Si le framework dit qu'elle lui appartient, elle est conservée : c'est justement le
+  cas qui la faisait perdre avant, sortir sa voiture et se déconnecter une minute plus tard.
 - **Semi-persistance des véhicules de métier et de location.** Une voiture de police survit au
   redémarrage de 06h00 parce que l'agent est toujours en service, et disparaît 45 minutes après
   sa déconnexion. Le temps d'arrêt du serveur ne compte pas dans ce décompte.
@@ -578,7 +617,10 @@ qu'on règle `Config.Placement.probe.shrink` sur son propre MLO au lieu de devin
 
 1. Placez `v-park` dans `resources/`.
 2. `ensure v-park` dans `server.cfg`, **après** votre framework et après oxmysql.
-3. Vérifiez que OneSync est activé.
+3. Vérifiez que OneSync est activé. **Sur un serveur txAdmin, OneSync se règle dans la page de
+   paramètres txAdmin, pas dans `server.cfg`** : le validateur de txAdmin commente la ligne à
+   chaque démarrage. Si v-park dit que OneSync est désactivé alors que vous croyez l'avoir
+   activé, c'est là qu'il faut regarder.
 4. Donnez-vous la permission : `add_ace group.admin vpark.admin allow`
 5. Facultatif, dans `server.cfg` et **pas** dans `config.lua` :
    `set vpark_webhook_errors "https://discord.com/api/webhooks/..."`

@@ -26,6 +26,12 @@
         byPlate     plate -> id. For matching against framework-owned vehicles and for
                     every command that takes a plate.
         byOwner     owner -> set of ids. For per-player limits and `/vparklist`.
+        byType      ownership kind -> set of ids. For the sweeps and the panel's filters.
+
+    `byType` was added in 1.0.1. The semi-persistence sweep runs every minute and only ever
+    cares about two kinds; without the index it walked every row in the store to find them,
+    which on a twenty-thousand vehicle server is twenty thousand iterations a minute to look at
+    perhaps forty vehicles.
 
     Every write goes through `Store.index` and `Store.unindex` so the four cannot drift apart.
     That is the entire reason those two functions exist rather than each caller updating what
@@ -38,6 +44,7 @@ local vehicles = {}
 local cells = {}
 local byPlate = {}
 local byOwner = {}
+local byType = {}
 
 local count = 0
 
@@ -86,6 +93,15 @@ local function index(record)
         end
         owned[record.id] = true
     end
+
+    local kind = record.owner_type or 'unowned'
+    local typed = byType[kind]
+    if not typed then
+        typed = {}
+        byType[kind] = typed
+    end
+    typed[record.id] = true
+    record.indexedType = kind
 end
 
 local function unindex(record)
@@ -105,6 +121,13 @@ local function unindex(record)
             owned[record.id] = nil
             if next(owned) == nil then byOwner[record.owner] = nil end
         end
+    end
+
+    -- `indexedType` and not `owner_type`: a record whose kind has just been changed must be
+    -- removed from the set it is actually IN, not from the one it is moving to.
+    local typed = byType[record.indexedType or record.owner_type or 'unowned']
+    if typed then
+        typed[record.id] = nil
     end
 end
 
@@ -302,6 +325,39 @@ function Store.countOwnedBy(owner)
 end
 
 --[[
+    Every record of a given ownership kind.
+
+    What the semi-persistence sweep walks instead of the whole store, and what the panel's
+    ownership filters use. `kinds` is a list, so the sweep asks for `{ 'job', 'rental' }` in one
+    call rather than iterating twenty thousand rows to find forty.
+]]
+function Store.ofTypes(kinds)
+    local out = {}
+    local count = 0
+
+    for _, kind in ipairs(kinds) do
+        local typed = byType[kind]
+        if typed then
+            for id in pairs(typed) do
+                local record = vehicles[id]
+                if record then
+                    count = count + 1
+                    out[count] = record
+                end
+            end
+        end
+    end
+
+    return out, count
+end
+
+function Store.countOfType(kind)
+    local typed = byType[kind]
+    if not typed then return 0 end
+    return Park.count(typed)
+end
+
+--[[
     Resolve a vehicle from whatever an operator typed.
 
     An id, a plate, or the id of a vehicle the player is looking at - handled by the caller.
@@ -427,6 +483,7 @@ function Store.update(id, patch)
     if patch.pos_x ~= nil or patch.pos_y ~= nil then reindex = true end
     if patch.plate ~= nil and patch.plate ~= record.plate then reindex = true end
     if patch.owner ~= nil and patch.owner ~= record.owner then reindex = true end
+    if patch.owner_type ~= nil and patch.owner_type ~= record.owner_type then reindex = true end
 
     if reindex then unindex(record) end
 

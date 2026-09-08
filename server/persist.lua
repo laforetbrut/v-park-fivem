@@ -82,6 +82,34 @@ RegisterNetEvent('vpark:server:candidate', function(payload)
     if type(payload) ~= 'table' then return end
     if not Runtime.ready() then return end
 
+    --[[
+        An ON-ENTRY offer is accepted only for a vehicle the framework says is OWNED.
+
+        The client sends one the moment a player sits in a vehicle it does not already know
+        about. Accepting all of them would make the settle timer meaningless - every car
+        anybody touches would be kept instantly, including the one they hopped into at a red
+        light.
+
+        So the server checks the owned-vehicles table and ignores the offer otherwise. The
+        vehicle still goes through the ordinary settle path when they get out.
+
+        `Config.Persistence.ownedImmediately` is the switch, and the client already honours it
+        before sending; this is the same check on the side that decides.
+    ]]
+    if payload.onEntry then
+        if not (Config.Persistence and Config.Persistence.ownedImmediately ~= false) then return end
+
+        local plate = Park.plate(payload.plate)
+        if not plate then return end
+
+        local row = Bridge.ownedByPlate(plate)
+        if not row or not row.owner then return end
+
+        -- Owned and out of the garage. Keep it now.
+        Persist.adopt(src, payload)
+        return
+    end
+
     Persist.adopt(src, payload)
 end)
 

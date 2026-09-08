@@ -221,7 +221,8 @@ Locale.register('en', {
     ['probe.free']         = 'The space is free. A vehicle would be placed exactly here.',
     ['probe.blocked']      = 'The space is blocked by %s. The console has the detail.',
 
-    ['admin.usage']        = 'usage: admin | admin garages | admin cleanup preview | admin cleanup run',
+    ['reconcile.done']       = 'Removed %d stray vehicle(s) from the world.',
+    ['admin.usage']        = 'usage: admin | admin garages | admin reconcile | admin cleanup preview | admin cleanup run',
 
     -- ---------------------------------------------------------------------------------
     -- The panel
@@ -297,6 +298,37 @@ Locale.register('en', {
     ['panel.summary_total']   = 'Kept',
     ['panel.summary_live']    = 'In world',
     ['panel.summary_pending'] = 'Pending write',
+
+    ['panel.filter_online']  = 'Owner online',
+    ['panel.filter_offline'] = 'Owner offline',
+
+    ['panel.act_detail']     = 'Details',
+
+    ['panel.selected']       = '%d selected',
+    ['panel.select_all']     = 'Select page',
+    ['panel.clear_selection']= 'Clear',
+    ['panel.bulk_done']      = '%d done, %d failed.',
+    ['panel.bulk_too_many']  = 'Select at most %d vehicles at a time.',
+    ['panel.confirm_bulk']   = 'Apply "%s" to %d selected vehicles?',
+
+    ['panel.owner_online']   = 'online',
+    ['panel.owner_offline']  = 'offline',
+
+    ['panel.detail_title']   = 'Vehicle detail',
+    ['panel.detail_fitted']  = 'Fitted',
+    ['panel.detail_damage']  = 'Damage',
+    ['panel.detail_timing']  = 'Timing',
+    ['panel.detail_colours'] = 'Colours',
+    ['panel.detail_none']    = 'Nothing recorded.',
+    ['panel.detail_created'] = 'Created',
+    ['panel.detail_updated'] = 'Written',
+    ['panel.detail_touched'] = 'Touched',
+    ['panel.detail_used']    = 'Last driven',
+    ['panel.detail_source']  = 'Source',
+    ['panel.detail_netid']   = 'Network id',
+
+    ['panel.matched']        = 'matched',
+    ['panel.shortcuts']      = 'Shortcuts: / search, R refresh, A select page, ESC close',
 
     ['panel.grace']      = 'Goes in',
     ['panel.idle']       = 'Idle',

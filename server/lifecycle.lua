@@ -367,7 +367,26 @@ function Lifecycle.sweepSemi()
     local removed = 0
     local seen = 0
 
-    for id, record in pairs(Store.all()) do
+    --[[
+        Only the semi-persistent kinds, from the ownership index.
+
+        Before 1.0.1 this walked the entire store once a minute to find the handful of rows it
+        cares about. On a server with twenty thousand vehicles and forty cruisers, that was
+        twenty thousand iterations a minute for forty answers.
+    ]]
+    local kinds = {}
+    for kind, rules in pairs(config.types or {}) do
+        if type(rules) == 'table' and rules.enabled ~= false then
+            kinds[#kinds + 1] = kind
+        end
+    end
+
+    if #kinds == 0 then return 0 end
+
+    local candidates = Store.ofTypes(kinds)
+
+    for _, record in ipairs(candidates) do
+        local id = record.id
         local rules = Lifecycle.semiRules(record.owner_type)
 
         if rules then
@@ -458,6 +477,7 @@ function Lifecycle.sweepSemi()
     end
 
     -- The counters are written on the ordinary flush cadence, not one statement per vehicle.
+    -- (see below)
     -- One indexed bulk update is cheaper than a thousand row writes, and losing a minute of
     -- counter to an unclean shutdown costs a minute of grace nobody will notice.
     if seen > 0 and Database.available() then
@@ -485,16 +505,24 @@ function Lifecycle.persistCounters()
     local types = semiConfig().types
     if type(types) ~= 'table' then return end
 
+    local kinds = {}
+    for kind, rules in pairs(types) do
+        if type(rules) == 'table' and rules.enabled ~= false then
+            kinds[#kinds + 1] = kind
+        end
+    end
+
+    if #kinds == 0 then return end
+
     local resetIds = {}
     local advanced = {}
 
-    for id, record in pairs(Store.all()) do
-        if Lifecycle.semiRules(record.owner_type) then
-            if record.offline_secs == 0 then
-                resetIds[#resetIds + 1] = id
-            else
-                advanced[#advanced + 1] = { id, record.offline_secs }
-            end
+    -- The ownership index again, for the same reason as the sweep above.
+    for _, record in ipairs(Store.ofTypes(kinds)) do
+        if record.offline_secs == 0 then
+            resetIds[#resetIds + 1] = record.id
+        else
+            advanced[#advanced + 1] = { record.id, record.offline_secs }
         end
     end
 

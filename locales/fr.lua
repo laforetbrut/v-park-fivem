@@ -217,7 +217,8 @@ Locale.register('fr', {
     ['probe.free']         = "La place est libre. Un véhicule serait placé exactement ici.",
     ['probe.blocked']      = "La place est bloquée par %s. Le détail est dans la console.",
 
-    ['admin.usage']        = "utilisation : admin | admin garages | admin cleanup preview | admin cleanup run",
+    ['reconcile.done']       = "%d véhicule(s) parasite(s) retiré(s) du monde.",
+    ['admin.usage']        = "utilisation : admin | admin garages | admin reconcile | admin cleanup preview | admin cleanup run",
 
     -- ---------------------------------------------------------------------------------
     -- Le panneau
@@ -293,6 +294,37 @@ Locale.register('fr', {
     ['panel.summary_total']   = "Conservés",
     ['panel.summary_live']    = "Dans le monde",
     ['panel.summary_pending'] = "En attente d'écriture",
+
+    ['panel.filter_online']  = "Propriétaire connecté",
+    ['panel.filter_offline'] = "Propriétaire absent",
+
+    ['panel.act_detail']     = "Détails",
+
+    ['panel.selected']       = "%d sélectionné(s)",
+    ['panel.select_all']     = "Sélectionner la page",
+    ['panel.clear_selection']= "Effacer",
+    ['panel.bulk_done']      = "%d effectué(s), %d en échec.",
+    ['panel.bulk_too_many']  = "Sélectionnez au plus %d véhicules à la fois.",
+    ['panel.confirm_bulk']   = "Appliquer « %s » aux %d véhicules sélectionnés ?",
+
+    ['panel.owner_online']   = "connecté",
+    ['panel.owner_offline']  = "absent",
+
+    ['panel.detail_title']   = "Détail du véhicule",
+    ['panel.detail_fitted']  = "Équipements",
+    ['panel.detail_damage']  = "Dégâts",
+    ['panel.detail_timing']  = "Chronologie",
+    ['panel.detail_colours'] = "Couleurs",
+    ['panel.detail_none']    = "Rien d'enregistré.",
+    ['panel.detail_created'] = "Créé",
+    ['panel.detail_updated'] = "Écrit",
+    ['panel.detail_touched'] = "Contact",
+    ['panel.detail_used']    = "Dernière conduite",
+    ['panel.detail_source']  = "Origine",
+    ['panel.detail_netid']   = "Id réseau",
+
+    ['panel.matched']        = "correspondant(s)",
+    ['panel.shortcuts']      = "Raccourcis : / rechercher, R actualiser, A sélectionner la page, ÉCHAP fermer",
 
     ['panel.grace']      = "Part dans",
     ['panel.idle']       = "Inactif",
