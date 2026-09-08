@@ -8,6 +8,55 @@ out of it.
 
 ---
 
+## [2026-09-08 21:30] — Probing something that could not have changed
+
+**Context:** Reported after 1.0.7: "vehicles are still not in their place, or they float in the
+air, and yet they have space".
+
+**Error:** None. Two configuration defaults, each defensible on its own.
+
+**Root cause:** `Config.Placement.probe.blockedBy.world` was `true`, so the placement traced six
+rays through the map to decide whether the saved pose was free.
+
+**That question has a known answer.** The vehicle was parked at that exact pose, so the map
+allowed it, and the map has not changed. The probe could only ever return a false positive - and
+it did so constantly, because it runs at roughly forty centimetres above the road and a kerb, a
+camber, a speed bump or a garage threshold is taller than that.
+
+On its own that would have been a minor annoyance. `Config.Placement.search.verticalRetry` was
+`3.5`, and the search's candidate list is ordered by preference, with the vertical retries
+FIRST. So a kerb-side car reported blocked, and the first alternative offered was the same spot
+three and a half metres in the air - where nothing is ever in the way, so the probe called it
+clear. The vehicle was placed there, `freezeUntilTouched` froze it, and `result.moved` sent the
+airborne position back to the server to be written to the database.
+
+Nothing anywhere in the path would bring it down again: `groundCorrect` only ever pushed a
+buried vehicle UP.
+
+**Fix:** The world and object probes are off by default. The vertical retry is off - the
+multi-storey case it was written for stopped existing in 1.0.7, when restored vehicles began
+being frozen on arrival and could no longer be saved mid-fall. `groundCorrect` corrects
+downwards as well as upwards, using each model's own origin-to-ground distance, and runs again
+over whatever the search finally chose. `tools/check.py` fails the build if either default
+drifts back.
+
+**Prevention:**
+
+> **Before writing a check, ask what could make its answer change since the last time it was
+> true.**
+>
+> The world probe was the most carefully engineered part of this resource - six rays rather than
+> a box test, a shrink factor tuned against the tightest legitimate spaces in the base map, a
+> ray height chosen to clear the roofline in underground car parks. All of that work went into
+> answering a question that was already answered by the fact that the vehicle had been parked
+> there.
+>
+> And: **an ordered fallback list is a ranking of preferences, so the first entry had better be
+> the safest one.** "Three and a half metres up" was first because it was cheapest to test, not
+> because it was the outcome anybody would want.
+
+---
+
 ## [2026-09-08 19:10] — Writing to an entity before it was ours to write to
 
 **Context:** Reported after 1.0.6. The multiplication was gone and the vehicles were staying,

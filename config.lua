@@ -960,11 +960,46 @@ Config.Placement = {
         -- a car lift or under a garage door that has since closed.
         headroom = 0.15,
 
-        -- What counts as blocking. These are shape test flags, and each is a different class
-        -- of thing you may or may not want to move for.
+        --[[
+            What counts as blocking.
+
+            -------------------------------------------------------------------------------
+            THE MAP CANNOT HAVE CHANGED, SO IT IS NOT ASKED ABOUT. THIS IS THE POINT.
+            -------------------------------------------------------------------------------
+
+            A vehicle was parked at this exact pose. The map allowed it then, and the map is
+            byte for byte the same map now. Testing world geometry can therefore only ever
+            produce a FALSE POSITIVE - and every false positive moves a car that was fine.
+
+            The false positives are not rare. The probe traces the vehicle's footprint at
+            roughly forty centimetres above the road, and a kerb, a sloped driveway, a speed
+            bump or a garage threshold is taller than that. Every car parked against a kerb
+            reported blocked.
+
+            What that cost, before 1.0.8: blocked sent the placement to the search, and the
+            search's first candidate was the saved position three and a half metres higher.
+            Nothing is in the way three and a half metres up, so the probe said clear, the car
+            was placed there, frozen, and the airborne position was saved. Permanently. That is
+            the "vehicles floating in the air even though they have space" report, and both
+            settings had to be wrong for it to happen.
+
+            `objects` is off for the same reason as `world` at a lower confidence: a prop
+            genuinely can appear where one was not before, but a car overlapping a wheelie bin
+            resolves itself the moment somebody drives it, and a car three metres in the air
+            never resolves at all. The asymmetry decides it.
+
+            VEHICLES ARE THE ONE THING THAT REALLY DOES CHANGE. Ambient traffic parks in the
+            bay while the server is empty; another player leaves a car on the spot. Those are
+            worth detecting, and they are handled through the entity pool rather than a shape
+            test - which is what makes it possible to delete a disposable one and refuse to
+            touch a player's.
+
+            Turn `world` back on if you have a map with moving geometry - a drawbridge, a
+            shutter a script opens and closes - parked under.
+        ]]
         blockedBy = {
-            world = true,      -- map geometry: walls, pillars, closed shutters
-            objects = true,    -- props: bins, barriers, pallets
+            world = false,     -- map geometry. See above: it cannot have changed.
+            objects = false,   -- props: bins, barriers, pallets
             vehicles = true,   -- other vehicles, ours and ambient
             peds = false,      -- an NPC standing in the bay. Not worth moving a car for;
                                -- the NPC will walk away, and pushing one is harmless.
@@ -1036,7 +1071,25 @@ Config.Placement = {
         -- This is the multi-storey car park case: the Z drifted by a floor because the
         -- vehicle was saved mid-fall, and the right answer is one floor up, not two metres
         -- sideways.
-        verticalRetry = 3.5,
+        --[[
+            OFF, AND THINK HARD BEFORE TURNING IT ON.
+
+            This was 3.5, and it was the first thing tried whenever the probe reported blocked:
+            the saved position three and a half metres up, then three and a half down, then
+            seven up, then seven down. Nothing is ever in the way three and a half metres above
+            a parked car, so the probe said clear and the car was placed IN THE AIR - then
+            frozen there, and the airborne position written back to the database as the truth.
+
+            It was written for a real case: a vehicle saved mid-fall in a multi-storey car park,
+            whose stored Z was a floor out. That case no longer happens. Since 1.0.7 a restored
+            vehicle is frozen by a replicated statebag the instant it reaches any client, so it
+            cannot fall while it is being saved, so its Z cannot drift by a floor.
+
+            The justification is gone and the failure mode is severe, so it is off. A vehicle
+            that cannot be placed is placed exactly where it was and left frozen, which is
+            always a better answer than one in the sky.
+        ]]
+        verticalRetry = 0,
     },
 
     -- What happens when the probe fails and the search finds nothing.

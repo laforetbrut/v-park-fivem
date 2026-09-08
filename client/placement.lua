@@ -747,9 +747,44 @@ function Placement.groundCorrect(model, position, class)
         return position
     end
 
+    --[[
+        WHERE THIS MODEL'S ORIGIN SITS WHEN ITS WHEELS ARE ON THE GROUND.
+
+        `GetEntityCoords` answers the entity's ORIGIN, not the point it touches the road, and
+        the two are a different distance apart for every model - about 0.6 m for a saloon, over
+        a metre for a truck. `-min.z` is that distance, and `min.z` is `centre.z - half.z`.
+
+        Getting this from the model rather than assuming a constant is what lets the check
+        below be tight enough to be useful without dragging a legitimately raised vehicle down.
+    ]]
+    local dims = dimensions(model)
+    local rest = groundZ + (dims and (dims.half.z - dims.centre.z) or 0.5)
+
     if position.z < groundZ - tolerance then
         Park.debug('saved Z was %.2f m below the ground, correcting', groundZ - position.z)
-        return vector3(position.x, position.y, groundZ + 0.5)
+        return vector3(position.x, position.y, rest)
+    end
+
+    --[[
+        AND THE OTHER DIRECTION, WHICH IS THE ONE THAT WAS MISSING.
+
+        This only ever pushed a buried vehicle up. A vehicle ABOVE the ground was left alone,
+        on the reasoning that it might be on a ramp or a roof - and `GetGroundZFor_3dCoord`
+        already answers with the ramp or the roof, so that reasoning was wrong.
+
+        What it actually did was make a floating vehicle permanent. The search would offer a
+        candidate three and a half metres up, the probe would call it clear because nothing is
+        ever up there, the vehicle would be placed and frozen, and the airborne position saved.
+        Nothing in the entire path would then ever bring it down again.
+
+        The tolerance is deliberately generous. A car on a steep camber or a kerb is within a
+        few tens of centimetres of its resting height; anything more than a metre and a half
+        above where this model rests on the surface beneath it is not parked, it is hovering.
+    ]]
+    if position.z > rest + tolerance then
+        Park.debug('%.2f m above where this model rests on the ground, correcting down',
+            position.z - rest)
+        return vector3(position.x, position.y, rest)
     end
 
     return position
@@ -999,6 +1034,22 @@ function Placement.placeInner(entity, data)
                 end
             end
         end
+    end
+
+    --[[
+        THE LAST WORD ON HEIGHT, AFTER THE SEARCH HAS HAD ITS SAY.
+
+        `groundCorrect` ran on the saved pose at the top of this function. If the search then
+        moved the vehicle, that answer was about a different place - and the search is the
+        thing that used to put vehicles in the sky. Running it once more over whatever was
+        finally chosen is what makes "no vehicle is ever left floating" a property of the code
+        rather than of the configuration.
+
+        Idempotent, so on the overwhelmingly common path where nothing moved it is one ground
+        probe that changes nothing.
+    ]]
+    if outcome ~= 'exact' then
+        target = Placement.groundCorrect(model, target, data.class or -1)
     end
 
     -- ANSWER TO PROBLEM 3: exact placement, no ground snap, full rotation.

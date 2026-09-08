@@ -7,6 +7,96 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.8] - 2026-09-08
+
+**Vehicles came back floating in the air, or several metres from where they were parked, in
+places with plenty of room.** Two shipped defaults were wrong, and together they were much worse
+than either alone.
+
+### The two settings
+
+**`Config.Placement.probe.blockedBy.world` was `true`.** The probe traced the vehicle's
+footprint through the map to see whether anything was in the way.
+
+It cannot be. **The vehicle was parked at that exact pose, so the map allowed it, and the map is
+byte for byte the same map now.** Testing world geometry can therefore only ever produce a false
+positive - and the false positives were not rare, because the probe runs at roughly forty
+centimetres above the road and a kerb, a sloped driveway, a speed bump or a garage threshold is
+taller than that. Every car parked against a kerb reported blocked.
+
+**`Config.Placement.search.verticalRetry` was `3.5`.** When the probe reported blocked, the very
+first candidate the search tried was the saved position three and a half metres higher.
+
+Nothing is ever in the way three and a half metres above a parked car, so the probe called it
+clear, the vehicle was placed there, `freezeUntilTouched` froze it, and `moved` sent the
+airborne position back to the server to be **saved as the truth**. Nothing in the entire path
+would ever bring it down again.
+
+### Fixed
+
+- **The world probe is off by default**, for the reason above. So is the object probe, at lower
+  confidence: a prop genuinely can appear where one was not before, but a car overlapping a
+  wheelie bin resolves itself the moment somebody drives it, and a car three metres in the air
+  never resolves at all. Vehicles remain probed, through the entity pool, because ambient
+  traffic really does park in the bay while the server is empty.
+
+- **The vertical retry is off.** It was written for a vehicle saved mid-fall in a multi-storey
+  car park, whose stored Z was a floor out. That case stopped happening in 1.0.7, when a
+  restored vehicle began being frozen by a replicated statebag the instant it reaches any
+  client - it cannot fall while it is being saved, so its Z cannot drift by a floor. The
+  justification was gone and the failure mode was severe.
+
+- **The ground check corrects downwards as well as up.** It only ever pushed a buried vehicle
+  up; a vehicle above the ground was left alone on the reasoning that it might be on a ramp or a
+  roof - and `GetGroundZFor_3dCoord` already answers with the ramp or the roof, so that
+  reasoning was wrong. It now knows where each model's origin sits when its wheels are on the
+  ground - about 0.6 m for a saloon, over a metre for a truck, read from the model rather than
+  assumed - and anything more than `groundTolerance` above that is brought down.
+
+  It also runs again over whatever the search finally chose, not only over the saved pose. That
+  is what makes "no vehicle is ever left floating" a property of the code rather than of the
+  configuration.
+
+- **`tools/check.py` fails the build if either default drifts back.**
+
+---
+
+## [1.0.8] - 2026-09-08 (français)
+
+**Les véhicules revenaient en l'air, ou à plusieurs mètres de leur place, à des endroits où il y
+avait largement la place.** Deux valeurs par défaut étaient mauvaises, et ensemble bien pires
+que séparément.
+
+### Les deux réglages
+
+**`blockedBy.world` valait `true`.** La sonde traçait l'empreinte du véhicule à travers la carte
+pour voir si quelque chose gênait. C'est impossible : **le véhicule était garé exactement là, la
+carte l'autorisait donc, et c'est la même carte aujourd'hui.** Ce test ne peut produire que des
+faux positifs - et pas rarement, puisque la sonde travaille à environ quarante centimètres
+au-dessus de la route et qu'une bordure de trottoir, une pente, un ralentisseur ou un seuil de
+garage sont plus hauts que ça.
+
+**`verticalRetry` valait `3.5`.** Quand la sonde disait « bloqué », le tout premier candidat
+essayé était la position sauvegardée **trois mètres et demi plus haut**. Rien ne gêne jamais
+là-haut, donc « libre », donc le véhicule y était posé, gelé, et cette position en l'air était
+**renvoyée au serveur et sauvegardée comme la vérité**. Plus rien ne le redescendait jamais.
+
+### Corrigé
+
+- **La sonde du monde est désactivée par défaut**, pour la raison ci-dessus. Celle des objets
+  aussi : une voiture qui chevauche une poubelle se règle dès qu'on la conduit, une voiture à
+  trois mètres du sol ne se règle jamais. Les véhicules restent détectés, via le pool
+  d'entités, parce que le trafic ambiant se gare vraiment sur la place.
+- **La reprise verticale est désactivée.** Le cas pour lequel elle avait été écrite n'existe
+  plus depuis la 1.0.7.
+- **La correction au sol fonctionne aussi vers le bas.** Elle connaît maintenant, modèle par
+  modèle, la hauteur à laquelle l'origine se trouve quand les roues touchent le sol, et elle
+  repasse sur la position finalement choisie par la recherche, pas seulement sur la position
+  sauvegardée.
+- **`tools/check.py` fait échouer le build si l'un des deux réglages revient en arrière.**
+
+---
+
 ## [1.0.7] - 2026-09-08
 
 **Vehicles came back under the map, a few metres from where they were parked, and the wrong

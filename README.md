@@ -538,12 +538,13 @@ webhooks off, after which the next real error goes unread for a fortnight.
   *reads* as the same, not the same vertices. `recaptureDelta` stops that compounding over
   repeated save cycles, and it is why re-capture is guarded rather than continuous.
 
-- **The world probe traces the footprint's perimeter, not its volume.** Six rays: the four sides
-  at body height and the two diagonals. An obstacle floating entirely inside the footprint
-  without touching a side or a diagonal is missed - which for a vehicle-sized volume is a very
-  small object in a very particular place, and the settle watch catches the consequence anyway.
-  This replaced a box shape test in 1.0.1, whose size arguments are undocumented; rays are two
-  points and have no interpretation to get wrong.
+- **The world probe is off by default, and that is deliberate.** A vehicle was parked at its
+  saved pose, so the map allowed it, and the map has not changed - so probing world geometry can
+  only produce false positives, and at the height the probe runs a kerb produces one. It is
+  still there (`Config.Placement.probe.blockedBy.world`) for a map with geometry that genuinely
+  moves, like a shutter a script opens and closes, parked under. Vehicles are always probed,
+  through the entity pool, because ambient traffic really does park in the bay while the server
+  is empty.
 - **A blocked space with no free spot nearby ends in an intersection.** With the default
   `fallback = 'place'` the vehicle goes exactly where it was, frozen, possibly clipping
   geometry. That is deliberate - see the tight-space section - but it is a trade, not a

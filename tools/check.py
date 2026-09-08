@@ -576,6 +576,15 @@ SHIPPED_DEFAULTS = [
      "without it /vpark does nothing at all on a stock install"),
     ('Streaming', 'reconcileInterval', '15',
      "the sweep that catches a stray vehicle; 0 disables it"),
+
+    # These two shipped as `true` and `3.5` and together put vehicles in the sky: the world
+    # probe reported a kerb as blocking, and the first thing the search then tried was the
+    # saved position three and a half metres higher. Both have to stay as they are.
+    ('Placement', 'world', 'false',
+     "the map cannot have changed since the vehicle was parked, so probing it only produces "
+     "false positives"),
+    ('Placement', 'verticalRetry', '0',
+     "a vehicle must never be lifted to find room; it floats there for good"),
 ]
 
 
