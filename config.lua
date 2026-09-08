@@ -436,8 +436,23 @@ Config.Persistence = {
     -- Set it back to 'all' if you were running 1.0.0 or 1.0.1 and want the old behaviour.
     mode = 'owned',
 
-    -- In 'owned' and 'claimed' mode, also keep vehicles that belong to a job or a gang.
-    -- Police cruisers left outside Mission Row survive the restart; a stolen Sultan does not.
+    --[[
+        In 'owned' and 'claimed' mode, also keep vehicles that belong to a job or a gang.
+        Police cruisers left outside Mission Row survive the restart; a stolen Sultan does not.
+
+        THIS NEEDS `Config.Ownership.jobPlatePattern` TO DO ANYTHING, since 1.0.12.
+
+        Recognising a job vehicle used to be "there is no owner row and the driver holds a job",
+        which is also true of every car an admin spawns, every dealership test drive and every
+        debug vehicle - so on a server where staff hold a job, `/car` produced a permanent row
+        the moment somebody sat in it.
+
+        Nothing about an unregistered vehicle distinguishes a police cruiser from a conjured
+        Premier. A recognisable plate does, which is what the pattern is for. Without one this
+        setting stays on and simply never matches, which is the safe direction: a server that
+        wants job persistence configures the pattern, and a server that does not keeps nothing
+        it did not ask for.
+    ]]
     jobVehicles = true,
 
     -- In 'owned' mode, also keep a vehicle a player explicitly parked with `/vpark`.
@@ -1035,7 +1050,56 @@ Config.Placement = {
     -- ---------------------------------------------------------------------------------
     -- When the exact spot really is blocked: the search
     -- ---------------------------------------------------------------------------------
+    --[[
+        ============================================================================
+        THE SEARCH IS OFF, AND A VEHICLE THEREFORE ALWAYS COMES BACK EXACTLY WHERE IT WAS.
+        ============================================================================
+
+        The search answers "the saved bay is occupied, where is the nearest free spot". Every
+        version up to 1.0.11 ran it, and every version up to 1.0.11 had reports of vehicles
+        coming back a metre or so from where they were parked. Measured, with `/vparkwhere`:
+
+            0TL1YS402S8YV  off by 1.250 m   dx +0.000  dy -1.250  dz +0.000
+            0TL1YSE03933L  off by 1.250 m   dx +1.250  dy +0.000  dz +0.000
+
+        1250 mm is exactly `step` below. That is not drift, it is this feature working.
+
+        -------------------------------------------------------------------------------
+        THE QUESTION IS WRONG, NOT THE ANSWER
+        -------------------------------------------------------------------------------
+
+        Ask what can actually be occupying a bay that a vehicle was parked in, and there are
+        only three answers:
+
+          - AMBIENT TRAFFIC. Already handled: `clearAmbient` deletes it before the probe runs.
+            If the search is being reached, this was not it.
+
+          - ANOTHER OF OUR PERSISTED VEHICLES. They coexisted - both were standing there when
+            both were saved - so this is a false positive. And it is a common one, because the
+            box tested is the model's bounding box, which includes the mirrors and the margin
+            the exporter added: two cars parked thirty centimetres apart overlap in it.
+
+          - A CAR SOMEBODY IS DRIVING. Temporary. It will leave.
+
+        In none of those three is moving OUR vehicle the right answer. The first is already
+        gone, the second was never real, and the third resolves itself in a minute.
+
+        1.0.11 tried to fix the second case by ignoring vehicles that carry our statebag. That
+        was correct and it was not enough: a replicated statebag arrives asynchronously, and
+        several vehicles restored at once are placed before their neighbours' bags have landed.
+        A fix that depends on winning a network race is not a fix.
+
+        So the search does not run. A vehicle whose bay is occupied is placed exactly where it
+        was and left frozen - which is what `fallback = 'place'` has always done - and two cars
+        briefly overlapping, both frozen, is a smaller problem than a car that is never where
+        its owner left it. The first person to drive one out resolves it.
+
+        Turn it on for a server where vehicles are parked somewhere genuinely contested and
+        being a metre out matters less than overlapping.
+    ]]
     search = {
+        enabled = false,
+
         -- Look for a free spot near the saved one when the saved one is blocked by something
         -- that could not be cleared - a wall, a player's car, a prop somebody placed.
         --

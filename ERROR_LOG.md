@@ -8,6 +8,52 @@ out of it.
 
 ---
 
+## [2026-09-09 09:30] — Two questions that could not be answered, both answered anyway
+
+**Context:** Tested on 1.0.11. The same three vehicles, the same two deltas, to the millimetre:
+
+    0TL1YS402S8YV  off by 1.250 m   dx +0.000  dy -1.250  dz +0.000
+    0TL1YSE03933L  off by 1.250 m   dx +1.250  dy +0.000  dz +0.000
+
+and `/car` still making vehicles persistent after `keysGrantOwnership` had been turned off.
+
+**Error:** None. Both features working as designed.
+
+**Root cause, the position:** 1.0.11 excluded vehicles carrying `vpark:id` from the blocking
+test, which was the right diagnosis. It did not work because the check reads a REPLICATED
+statebag, and a replicated statebag arrives asynchronously. Several vehicles restored at once
+are placed before their neighbours' bags have landed on that client, so the filter finds nil and
+the neighbour counts as an obstacle. The fix depended on winning a network race.
+
+Stepping back one level: what can occupy a bay a vehicle was parked in? Ambient traffic, which
+`clearAmbient` has already deleted by the time the probe runs. Another of our vehicles, which
+coexisted with this one by construction. Or a car somebody is driving, which will leave. Moving
+our vehicle is wrong in all three. The search was answering a question that has no case in which
+its answer is wanted.
+
+**Root cause, `/car`:** `Ownership.isJobVehicle` fell back to "there is no owner row and the
+driver holds a job". The comment directly above it listed what that catches - "a job spawner, a
+dealership demo or an admin command" - and it treated all three as job vehicles. On a server
+where staff hold a job, every `/car` became a permanent row.
+
+**Fix:** `Config.Placement.search.enabled = false`; a vehicle whose bay is occupied is placed
+exactly where it was and left frozen. `isJobVehicle` returns false without a
+`jobPlatePattern`, because nothing else can distinguish a cruiser from a conjured Premier.
+
+**Prevention:**
+
+> **When a fix has to win a race to be correct, go up a level instead of tightening it.**
+>
+> 1.0.11's filter was the right idea and could never have been reliable, because the information
+> it needed arrives when the network feels like it. The question to ask at that point is not
+> "how do I get the statebag sooner" but "why am I asking at all" - and the answer was that the
+> whole feature had no case in which it helped.
+>
+> The other one is the same shape: a heuristic whose own comment lists a counter-example is not
+> a heuristic, it is a guess with documentation.
+
+---
+
 ## [2026-09-09 05:10] — Widening ownership on a premise I never checked
 
 **Context:** Reported alongside the position measurements: "when I do /car premier it makes it

@@ -132,10 +132,27 @@ function Ownership.isJobVehicle(plate, group)
         return normalised ~= nil and normalised:match(pattern) ~= nil
     end
 
-    -- No owner row means nobody bought it, which on every framework means it came from a job
-    -- spawner, a dealership demo or an admin command.
-    local row = Bridge.ownedByPlate(plate)
-    return row == nil and group ~= nil
+    --[[
+        WITHOUT A PATTERN, THIS QUESTION CANNOT BE ANSWERED, SO IT ANSWERS NO.
+
+        The rule used to be "there is no owner row and the driver holds a job", and the comment
+        above it listed what that catches: a job spawner, a dealership demo, AND AN ADMIN
+        COMMAND. It caught all three and treated all three as job vehicles.
+
+        So on a server where staff hold a job - which is most of them - every car spawned with
+        `/car` became a permanent row the moment somebody sat in it. Reported as exactly that:
+        "/car makes it persistent, that is not normal; it should be /admincar".
+
+        There is no way to tell a police cruiser taken from the Mission Row spawner apart from
+        a Premier an admin conjured, by looking at the vehicle. Both are unregistered, both are
+        being driven by somebody with a job. The only thing that CAN tell them apart is a
+        recognisable plate, which is what `jobPlatePattern` is for and why the config calls it
+        exact and free.
+
+        No pattern, no answer. Job vehicles are kept on a server that configures one, and
+        nothing else is swept up on a server that does not.
+    ]]
+    return false
 end
 
 --[[

@@ -616,6 +616,15 @@ def check_shipped_defaults():
             index += 1
         sections[name] = source[start:index]
 
+    # `search.enabled` is nested, and the section parser above finds the first `enabled`
+    # in the Placement block rather than that one. Checked literally instead.
+    if not re.search(r'search\s*=\s*\{\s*\n\s*enabled\s*=\s*false\s*,', source):
+        fail('defaults',
+             'Config.Placement.search does not ship with `enabled = false` as its first '
+             'key. The search moves a vehicle away from where it was parked, and every '
+             'reason a bay can look occupied is either already handled, a false positive, '
+             'or temporary.')
+
     for section, key, expected, why in SHIPPED_DEFAULTS:
         body = sections.get(section)
         if body is None:

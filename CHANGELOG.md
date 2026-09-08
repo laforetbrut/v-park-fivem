@@ -7,6 +7,105 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.12] - 2026-09-09
+
+Two settings that were answering questions they could not answer. Both are off, and both take a
+whole class of wrong behaviour with them.
+
+### A vehicle now always comes back exactly where it was
+
+The placement search is **off by default**. It answers "the saved bay is occupied, where is the
+nearest free spot", and 1.0.11 was the fifth release in a row to have reports of vehicles
+coming back about a metre from where they were parked. Measured, with `/vparkwhere`:
+
+```
+0TL1YS402S8YV  off by 1.250 m   dx +0.000  dy -1.250  dz +0.000
+0TL1YSE03933L  off by 1.250 m   dx +1.250  dy +0.000  dz +0.000
+```
+
+1250 mm is exactly `Config.Placement.search.step`. That was not drift. That was this feature
+working as designed.
+
+**The question is wrong, not the answer.** Ask what can actually be occupying a bay a vehicle
+was parked in, and there are only three possibilities:
+
+- **Ambient traffic.** Already handled - `clearAmbient` deletes it before the probe runs. If the
+  search is being reached, this was not it.
+- **Another of our persisted vehicles.** They coexisted, because both were standing there when
+  both were saved. A false positive, and a common one: the box tested is the model's bounding
+  box, which includes the mirrors and the exporter's margin, so two cars parked thirty
+  centimetres apart overlap in it.
+- **A car somebody is driving.** Temporary. It will leave.
+
+In none of those three is moving *our* vehicle the right answer.
+
+1.0.11 tried to fix the second case by ignoring vehicles carrying our statebag. That was correct
+and it was not enough: a replicated statebag arrives asynchronously, and several vehicles
+restored at once are placed before their neighbours' bags have landed. **A fix that depends on
+winning a network race is not a fix.**
+
+A vehicle whose bay is occupied is now placed exactly where it was and left frozen. Two cars
+briefly overlapping, both frozen, is a smaller problem than a car that is never where its owner
+left it, and the first person to drive one out resolves it.
+
+### `/car` no longer makes a vehicle persistent
+
+Recognising a job vehicle was "there is no owner row and the driver holds a job". The comment
+above that rule listed what it catches: a job spawner, a dealership demo, **and an admin
+command** - and it treated all three as job vehicles. So on a server where staff hold a job,
+which is most of them, every car spawned with `/car` became a permanent row the moment somebody
+sat in it.
+
+Nothing about an unregistered vehicle distinguishes a police cruiser taken from the Mission Row
+spawner from a Premier an admin conjured. Both are unregistered, both are being driven by
+somebody with a job. **The only thing that can tell them apart is a recognisable plate**, which
+is what `Config.Ownership.jobPlatePattern` is for.
+
+Without a pattern the question has no answer, so it answers no. Job vehicles are kept on a
+server that configures one, and nothing is swept up on a server that does not.
+
+Together with `keysGrantOwnership` going off in 1.0.11, a vehicle is persistent when the
+framework says it belongs to somebody - which is what `/admincar` does and what `/car` does not.
+
+---
+
+## [1.0.12] - 2026-09-09 (français)
+
+Deux réglages qui répondaient à des questions auxquelles ils ne pouvaient pas répondre. Les deux
+sont désactivés, et chacun emporte avec lui toute une classe de mauvais comportements.
+
+### Un véhicule revient maintenant toujours exactement à sa place
+
+La recherche de placement est **désactivée par défaut**. Elle répond à « la place sauvegardée
+est occupée, où est la plus proche libre », et la 1.0.11 était la cinquième version d'affilée
+avec des véhicules revenant à un mètre environ de leur place. Mesuré : 1250 mm, soit exactement
+`search.step`. Ce n'était pas une dérive, c'était cette fonction qui marchait comme prévu.
+
+**C'est la question qui est mauvaise, pas la réponse.** Ce qui peut occuper une place où un
+véhicule était garé se résume à trois cas : du trafic ambiant, déjà supprimé avant la sonde ; un
+autre de nos véhicules, qui coexistait donc faux positif ; une voiture conduite par quelqu'un,
+donc temporaire. Dans aucun des trois déplacer **notre** véhicule n'est la bonne réponse.
+
+La 1.0.11 avait tenté de corriger le deuxième cas en ignorant les véhicules portant notre
+statebag. C'était juste et insuffisant : un statebag répliqué arrive de façon asynchrone, et
+plusieurs véhicules restaurés en même temps sont placés avant que les bags de leurs voisins ne
+soient arrivés. **Un correctif qui dépend de gagner une course réseau n'est pas un correctif.**
+
+Un véhicule dont la place est occupée est désormais posé exactement où il était, et laissé gelé.
+
+### `/car` ne rend plus un véhicule persistant
+
+Reconnaître un véhicule de métier, c'était « pas de ligne propriétaire et le conducteur a un
+métier ». Le commentaire au-dessus de cette règle énumérait ce qu'elle attrape : un spawner de
+métier, un essai de concession, **et une commande admin** - et elle traitait les trois comme des
+véhicules de métier.
+
+Rien dans un véhicule non enregistré ne distingue une voiture de police d'une Premier invoquée
+par un admin. **Seule une plaque reconnaissable le peut**, ce à quoi sert `jobPlatePattern`.
+Sans motif, la question n'a pas de réponse, donc elle répond non.
+
+---
+
 ## [1.0.11] - 2026-09-09
 
 Fixed from measurements rather than from reasoning. `/vparkwhere`, added in 1.0.10, reported
