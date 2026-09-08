@@ -386,6 +386,18 @@ function Persist.applySnapshot(id, snapshot)
     local record = Store.get(id)
     if not record or type(snapshot) ~= 'table' then return false end
 
+    --[[
+        Keep the server's idea of frozen current.
+
+        `Spawn.despawn` reads the final pose only for a vehicle that could have moved, and a
+        frozen one provably could not - see the note there. The client is the only thing that
+        knows when a vehicle was woken, and this is the message it was already sending.
+    ]]
+    if type(snapshot.frozen) == 'boolean' then
+        local entry = Store.live(id)
+        if entry then entry.frozen = snapshot.frozen end
+    end
+
     local patch = {}
 
     local position = Park.toVec(snapshot.position)

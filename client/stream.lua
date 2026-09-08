@@ -129,10 +129,13 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
             A car that is dressed wrong is a much smaller problem than a car that flickers,
             and the next save corrects it.
         ]]
+        local dressed = true
+
         if type(data.properties) == 'table' then
-            local dressed = pcall(Properties.apply, entity, data.properties, { version = data.version })
+            dressed = pcall(Properties.apply, entity, data.properties, { version = data.version })
             if not dressed then
-                Park.debug('could not apply properties to %s - placing it anyway', tostring(data.id))
+                Park.debug('could not apply properties to %s - placing it anyway, and it will '
+                    .. 'not be captured until it has been dressed', tostring(data.id))
             end
         end
 
@@ -159,6 +162,19 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
                 -- against this, which is what stops the approximation compounding over
                 -- repeated save cycles.
                 restoredHealth = GetVehicleBodyHealth(entity),
+
+                --[[
+                    Whether this vehicle currently looks the way the database says it does.
+
+                    A vehicle whose properties could not be applied is a STOCK car standing
+                    where a modified one belongs. Capturing it would write that stock state
+                    back over the real one and the modifications would be gone for good - "it
+                    is not how it was before", permanently, from one failed apply.
+
+                    So an undressed vehicle reports nothing at all until an apply succeeds.
+                    See `Stream.snapshot`.
+                ]]
+                dressed = dressed,
             }
             trackedCount = trackedCount + 1
             byNet[netId] = data.id
@@ -447,6 +463,21 @@ function Stream.snapshot(id)
         calls.
     ]]
     if record.frozen and record.captureClean then
+        return nil
+    end
+
+    --[[
+        AN UNDRESSED VEHICLE HAS NOTHING TO SAY, AND MUST NOT SAY IT.
+
+        `Properties.apply` failing leaves a stock car where a modified one belongs. Capturing
+        that would overwrite the stored modifications with the model's defaults, which is
+        losing them - not for this session, for good.
+
+        Nil is not an error here: the server treats an absent snapshot as "no news", which is
+        exactly right. The vehicle is re-dressed on its next restore and starts reporting
+        again then.
+    ]]
+    if record.dressed == false then
         return nil
     end
 

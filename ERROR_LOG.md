@@ -8,6 +8,61 @@ out of it.
 
 ---
 
+## [2026-09-08 17:20] — Treating "I could not improve this" as "this is broken"
+
+**Context:** After the orphan fix, a pass over the whole restore path against what a persistence
+resource is actually for: the vehicle is where it was, it looks how it did, it does not
+multiply, and noticing all of that is cheap.
+
+**Error:** No error, in any log. This is a design fault rather than a bug, which is why five
+releases went past it.
+
+**Root cause:** The server creates a vehicle at its saved coordinates and heading - both are
+arguments to the creation native - so a vehicle nothing touches afterwards is already exactly
+where it was left. Everything the client does next only REFINES that placement.
+
+`vpark:server:restored` treated every non-ok answer as a failed restore and despawned the
+vehicle. Three of the client's answers are not failures at all:
+
+- `no_control` - another client owns the entity, or the control request took longer than three
+  seconds on a busy server.
+- `blocked` - the exact bay is occupied and the search could not find room nearby.
+- `raised` - something inside the placement threw, on a vehicle that is at the right
+  coordinates and merely not refined.
+
+All three deleted a correctly placed vehicle, and the streaming pass created it again on the
+next tick. That is a create-delete loop per vehicle per second: visible as flicker, felt as
+lag, and it fed every other symptom in this file, because each cycle was another chance for the
+creation path to leak or the entity to be caught half-made.
+
+Two related faults found in the same pass:
+
+- A vehicle whose properties failed to apply was still captured, so the stock state was written
+  back over the stored modifications. One failed apply lost them permanently.
+- The final pose was re-read on every despawn, including for frozen vehicles that provably had
+  not moved. Placement settling and collision streaming each nudge an entity by centimetres, and
+  every one of those was written down - so a parked car drifted a little on every pass a player
+  made.
+
+**Fix:** Only `gone` despawns. `no_control` is reported as success with the placement marked
+unrefined. An undressed vehicle reports no snapshot at all. A frozen vehicle's pose is not
+re-read, and the server learns about wakes from the client so a driven vehicle still is.
+
+**Prevention:**
+
+> **Ask what the default outcome is when every optional step fails.**
+>
+> If the answer is "the vehicle is where it should be", every one of those steps can fail
+> harmlessly and the resource degrades into doing its job. If the answer is "the vehicle is
+> deleted", then every optional step is load-bearing and the resource is as reliable as its
+> flakiest one - which here was a network control request on a busy server.
+>
+> The refinement was written as a step that had to succeed because it was written first, before
+> the server was creating vehicles at the right coordinates itself. Nothing re-derived it once
+> that changed.
+
+---
+
 ## [2026-09-08 16:00] — The right native, and the wrong reflex kept with it
 
 **Context:** Immediately after 1.0.4 shipped. Reported as "the vehicles appear then disappear,

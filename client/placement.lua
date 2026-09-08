@@ -889,10 +889,33 @@ function Placement.placeInner(entity, data)
     local rotation = data.rotation or { x = 0.0, y = 0.0, z = 0.0 }
     local heading = rotation.z or 0.0
 
-    if not takeControl(entity, 3000) then
-        -- Somebody else owns it and is presumably doing this same work. Leaving it alone is
-        -- correct; two clients placing one entity fight.
-        return { ok = false, reason = 'no_control' }
+    --[[
+        NOT BEING ABLE TO REFINE THE PLACEMENT IS NOT A FAILED PLACEMENT.
+
+        The server created this vehicle at its saved coordinates and heading - those were
+        arguments to the creation native - so a vehicle we never touch is already exactly where
+        it was left. Everything below only REFINES that: it corrects a buried Z, clears ambient
+        traffic out of the bay, and finds the nearest free spot when the exact one is occupied.
+
+        Until 1.0.5 this returned a failure, and the server answered a failure by deleting the
+        vehicle. Two clients contending for one entity, or a control request that took longer
+        than three seconds on a busy server, therefore produced delete-and-recreate on a loop:
+        the vehicle flickered, and the churn is most of what a server feels as lag from a
+        persistence resource.
+
+        So: report success, say the placement was not refined, and leave the vehicle where the
+        server put it. That is the right answer and it is also the answer the player wants.
+    ]]
+    if not takeControl(entity, 5000) then
+        return {
+            ok = true,
+            outcome = 'unrefined',
+            frozen = false,
+            collision = true,
+            position = { x = Park.coord(saved.x), y = Park.coord(saved.y), z = Park.coord(saved.z) },
+            heading = Park.angle(heading),
+            moved = false,
+        }
     end
 
     -- The ghost window. Collision off and frozen means the entity cannot fall, cannot be hit

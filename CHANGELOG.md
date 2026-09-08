@@ -58,6 +58,56 @@ regression in 1.0.4, and the fix is one line of judgement rather than one line o
   arguments to the creation native, and the client's placement pass sets the full pose a moment
   later anyway.
 
+### The four things a persistence resource has to get right
+
+The rest of this release is a pass over the restore path against what it is actually for: the
+vehicle is where it was, it looks how it did, it does not multiply, and none of it costs the
+server anything to notice.
+
+- **A failed placement no longer deletes the vehicle.** This is the big one. The server creates
+  a vehicle at its saved coordinates and heading - those are arguments to the creation native -
+  so a vehicle the client never touches is *already* exactly where it was left. Everything the
+  client does afterwards only REFINES that: correcting a buried Z, clearing ambient traffic out
+  of the bay, finding the nearest free spot when the exact one is occupied.
+
+  Every failure of that refinement used to despawn the vehicle, and the streaming pass created
+  it again a second later. A client that could not take control in time, a bay the search could
+  not fit into, a raise inside the placement: all three deleted a correctly placed vehicle on a
+  loop. That loop is what a player sees as flicker and what a server feels as lag.
+
+  Only one answer deletes a vehicle now, and it is the one that says the entity is not there.
+
+- **Not being able to take control is reported as success**, because the vehicle is where it
+  belongs; the placement simply was not refined. The control wait also went from three seconds
+  to five.
+
+- **A vehicle that could not be dressed is never captured.** `Properties.apply` failing leaves a
+  stock car standing where a modified one belongs, and the next capture wrote that stock state
+  back over the real one - losing the modifications for good, from one failed apply. An
+  undressed vehicle now reports nothing at all until an apply succeeds.
+
+- **A frozen vehicle is not re-read when it despawns.** It cannot have moved: a frozen entity is
+  not simulated and the wake handlers unfreeze it before a player can touch it. Reading it
+  anyway was a slow drift - placement settles an entity by a few centimetres, collision
+  streaming in nudges it, and each of those was written down on every despawn. A car parked and
+  passed a hundred times moved a little further each time. The server now learns about a wake
+  from the client - on entry, and from every snapshot - and re-reads the pose only for a vehicle
+  that could actually have gone somewhere.
+
+- **The orphan mode is re-asserted once the entity definitely exists.** `SET_ENTITY_ORPHAN_MODE`
+  with KeepEntity is what guarantees the server will not collect a parked vehicle, and it was
+  being set against an entity that was still orphaned. One native per restore removes the doubt.
+
+- **A client that cannot see the entity at all gets a twenty-second backoff.** The usual cause is
+  a scope problem that fixes itself when somebody walks closer; asking the same client the same
+  question every second in the meantime is the same create-delete churn in a different place.
+
+- **The reconciliation sweep stopped reading a statebag off every vehicle on the server.**
+  `GetAllVehicles` returns ambient traffic too - hundreds of entities on a busy server - and the
+  sweep was reading a statebag off each of them every fifteen seconds to find entities its own
+  index already knew about. The statebag answers one question the index cannot, which is only
+  meaningful in the first two minutes after a restart, so that is when it is asked.
+
 ---
 
 ## [1.0.5] - 2026-09-08 (français)

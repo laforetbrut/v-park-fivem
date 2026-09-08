@@ -89,6 +89,15 @@ local failures = {}
 local ours = {}
 local condemned = {}
 
+--[[
+    Until when the reconciliation sweep also reads statebags.
+
+    Set at boot. See the note inside `Spawn.reconcile`: after this, everything of ours is in
+    `ours`, and the only thing a statebag read can find is an entity from a previous start of
+    the resource - which by then there has been ample opportunity to collect.
+]]
+local bootWindow = 0
+
 -- Forward-declared so that `Spawn.create` can call something defined below it. Assigned, not
 -- redeclared, further down; writing `local function` twice would give two different upvalues
 -- and the call above would reach neither.
@@ -766,13 +775,27 @@ function Spawn.despawn(id, reason)
     pending[id] = nil
     deferred[id] = nil
 
-    -- One last read of where it actually ended up. A vehicle that was pushed, or that settled
-    -- differently from where we placed it, should be written down before it goes away - or the
-    -- next restore puts it back at a position that is a restart out of date.
-    --
-    -- Best effort, through the safe accessors: an entity nobody has in scope may not answer.
+    --[[
+        One last read of where it actually ended up - BUT ONLY IF IT COULD HAVE MOVED.
+
+        A vehicle that is still frozen has not moved. It cannot: a frozen entity is not
+        simulated, nothing can push it, and the wake handlers unfreeze it before a player can
+        touch it. Its stored position is already the truth.
+
+        Reading it anyway was a slow drift. Placement settles an entity by a few centimetres,
+        collision streaming in nudges it, and each of those was read back and written down on
+        every despawn - so a car parked and passed a hundred times moved a little further each
+        time, and "it is not quite where I left it" is a complaint that builds rather than
+        appears.
+
+        So the pose is re-read only for a vehicle that was awake, which is the only kind that
+        can have gone anywhere. Best effort even then, through the safe accessors: an entity
+        nobody has in scope may not answer.
+    ]]
     local record = Store.get(id)
-    if record and safeExists(entity) then
+    local couldHaveMoved = entry.frozen == false and entry.seen == true
+
+    if record and couldHaveMoved and safeExists(entity) then
         local position = safeCoords(entity)
         local rotation = safeRotation(entity)
 
@@ -1050,17 +1073,37 @@ RegisterNetEvent('vpark:server:restored', function(id, result)
     end
 
     if not result.ok then
-        Park.debug('placement of %s failed: %s', id, tostring(result.reason))
-        pcall(Spawn.despawn, id, 'placement failed')
+        --[[
+            ONLY ONE ANSWER DELETES THE VEHICLE, AND IT IS THE ONE THAT SAYS IT IS NOT THERE.
 
-        -- AFTER the despawn, which clears the backoff table as part of forgetting the
-        -- vehicle. Setting it first would have it wiped a line later, and the vehicle would
-        -- be retried on the very next pass - which is the retry storm this exists to stop.
-        if result.retry then
-            deferred[id] = Park.ticks() + 15000
+            Every other failure means the client could not REFINE a vehicle that the server had
+            already created at its saved coordinates - so the vehicle is exactly where it
+            belongs, and deleting it achieves nothing except making it disappear.
+
+            Until 1.0.5 every failure despawned. A client that could not take control in time,
+            a bay the search could not find room in, a raise inside the placement: all three
+            deleted a correctly placed vehicle, and the streaming pass then created it again a
+            second later. That loop is the flicker, and the create-delete churn behind it is
+            most of what a server feels as lag from a persistence resource.
+
+            `blocked` with `retry` is a real answer worth deferring - the bay was full and may
+            not be in fifteen seconds - but the vehicle STAYS while we wait.
+        ]]
+        if result.reason == 'gone' then
+            Park.debug('%s was gone before the client could place it', id)
+            pcall(Spawn.despawn, id, 'entity gone')
+            stats.failed = stats.failed + 1
+            return
         end
 
-        stats.failed = stats.failed + 1
+        Park.debug('%s could not be refined (%s) - keeping it where the server put it',
+            id, tostring(result.reason))
+
+        entry.placedAt = Park.ticks()
+        entry.seen = true
+        entry.frozen = false
+
+        stats.forced = (stats.forced or 0) + 1
         return
     end
 
@@ -1070,6 +1113,22 @@ RegisterNetEvent('vpark:server:restored', function(id, result)
     -- The client only answers after `waitForEntity` succeeded, so this is proof the entity
     -- genuinely exists. See the note in `sweepVanishing`.
     entry.seen = true
+
+    --[[
+        RE-ASSERT THE ORPHAN MODE, NOW THAT THE ENTITY DEFINITELY EXISTS.
+
+        `SET_ENTITY_ORPHAN_MODE` with KeepEntity is the only thing standing between a parked
+        vehicle and the engine collecting it the moment no player is near - it is, in the CFX
+        documentation's words, what guarantees the server will not delete it.
+
+        It is set during configuration as well, but that runs against an entity that is
+        registered and orphaned, and a call that quietly did nothing there would not be noticed
+        until vehicles started vanishing from empty streets. This costs one native per restore
+        and removes the doubt.
+    ]]
+    if SetEntityOrphanMode and (streaming().entity or {}).orphanMode ~= false then
+        pcall(SetEntityOrphanMode, entry.entity, 2)
+    end
 
     if result.outcome then
         stats[result.outcome] = (stats[result.outcome] or 0) + 1
@@ -1102,6 +1161,20 @@ RegisterNetEvent('vpark:server:restoreFailed', function(id, reason)
 
     Park.debug('client could not restore %s: %s', id, tostring(reason))
     pcall(Spawn.despawn, id, 'client failed')
+
+    --[[
+        Backed off, and not simply retried.
+
+        The usual cause is `no_entity`: the client waited twelve seconds and the entity never
+        arrived in its scope. Recreating it immediately asks the same client the same question
+        and gets the same answer, which is a create-delete loop at one vehicle per second -
+        the churn a server feels as lag.
+
+        A record, not a counter, because this is a transient condition: the player walks
+        closer, or another one arrives, and it works.
+    ]]
+    deferred[id] = Park.ticks() + 20000
+
     stats.failed = stats.failed + 1
 end)
 
@@ -1122,6 +1195,22 @@ RegisterNetEvent('vpark:server:touched', function(id, used)
 
     local record = Store.get(id)
     if not record then return end
+
+    --[[
+        Somebody got IN it, so it is awake and it can move.
+
+        The strongest signal there is, and the earliest: it arrives when the door closes rather
+        than on the next capture sweep. `Spawn.despawn` reads the final pose only for a vehicle
+        that could have moved, and without this a player who got in, drove off and left the
+        streaming radius between two sweeps would have the drive discarded.
+    ]]
+    if used then
+        local entry = Store.live(id)
+        if entry then
+            entry.frozen = false
+            entry.seen = true
+        end
+    end
 
     local now = Park.now()
     record.touched_at = now
@@ -1210,7 +1299,20 @@ function Spawn.reconcile()
         local id = ours[entity]
         local marked = false
 
-        if not id then
+        --[[
+            The statebag is only asked for during the boot window, and that is a real saving.
+
+            `GetAllVehicles` returns EVERY vehicle on the server, ambient traffic included -
+            several hundred on a busy one, several thousand on a bad one. Reading a statebag
+            off each of them, every fifteen seconds, forever, to find entities that our own
+            book already knows about is most of what this sweep used to cost.
+
+            The statebag answers one question our book cannot: which entities were left behind
+            by a PREVIOUS start of this resource, whose handles we never saw. That question is
+            only meaningful just after boot, and after that every entity of ours is in `ours`
+            because we put it there.
+        ]]
+        if not id and Park.ticks() < bootWindow then
             local read = pcall(function() id = Entity(entity).state['vpark:id'] end)
             marked = read and type(id) == 'string'
             if not marked then id = nil end
@@ -1289,6 +1391,10 @@ end
 
 CreateThread(function()
     while not Runtime.ready() do Wait(500) end
+
+    -- Long enough for several sweeps to have looked at everything, short enough that the
+    -- steady-state cost arrives quickly. See the note inside `Spawn.reconcile`.
+    bootWindow = Park.ticks() + 120000
 
     -- Once at boot, before the first streaming pass, so a restart that left entities behind
     -- starts clean rather than adding to them.
