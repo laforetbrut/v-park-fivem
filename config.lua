@@ -426,11 +426,30 @@ Config.Persistence = {
     --
     --   'none'     Persistence off. The commands, the API and the migration still work, so
     --              this is the setting to use while migrating, before you flip the switch.
-    mode = 'all',
+    --
+    -- 'owned' IS THE DEFAULT SINCE 1.0.2. It was 'all', which persists every car anybody
+    -- drives, and on a busy server that is a table full of stolen taxis nobody will ever look
+    -- for again. 'owned' keeps the cars players actually care about and lets the rest be
+    -- traffic - and with `keysGrantOwnership` in Section 10, holding the keys is enough to
+    -- count, so an admin-spawned car or one handed over by another player is kept too.
+    --
+    -- Set it back to 'all' if you were running 1.0.0 or 1.0.1 and want the old behaviour.
+    mode = 'owned',
 
     -- In 'owned' and 'claimed' mode, also keep vehicles that belong to a job or a gang.
     -- Police cruisers left outside Mission Row survive the restart; a stolen Sultan does not.
     jobVehicles = true,
+
+    -- In 'owned' mode, also keep a vehicle a player explicitly parked with `/vpark`.
+    --
+    -- On by default because `mode = 'owned'` is the default, and without this the park
+    -- command would do nothing at all on a stock install: a claim is neither an owned vehicle
+    -- nor a job one, so the mode would refuse it. A claim is a deliberate act by a player
+    -- about a car they are sitting in, and silently ignoring it is not a defensible reading
+    -- of any mode.
+    --
+    -- Turn it off for a strict "only what the framework says is theirs" server.
+    allowClaimInOwnedMode = true,
 
     -- Seconds a vehicle must have been stationary and empty before it is written for the
     -- first time.
@@ -467,6 +486,23 @@ Config.Persistence = {
         Turn it off only if you genuinely want owned vehicles to wait as well.
     ]]
     ownedImmediately = true,
+
+    --[[
+        How long before the same vehicle is offered on entry again.
+
+        The offer is what asks the server "is this car theirs, and should it be kept". 1.0.1
+        made it once per vehicle per session, which meant a player who got into a car and THEN
+        got the keys - `/admincar`, a mate handing them over, a dealership finishing a sale -
+        was never asked about again and lost the car on the next restart. Reported as exactly
+        that.
+
+        Sixty seconds is one small event a minute for as long as somebody is sitting in a car
+        that is not theirs, and nothing at all once they get out or once it is adopted.
+
+        Raise it if you have a very large player count and a very slow key resource. Setting
+        it to 0 offers on every entry.
+    ]]
+    entryOfferRetrySeconds = 60,
 
     -- Also persist a vehicle the moment its driver disconnects, without waiting for
     -- `settleSeconds`.
@@ -1144,7 +1180,11 @@ Config.Streaming = {
     -- difference between one stray vehicle and a car park full of them.
     --
     -- 0 disables it. Do not, unless orphanMode is also off.
-    reconcileInterval = 30,
+    --
+    -- 15 rather than 30 since 1.0.2: it is the net that catches anything the creation path
+    -- still manages to lose, and a stray vehicle is much more visible than the cost of
+    -- looking for one.
+    reconcileInterval = 15,
 
     -- Server-side entity settings, applied to every vehicle we create.
     entity = {
@@ -1524,6 +1564,33 @@ Config.Ownership = {
     -- A car sold through a dealership or a player-to-player sale keeps its persisted state
     -- and changes hands, rather than the buyer finding a car that expires in two days.
     followFrameworkOwner = true,
+
+    --[[
+        HOLDING THE KEYS COUNTS AS OWNING IT.
+
+        Added in 1.0.2, and it is the other half of making `mode = 'owned'` the default.
+
+        The framework's owned-vehicles table is not the only way a car becomes somebody's.
+        `/admincar`, a dealership demo, a job spawner, a player handing a mate the keys, a
+        heist vehicle given to the crew - none of those write a row in `player_vehicles`, and
+        in a strict reading of 'owned' every one of them is traffic that vanishes on restart.
+
+        That is wrong, and it was reported as exactly that: a car the player had given
+        themselves the keys to was not kept, and obviously should have been.
+
+        So the resolution order is now the framework's record first, because it is the
+        strongest evidence there is, and the key resource second. A player who holds the keys
+        is recorded as the owner with `owner_type = 'owned'` and gets the owned expiry.
+
+        WHAT THIS COSTS. One export call to your key resource per vehicle, at the moment
+        somebody gets into one that is not persisted yet. Not per save, not per streaming
+        pass. A key resource with no readable server-side answer returns nothing, which is
+        treated as "no keys", and the vehicle falls through to the settle timer exactly as it
+        did before.
+
+        Turn it off for a strict "only what the framework sold them" reading.
+    ]]
+    keysGrantOwnership = true,
 }
 
 -- ===========================================================================================
@@ -1749,7 +1816,8 @@ Config.Inventory = {
 
 Config.Interaction = {
     -- Add a "park here" option to your target system for the vehicle you are looking at.
-    -- Only appears in `mode = 'claimed'`, where parking is a deliberate act.
+    -- Only appears in the modes where parking is a deliberate act: `claimed`, and `owned`
+    -- while `Config.Persistence.allowClaimInOwnedMode` is on.
     target = {
         enabled = false,
         label = 'interaction.park',   -- a locale key, or literal text

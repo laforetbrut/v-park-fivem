@@ -70,6 +70,26 @@ function Ownership.resolve(plate, src, explicit)
         return characterId, 'claimed', name, nil
     end
 
+    --[[
+        The keys are the second-strongest evidence, and on a lot of servers the only one.
+
+        `/admincar`, a dealership demo, a job spawner, a heist car handed to the crew: none of
+        those write a row in the framework's owned-vehicles table, and every one of them is a
+        car the player would be astonished to lose on a restart. This was reported as exactly
+        that.
+
+        Deliberately AFTER the framework row. A car whose owner the framework knows has an
+        owner, even while somebody else is driving it on a borrowed set of keys - handing a
+        mate your keys must not hand them the car.
+
+        See `Config.Ownership.keysGrantOwnership`.
+    ]]
+    if Config.Ownership and Config.Ownership.keysGrantOwnership ~= false then
+        if Ownership.hasKeys(src, plate) then
+            return characterId, 'owned', name, nil
+        end
+    end
+
     -- A job or gang vehicle: the player is on a job whose vehicles the config keeps, and the
     -- vehicle is not personally owned by anybody.
     if Config.Persistence and Config.Persistence.jobVehicles then
@@ -232,7 +252,7 @@ function Ownership.sourceOf(characterId)
 
     -- The map can outlive a disconnect by one event. Verifying costs one call and saves
     -- sending a notification to a slot that now belongs to somebody else.
-    if not GetPlayerName(src) then
+    if not Bridge.playerName(src) then
         online[characterId] = nil
         return nil
     end
@@ -259,7 +279,7 @@ local function register(src)
     CreateThread(function()
         local characterId = Bridge.waitForCharacter(src, 60000)
         if not characterId then
-            Park.debug('could not resolve a character for %s within 60s', GetPlayerName(src) or src)
+            Park.debug('could not resolve a character for %s within 60s', Bridge.playerName(src) or src)
             return
         end
 
@@ -360,24 +380,41 @@ function Ownership.hasKeys(src, plate)
     local normalised = Park.plate(plate)
     if not normalised then return false end
 
+    --[[
+        Asked with BOTH spellings of the plate.
+
+        `Park.plate` trims and upper-cases; a key resource stores whatever it was handed. Most
+        trim, some do not, and `GetVehicleNumberPlateText` pads a short plate with trailing
+        spaces - so "ADMIN" and "ADMIN   " are the same car and two different table keys. Two
+        lookups against an in-memory table is not a cost worth reasoning about; a keyholder we
+        failed to recognise over three spaces is a bug worth avoiding.
+    ]]
+    local spellings = { normalised }
+    if type(plate) == 'string' and plate ~= normalised then
+        spellings[2] = plate
+    end
+
+    local function ask(fn)
+        for _, spelling in ipairs(spellings) do
+            if Park.try(function() return fn(spelling) end) == true then return true end
+        end
+        return false
+    end
+
     if provider == 'qs-vehiclekeys' then
-        local answer = Park.try(function() return exports['qs-vehiclekeys']:HasKeys(src, normalised) end)
-        return answer == true
+        return ask(function(text) return exports['qs-vehiclekeys']:HasKeys(src, text) end)
     end
 
     if provider == 'qb-vehiclekeys' then
-        local answer = Park.try(function() return exports['qb-vehiclekeys']:HasKeys(src, normalised) end)
-        return answer == true
+        return ask(function(text) return exports['qb-vehiclekeys']:HasKeys(src, text) end)
     end
 
     if provider == 'wasabi_carlock' then
-        local answer = Park.try(function() return exports.wasabi_carlock:HasKey(src, normalised) end)
-        return answer == true
+        return ask(function(text) return exports.wasabi_carlock:HasKey(src, text) end)
     end
 
     if provider == 'mk_vehiclekeys' then
-        local answer = Park.try(function() return exports.mk_vehiclekeys:hasKey(src, normalised) end)
-        return answer == true
+        return ask(function(text) return exports.mk_vehiclekeys:hasKey(src, text) end)
     end
 
     return false

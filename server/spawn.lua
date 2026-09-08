@@ -63,6 +63,55 @@ local function streaming()
     return (Config and Config.Streaming) or {}
 end
 
+--[[
+    Read an entity's pose without being able to raise.
+
+    -------------------------------------------------------------------------------------------
+    WHY THESE EXIST
+    -------------------------------------------------------------------------------------------
+
+    `DoesEntityExist` answering true is NOT a guarantee that the next native will succeed. A
+    server-created entity that no client currently has in scope is registered but has no
+    synchronisation state, and reads against it raise:
+
+        script error in native 00000000635e5289: Tried to access invalid entity: 143624
+
+    Observed on a live server the moment a player drove away from a group of restored vehicles.
+    The raise propagated out of `Spawn.despawn`, out of the streaming pass, and killed the pass
+    for that tick - which is how a resource stops streaming entirely while looking healthy.
+
+    Every server-side entity read now goes through one of these. A nil answer means "could not
+    read it", which every caller already handles by leaving the stored value alone.
+]]
+local function safeCoords(entity)
+    if not entity or entity == 0 then return nil end
+    local ok, position = pcall(GetEntityCoords, entity)
+    if not ok or not position then return nil end
+    if position.x == 0.0 and position.y == 0.0 then return nil end
+    return position
+end
+
+local function safeRotation(entity)
+    if not entity or entity == 0 then return nil end
+    local ok, rotation = pcall(GetEntityRotation, entity)
+    if not ok then return nil end
+    return rotation
+end
+
+local function safeExists(entity)
+    if not entity or entity == 0 then return false end
+    local ok, exists = pcall(DoesEntityExist, entity)
+    return ok and exists == true
+end
+
+local function safeDelete(entity)
+    if not entity or entity == 0 then return end
+    pcall(DeleteEntity, entity)
+end
+
+Spawn.safeCoords = safeCoords
+Spawn.safeRotation = safeRotation
+
 -- ---------------------------------------------------------------------------------------
 -- Players
 -- ---------------------------------------------------------------------------------------
@@ -178,6 +227,68 @@ local function nominate(record, players)
 end
 
 --[[
+    Everything that is done to a vehicle after it exists.
+
+    Separate from `Spawn.create` for one reason: it is called through `pcall`, and a pcall
+    around a named function is a great deal easier to read than a pcall around sixty inline
+    lines. Nothing in here may be assumed to have run.
+]]
+local function configure(entity, record)
+    SetEntityRoutingBucket(entity, record.bucket or 0)
+
+    -- Full rotation, and never a heading afterwards. See the note in client/placement.lua:
+    -- setting the heading would flatten the pitch a car parked on a slope actually has.
+    SetEntityCoords(entity, record.pos_x, record.pos_y, record.pos_z, false, false, false, false)
+    SetEntityRotation(entity, record.rot_x, record.rot_y, record.rot_z, 2, true)
+
+    local entityConfig = streaming().entity or {}
+
+    if entityConfig.orphanMode ~= false and SetEntityOrphanMode then
+        -- 2: keep the entity even when no player is near it. We decide when it goes.
+        pcall(SetEntityOrphanMode, entity, 2)
+    end
+
+    local culling = tonumber(entityConfig.cullingRadius) or 0
+    if culling > 0 and SetEntityDistanceCullingRadius then
+        pcall(SetEntityDistanceCullingRadius, entity, culling)
+    end
+
+    local state = Entity(entity).state
+
+    -- The id is replicated to everybody in scope. It is how a client knows this entity is
+    -- ours - the placement code refuses to delete a vehicle carrying one, and the panel and
+    -- the API both resolve an entity to a record through it.
+    state:set('vpark:id', record.id, true)
+
+    if record.plate then
+        state:set('vpark:plate', record.plate, true)
+    end
+
+    -- Deformation is applied by EVERY client, locally, which is what makes two players see
+    -- the same dents. Hence a replicated bag rather than a targeted event.
+    local deformation = record.properties and record.properties.deformation
+    if deformation and Config.Deformation and Config.Deformation.enabled ~= false then
+        state:set('vpark:deform', {
+            v = record.updated_at,
+            d = deformation.d,
+            g = deformation.g,
+        }, true)
+    end
+
+    -- Statebags another resource expects on the vehicle. Set server-side because a replicated
+    -- bag can only be written by the server or the entity's owner, and at this moment there
+    -- is no owner.
+    if record.statebags and Config.Save and Config.Save.fields and Config.Save.fields.statebags ~= false then
+        for key, value in pairs(record.statebags) do
+            local ok = pcall(function() state:set(key, value, true) end)
+            if not ok then
+                Park.debug('could not restore statebag `%s` on %s', tostring(key), record.id)
+            end
+        end
+    end
+end
+
+--[[
     Create one vehicle in the world.
 
     Returns the entity, or nil.
@@ -261,77 +372,29 @@ function Spawn.create(record, players)
 
     failures[record.id] = nil
 
-    -- Everything the server can set, set before any client is told about it.
-    SetEntityRoutingBucket(entity, record.bucket or 0)
-
-    -- Full rotation, and never a heading afterwards. See the note in client/placement.lua:
-    -- setting the heading would flatten the pitch a car parked on a slope actually has.
-    SetEntityCoords(entity, record.pos_x, record.pos_y, record.pos_z, false, false, false, false)
-    SetEntityRotation(entity, record.rot_x, record.rot_y, record.rot_z, 2, true)
-
-    local entityConfig = streaming().entity or {}
-
-    if entityConfig.orphanMode ~= false and SetEntityOrphanMode then
-        -- 2: keep the entity even when no player is near it. We decide when it goes.
-        pcall(SetEntityOrphanMode, entity, 2)
-    end
-
-    local culling = tonumber(entityConfig.cullingRadius) or 0
-    if culling > 0 and SetEntityDistanceCullingRadius then
-        pcall(SetEntityDistanceCullingRadius, entity, culling)
-    end
-
-    local netId = NetworkGetNetworkIdFromEntity(entity)
-
     --[[
-        No network id, no way for a client to find it.
+        REGISTERED FIRST. CONFIGURED SECOND. THIS ORDER IS THE WHOLE FIX.
 
-        The restore instruction is addressed by network id, so an entity without one can never
-        be dressed or placed - it would sit in the world as an undressed, unplaced copy that
-        nothing owns. That is the same shape as the duplication bug, so it gets the same
-        answer: delete what we made and report it, rather than leaving it behind.
+        Between `CreateVehicle` and `Store.setLive` there used to be sixty lines of natives:
+        the routing bucket, the coordinates, the rotation, the orphan mode, the culling radius
+        and half a dozen statebag writes. Any one of them raising - and
+        `SetEntityCoords`/`SetEntityRotation` on a freshly created entity demonstrably does -
+        left an entity in the world that nothing had recorded.
+
+        Nothing recorded it, so `Store.isLive` said no, so the next pass created another one.
+        And `SetEntityOrphanMode` had already told the engine never to collect it. That is the
+        multiplication, and it is why it accelerated: each pass added copies faster than
+        anything removed them.
+
+        So the entity is registered the instant it exists, before anything can raise, and
+        everything after that point runs inside a pcall. A configuration that fails now
+        despawns cleanly - which deletes the entity, because `despawn` owns that - instead of
+        abandoning it.
     ]]
-    if not netId or netId == 0 then
-        Park.warn('%s was created but has no network id - removing it', record.id)
-        DeleteEntity(entity)
-        stats.failed = stats.failed + 1
-        deferred[record.id] = Park.ticks() + 10000
-        return nil
-    end
-
-    local state = Entity(entity).state
-
-    -- The id is replicated to everybody in scope. It is how a client knows this entity is
-    -- ours - the placement code refuses to delete a vehicle carrying one, and the panel and
-    -- the API both resolve an entity to a record through it.
-    state:set('vpark:id', record.id, true)
-
-    if record.plate then
-        state:set('vpark:plate', record.plate, true)
-    end
-
-    -- Deformation is applied by EVERY client, locally, which is what makes two players see
-    -- the same dents. Hence a replicated bag rather than a targeted event.
-    local deformation = record.properties and record.properties.deformation
-    if deformation and Config.Deformation and Config.Deformation.enabled ~= false then
-        state:set('vpark:deform', {
-            v = record.updated_at,
-            d = deformation.d,
-            g = deformation.g,
-        }, true)
-    end
-
-    -- Statebags another resource expects on the vehicle. Set server-side because a replicated
-    -- bag can only be written by the server or the entity's owner, and at this moment there
-    -- is no owner.
-    if record.statebags and Config.Save and Config.Save.fields and Config.Save.fields.statebags ~= false then
-        for key, value in pairs(record.statebags) do
-            local ok = pcall(function() state:set(key, value, true) end)
-            if not ok then
-                Park.debug('could not restore statebag `%s` on %s', tostring(key), record.id)
-            end
-        end
-    end
+    -- Through pcall like everything else that touches the entity. A network id we cannot read
+    -- is handled below, after the vehicle is safely registered.
+    local gotId, netId = pcall(NetworkGetNetworkIdFromEntity, entity)
+    if not gotId then netId = nil end
 
     Store.setLive(record.id, {
         entity = entity,
@@ -341,6 +404,28 @@ function Spawn.create(record, players)
     })
 
     pending[record.id] = Park.ticks()
+
+    local configured = pcall(configure, entity, record)
+
+    --[[
+        A configuration that raised, or an entity with no network id, is not usable.
+
+        No network id means no client can ever be told to dress or place it: the restore
+        instruction is addressed by network id. Either way the answer is the same - despawn,
+        which deletes the entity because that is what despawn owns, and back off.
+    ]]
+    if not configured or not netId or netId == 0 then
+        if not configured then
+            Park.warn('%s was created but could not be configured - removing it', record.id)
+        else
+            Park.warn('%s was created but has no network id - removing it', record.id)
+        end
+
+        pcall(Spawn.despawn, record.id, 'configuration failed')
+        stats.failed = stats.failed + 1
+        deferred[record.id] = Park.ticks() + 10000
+        return nil
+    end
 
     TriggerClientEvent('vpark:client:restore', placer.src, netId, {
         id = record.id,
@@ -377,15 +462,36 @@ function Spawn.despawn(id, reason)
     local entry = Store.live(id)
     if not entry then return false end
 
+    --[[
+        THE BOOKKEEPING COMES FIRST AND CANNOT FAIL.
+
+        Everything below this point touches an entity, and touching a server-side entity can
+        raise - see `safeCoords`. An earlier version read the pose first and cleared the state
+        last, so a raise left the vehicle registered as live with an entity that was on its way
+        out. Nothing ever cleared it, the streaming pass died on the same vehicle every tick,
+        and the resource stopped streaming while looking perfectly healthy.
+
+        Clearing first means the worst case is a vehicle whose final position was not saved -
+        it comes back where it was a minute ago - rather than a resource that has stopped.
+    ]]
+    local entity = entry.entity
+    local placer = entry.placer
+
+    Store.setLive(id, nil)
+    pending[id] = nil
+    deferred[id] = nil
+
     -- One last read of where it actually ended up. A vehicle that was pushed, or that settled
     -- differently from where we placed it, should be written down before it goes away - or the
     -- next restore puts it back at a position that is a restart out of date.
+    --
+    -- Best effort, through the safe accessors: an entity nobody has in scope may not answer.
     local record = Store.get(id)
-    if record and entry.entity and DoesEntityExist(entry.entity) then
-        local position = GetEntityCoords(entry.entity)
-        local rotation = GetEntityRotation(entry.entity)
+    if record and safeExists(entity) then
+        local position = safeCoords(entity)
+        local rotation = safeRotation(entity)
 
-        if position and (position.x ~= 0.0 or position.y ~= 0.0) then
+        if position and rotation then
             Store.update(id, {
                 pos_x = Park.coord(position.x),
                 pos_y = Park.coord(position.y),
@@ -397,16 +503,13 @@ function Spawn.despawn(id, reason)
         end
     end
 
-    if entry.placer then
-        TriggerClientEvent('vpark:client:forget', entry.placer, id)
+    if placer then
+        pcall(TriggerClientEvent, 'vpark:client:forget', placer, id)
     end
 
-    if entry.entity and DoesEntityExist(entry.entity) then
-        DeleteEntity(entry.entity)
-    end
-
-    Store.setLive(id, nil)
-    pending[id] = nil
+    -- Unconditional, and not gated on `safeExists`. An entity that cannot be read may still
+    -- exist, and leaving it behind is exactly the failure this whole release is about.
+    safeDelete(entity)
 
     stats.despawned = stats.despawned + 1
     Park.trace('despawned %s (%s)', id, reason or 'out of range')
@@ -472,7 +575,7 @@ local function pass()
         -- Nobody online. Everything live is by definition wanted by nobody, and clearing it
         -- costs nothing and frees the entity budget for the next player to join.
         for id in pairs(Store.allLive()) do
-            Spawn.despawn(id, 'no players online')
+            pcall(Spawn.despawn, id, 'no players online')
         end
         return
     end
@@ -491,7 +594,9 @@ local function pass()
         if Park.ticks() - sentAt > 20000 then
             pending[id] = nil
             Park.debug('no placement answer for %s after 20s - removing it and re-nominating', id)
-            Spawn.despawn(id, 'no placement answer')
+            -- Individually protected. One vehicle that cannot be despawned must not stop the
+            -- other three hundred from being.
+            pcall(Spawn.despawn, id, 'no placement answer')
             stats.failed = stats.failed + 1
         end
     end
@@ -513,7 +618,7 @@ local function pass()
             local record = Store.get(id)
 
             if not record then
-                Spawn.despawn(id, 'no record')
+                pcall(Spawn.despawn, id, 'no record')
                 despawned = despawned + 1
             else
                 -- Wanted-set membership uses the spawn radius; the despawn radius is larger,
@@ -527,7 +632,7 @@ local function pass()
                 end
 
                 if nearest > despawnRadius * despawnRadius then
-                    Spawn.despawn(id, 'out of range')
+                    pcall(Spawn.despawn, id, 'out of range')
                     despawned = despawned + 1
                 end
             end
@@ -569,8 +674,18 @@ local function pass()
                 deferred[record.id] = nil
                 attempted = attempted + 1
 
-                if Spawn.create(record, players) then
+                -- Individually protected, for the same reason as the despawns above. A model
+                -- that raises on creation must cost one candidate, not the whole pass.
+                local ok, entity = pcall(Spawn.create, record, players)
+
+                if ok and entity then
                     created = created + 1
+                elseif not ok then
+                    Park.error('creating %s raised: %s', record.id, tostring(entity))
+                    -- It may have been created before it raised. Despawn covers both cases:
+                    -- registered-and-created, and registered-and-not.
+                    pcall(Spawn.despawn, record.id, 'creation raised')
+                    deferred[record.id] = Park.ticks() + 30000
                 end
             end
         end
@@ -590,6 +705,18 @@ CreateThread(function()
         local ok, err = pcall(pass)
         if not ok then
             Park.error('the streaming pass raised: %s', tostring(err))
+
+            --[[
+                A pass that raised may have left something behind, so sweep immediately rather
+                than waiting up to `reconcileInterval` for the scheduled one.
+
+                This is the belt to the fix's braces. Every individual create and despawn is
+                protected now, so a raise here should be impossible - but "should be
+                impossible" is what the last two releases said about the vehicle that
+                multiplied, and a sweep costs one walk of the vehicle pool.
+            ]]
+            pcall(Spawn.reconcile)
+
             -- Back off rather than raising once a second forever.
             Wait(5000)
         end
@@ -622,12 +749,16 @@ RegisterNetEvent('vpark:server:restored', function(id, result)
     end
 
     if not result.ok then
+        Park.debug('placement of %s failed: %s', id, tostring(result.reason))
+        pcall(Spawn.despawn, id, 'placement failed')
+
+        -- AFTER the despawn, which clears the backoff table as part of forgetting the
+        -- vehicle. Setting it first would have it wiped a line later, and the vehicle would
+        -- be retried on the very next pass - which is the retry storm this exists to stop.
         if result.retry then
             deferred[id] = Park.ticks() + 15000
         end
 
-        Park.debug('placement of %s failed: %s', id, tostring(result.reason))
-        Spawn.despawn(id, 'placement failed')
         stats.failed = stats.failed + 1
         return
     end
@@ -652,11 +783,20 @@ RegisterNetEvent('vpark:server:restored', function(id, result)
 end)
 
 RegisterNetEvent('vpark:server:restoreFailed', function(id, reason)
-    pending[id] = nil
+    local src = source
     if type(id) ~= 'string' then return end
 
+    -- Only the client we actually asked. Without this any player could despawn any vehicle on
+    -- the server by name - which the streaming pass would put straight back, so it is a waste
+    -- of everybody's bandwidth rather than a way to destroy anything, but it is still not a
+    -- message we should act on.
+    local entry = Store.live(id)
+    if not entry or entry.placer ~= src then return end
+
+    pending[id] = nil
+
     Park.debug('client could not restore %s: %s', id, tostring(reason))
-    Spawn.despawn(id, 'client failed')
+    pcall(Spawn.despawn, id, 'client failed')
     stats.failed = stats.failed + 1
 end)
 
@@ -744,7 +884,7 @@ function Spawn.reconcile()
     for index = 1, #all do
         local entity = all[index]
 
-        if entity and entity ~= 0 and DoesEntityExist(entity) then
+        if safeExists(entity) then
             local id
             local read = pcall(function() id = Entity(entity).state['vpark:id'] end)
 
@@ -755,7 +895,7 @@ function Spawn.reconcile()
                 if not record then
                     -- Ours by its statebag, unknown to the store. Nothing will ever claim it.
                     orphans = orphans + 1
-                    DeleteEntity(entity)
+                    safeDelete(entity)
                     removed = removed + 1
 
                 elseif not live then
@@ -763,13 +903,13 @@ function Spawn.reconcile()
                     -- is left over. Adopting it would be tempting and wrong: it has not been
                     -- dressed or placed, and we cannot tell whether it ever was.
                     orphans = orphans + 1
-                    DeleteEntity(entity)
+                    safeDelete(entity)
                     removed = removed + 1
 
                 elseif live.entity ~= entity then
                     -- A second copy of a vehicle we already have. THE ONE AN OPERATOR SEES.
                     duplicates = duplicates + 1
-                    DeleteEntity(entity)
+                    safeDelete(entity)
                     removed = removed + 1
                 end
             end

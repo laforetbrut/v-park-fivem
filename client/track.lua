@@ -116,6 +116,7 @@ Track.describe = describe
 
     Not cleared on exit: the point is to offer each vehicle once per session.
 ]]
+-- entity -> { plate, at }. See the note in `onEnter`; it is not a plain "already asked" set.
 local offeredOnEntry = {}
 
 local function onEnter(vehicle)
@@ -136,22 +137,50 @@ local function onEnter(vehicle)
     end
 
     --[[
-        Not one of ours yet. Offer it on ENTRY, so that a vehicle the framework says this
-        player owns is kept from the moment they sit in it rather than forty-five seconds
-        after they walk away from it.
+        Not one of ours yet. Offer it on ENTRY, so that a vehicle this player owns is kept
+        from the moment they sit in it rather than forty-five seconds after they walk away
+        from it.
 
-        The SERVER decides. It looks the plate up in the framework's owned-vehicles table and
-        adopts only if it is genuinely owned; anything else is ignored here and goes through
-        the ordinary settle path on exit. `Config.Persistence.ownedImmediately` is the switch.
+        The SERVER decides. It checks the framework's owned-vehicles table, then the key
+        resource, and adopts only if the car is genuinely theirs; anything else is ignored and
+        goes through the ordinary settle path on exit. `Config.Persistence.ownedImmediately`
+        is the switch.
 
-        Sent once per vehicle per session, and only when the local rules would allow it at
-        all - so a bicycle, a blacklisted model or a car inside a garage zone costs nothing.
+        Offered only when the local rules would allow it at all, so a bicycle, a blacklisted
+        model or a car inside a garage zone costs nothing.
+
+        -------------------------------------------------------------------------------------
+        WHY THE OFFER EXPIRES RATHER THAN BEING MADE ONCE
+        -------------------------------------------------------------------------------------
+
+        1.0.1 offered a given vehicle once per session and never again. Two things break on
+        that, and the first was reported:
+
+          - OWNERSHIP CAN ARRIVE AFTER YOU SIT DOWN. Get into a car, then get the keys -
+            `/admincar`, a mate handing them over, a dealership finishing a sale. The offer
+            was already made and refused, and nothing would ever ask again, so the car was
+            not kept.
+
+          - ENTITY HANDLES ARE REUSED. The table is keyed on the handle, so a vehicle that
+            despawned could hand its "already offered" mark to an entirely different car.
+
+        So the mark carries a time and the plate that was offered. A different plate on the
+        same handle is a different vehicle and is offered immediately; the same plate is
+        re-offered after `retrySeconds`. On a car nobody owns that is one small event a
+        minute while somebody sits in it, and it stops the moment they get out.
     ]]
     if not (Config.Persistence and Config.Persistence.ownedImmediately ~= false) then return end
-    if offeredOnEntry[vehicle] then return end
     if not worthReporting(vehicle) then return end
 
-    offeredOnEntry[vehicle] = true
+    local plate = GetVehicleNumberPlateText(vehicle)
+    local previous = offeredOnEntry[vehicle]
+    local retry = tonumber(Config.Persistence and Config.Persistence.entryOfferRetrySeconds) or 60
+
+    if previous and previous.plate == plate and Park.ticks() - previous.at < retry * 1000 then
+        return
+    end
+
+    offeredOnEntry[vehicle] = { plate = plate, at = Park.ticks() }
 
     local payload = describe(vehicle)
     if payload then

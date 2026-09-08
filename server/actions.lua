@@ -36,7 +36,7 @@ local function requireAdmin(src)
 
     if Config.Permissions and Config.Permissions.logRefusals then
         Park.warn('%s (%s) was refused an admin action - check `add_ace group.admin %s allow`',
-            GetPlayerName(src) or 'unknown', tostring(src),
+            Bridge.playerName(src) or 'unknown', tostring(src),
             tostring(Config.Permissions and Config.Permissions.ace))
     end
 
@@ -118,7 +118,7 @@ local function askClient(record, netId, action, value)
     local entry = Store.live(record.id)
     local src = entry and entry.placer
 
-    if not src or not GetPlayerName(src) then
+    if not Bridge.playerName(src) then
         -- Whoever placed it has gone. The nearest online player will do.
         local best, bestDistance
         for _, player in ipairs(Spawn.onlinePlayers()) do
@@ -366,7 +366,7 @@ function Actions.setOwner(src, reference, targetSrc)
     if not record then return false, err end
 
     targetSrc = tonumber(targetSrc)
-    if not targetSrc or not GetPlayerName(targetSrc) then return false, 'error.no_such_player' end
+    if not Bridge.playerName(targetSrc) then return false, 'error.no_such_player' end
 
     local characterId = Bridge.characterId(targetSrc)
     if not characterId then return false, 'error.character_not_loaded' end

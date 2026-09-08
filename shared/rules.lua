@@ -198,6 +198,22 @@ function Rules.modeAllows(ownership)
     if mode == 'owned' then
         if ownership == 'owned' then return true end
         if ownership == 'job' and Config.Persistence.jobVehicles then return true end
+
+        --[[
+            An explicit claim is honoured in 'owned' mode too.
+
+            `/vpark` exists to say "keep this one", and refusing it in the mode that ships as
+            the default would mean the command does nothing at all on a stock install - which
+            is worse than the small widening of what 'owned' means. A claim is a deliberate
+            act by a player about a car they are sitting in; there is no version of "owned"
+            in which that should be silently ignored.
+
+            `Config.Persistence.allowClaimInOwnedMode = false` for a strict reading.
+        ]]
+        if ownership == 'claimed' and Config.Persistence.allowClaimInOwnedMode ~= false then
+            return true
+        end
+
         return false, 'refuse.not_owned'
     end
 

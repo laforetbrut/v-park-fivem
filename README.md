@@ -40,8 +40,10 @@ what it found, and changes nothing until you say so.
   crash. Position, rotation, modifications, colours, damage, fuel, dirt, plate, extras, neons,
   livery and lock state.
 - **A player's own car is kept from the moment they get in.** No command, no waiting. If the
-  framework says it is theirs, it is kept - which matters most in the case that used to lose
-  it: taking the car out and disconnecting a minute later.
+  framework says it is theirs - **or they simply hold the keys** - it is kept, which matters
+  most in the case that used to lose it: taking the car out and disconnecting a minute later.
+  Persistence defaults to `owned` for exactly this reason: the cars players care about, not
+  every taxi anybody has ever sat in.
 - **They come back in the SAME SPACE.** A four-stage placement engine handles the tight cases:
   underground car parks, single-car garages, alleyways, MLO interiors, multi-storey ramps. It
   is the section of the config worth reading, and it has its own heading below.
@@ -481,10 +483,13 @@ webhooks off, after which the next real error goes unread for a fortnight.
 ## Known limits, stated plainly
 
 - **What has actually been run, and what has not.** The server half has been exercised on a
-  real qb-core server with oxmysql: 64 automated checks covering boot, schema creation,
-  detection, every console command, the loader, the spatial grid, ownership, the lifecycle
-  maths, the save pipeline, the trash, the audit log and the full migration cycle. Three real
-  defects came out of that and are fixed.
+  real qb-core server with oxmysql and MariaDB 11.4: **78 automated checks, zero failures, zero
+  SQL errors and nothing raised in the boot log**, covering boot, schema creation, detection,
+  every console command, the loader, the spatial grid, ownership, the lifecycle maths, the save
+  pipeline, the trash, the audit log, the reliability paths added in 1.0.2 and the full
+  migration cycle including backup and rollback. Several real defects have come out of it,
+  including one - console commands never being audited - that had survived two releases because
+  the pcall that caught it logged a single line nobody read.
 
   **The client half has not been driven by a human yet.** Placement, deformation, property
   capture and apply, and the admin panel all need a game client, and the automated pass cannot
@@ -573,8 +578,10 @@ y a trouvé, et ne change rien tant que vous ne le demandez pas.
 - **Les déformations sont sauvegardées et synchronisées.** Les bosses reviennent, et tous les
   joueurs voient les mêmes, ce que le moteur ne garantit pas autrement.
 - **La voiture d'un joueur est conservée dès qu'il monte dedans.** Aucune commande, aucune
-  attente. Si le framework dit qu'elle lui appartient, elle est conservée : c'est justement le
-  cas qui la faisait perdre avant, sortir sa voiture et se déconnecter une minute plus tard.
+  attente. Si le framework dit qu'elle lui appartient, **ou s'il en a simplement les clés**,
+  elle est conservée : c'est justement le cas qui la faisait perdre avant, sortir sa voiture et
+  se déconnecter une minute plus tard. Le mode de persistance est `owned` par défaut pour cette
+  raison précise.
 - **Semi-persistance des véhicules de métier et de location.** Une voiture de police survit au
   redémarrage de 06h00 parce que l'agent est toujours en service, et disparaît 45 minutes après
   sa déconnexion. Le temps d'arrêt du serveur ne compte pas dans ce décompte.

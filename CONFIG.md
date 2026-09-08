@@ -46,12 +46,30 @@ The single most consequential setting in the file.
 
 | Mode | Behaviour | Table size on a busy server |
 |---|---|---|
-| **`'all'`** (default) | Any vehicle a player drives becomes persistent | A few thousand rows. They expire; see Section 9 |
-| `'owned'` | Only vehicles the framework says belong to a character. A stolen car vanishes on restart | Hundreds |
+| **`'owned'`** (default) | Only vehicles that are somebody's: the framework's owned-vehicles table, **or the keys** | Hundreds |
+| `'all'` | Any vehicle a player drives becomes persistent | A few thousand rows. They expire; see Section 9 |
 | `'claimed'` | Nothing persists until somebody runs `/vpark`. Maximum player agency, and it makes parking a deliberate act | Small |
 | `'none'` | Persistence off. Commands, API and migration still work | Zero |
 
 `'none'` is the setting to use **while migrating**, before you flip the switch.
+
+**The default changed in 1.0.2**, from `'all'` to `'owned'`. `'all'` persists every car anybody
+drives, and on a busy server that is a table full of stolen taxis nobody will ever look for
+again. Set it back to `'all'` if you were running 1.0.0 or 1.0.1 and want the old behaviour.
+
+Two settings keep `'owned'` from being uselessly strict, and both are on by default:
+
+- **`Config.Ownership.keysGrantOwnership`** - holding the keys counts as owning it. Without
+  this, `/admincar`, a dealership demo, a job spawner and a mate handing over their keys all
+  produce cars that vanish on the next restart, because none of them write a row in
+  `player_vehicles`. The framework's record is still asked **first** and still wins, so lending
+  somebody your keys does not lend them your car. It costs one export call to your key resource
+  at the moment somebody gets into a vehicle that is not persisted yet - not per save, not per
+  streaming pass. A key resource with no readable server-side answer is treated as "no keys".
+
+- **`Config.Persistence.allowClaimInOwnedMode`** - `/vpark` works. A claim is neither an owned
+  vehicle nor a job one, so read strictly the mode would refuse it and the park command would do
+  nothing at all on a stock install.
 
 ### `settleSeconds`
 

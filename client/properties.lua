@@ -104,7 +104,12 @@ local function rememberTuning(vehicle, fingerprint, tuning)
         tuningOrder[tuningCount] = vehicle
     end
 
-    tuningCache[vehicle] = { fingerprint = fingerprint, tuning = tuning }
+    -- The model is stored alongside and checked on the way out. See `tuningFingerprint`.
+    tuningCache[vehicle] = {
+        fingerprint = fingerprint,
+        model = GetEntityModel(vehicle),
+        tuning = tuning,
+    }
 
     -- Evict oldest-first once over the limit. A plain table would grow for the life of the
     -- session on a server where players drive a lot of different vehicles.
@@ -134,20 +139,50 @@ end
 --[[
     A cheap summary of everything the tuning half describes.
 
-    Twelve native calls chosen to move whenever anything in that half does: the colour indices
-    and the paint type, the wheel type, the livery, the window tint, three sample mod slots
-    across the visual, performance and wheel ranges, the turbo toggle, and the neon state.
+    Sixteen native calls chosen to move whenever anything in that half does: the identity of
+    the vehicle, the colour indices, the custom paint, the wheel type, the livery, the window
+    tint, three sample mod slots across the visual, performance and wheel ranges, the turbo
+    toggle, and the neon state.
 
     It is not a hash of the whole thing and does not need to be. Fitting a spoiler changes slot
     0; fitting an engine changes slot 11; a respray changes the colours. The one case it would
     miss is a mod changing in a slot nothing samples while every sampled value stays identical,
     which requires a deliberate effort to construct.
+
+    -------------------------------------------------------------------------------------------
+    THE MODEL AND THE PLATE ARE IN HERE FOR A REASON. DO NOT TAKE THEM OUT.
+    -------------------------------------------------------------------------------------------
+
+    The cache is keyed on the entity handle, and the game REUSES entity handles. A vehicle that
+    despawns frees its handle, and the next vehicle created can be given the same number.
+
+    1.0.1 sampled only the tuning values, so a cache entry survived that reuse: handle 1234 was
+    a custom-painted Sultan, handle 1234 became a Bison, the two agreed on every sampled value,
+    and the cache hit stamped the Sultan's paint onto the Bison. That car was then SAVED in the
+    wrong colour, so it also came back wrong - which is why the report was "wrong colours when
+    it loads, and the same on restore". It was one bug, seen twice.
+
+    Note also that custom RGB paint is sampled here. It is invisible to `GetVehicleColours`,
+    which keeps answering the underlying index while a custom colour is displayed, so without
+    these four calls a respray from indexed to custom would not move the fingerprint at all.
 ]]
 local function tuningFingerprint(vehicle)
     local primary, secondary = GetVehicleColours(vehicle)
     local pearlescent, wheelColour = GetVehicleExtraColours(vehicle)
 
-    return ('%d.%d.%d.%d.%d.%d.%d.%d.%d.%d.%s.%s'):format(
+    local custom = ''
+    if GetIsVehiclePrimaryColourCustom(vehicle) then
+        local r, g, b = GetVehicleCustomPrimaryColour(vehicle)
+        custom = ('%d,%d,%d'):format(r or 0, g or 0, b or 0)
+    end
+    if GetIsVehicleSecondaryColourCustom(vehicle) then
+        local r, g, b = GetVehicleCustomSecondaryColour(vehicle)
+        custom = custom .. ('/%d,%d,%d'):format(r or 0, g or 0, b or 0)
+    end
+
+    return ('%d.%s.%d.%d.%d.%d.%d.%d.%d.%d.%d.%d.%s.%s.%s'):format(
+        GetEntityModel(vehicle) or 0,
+        tostring(GetVehicleNumberPlateText(vehicle) or ''),
         primary or 0, secondary or 0,
         pearlescent or 0, wheelColour or 0,
         GetVehicleWheelType(vehicle) or 0,
@@ -157,7 +192,8 @@ local function tuningFingerprint(vehicle)
         GetVehicleMod(vehicle, 11) or -1,
         GetVehicleMod(vehicle, 23) or -1,
         tostring(IsToggleModOn(vehicle, 18)),
-        tostring(IsVehicleNeonLightEnabled(vehicle, 0))
+        tostring(IsVehicleNeonLightEnabled(vehicle, 0)),
+        custom
     )
 end
 
@@ -285,7 +321,10 @@ function Properties.capture(vehicle)
     local fingerprint = tuningFingerprint(vehicle)
     local cached = tuningCache[vehicle]
 
-    if cached and cached.fingerprint == fingerprint then
+    -- The model is checked separately as well as being inside the fingerprint. It costs one
+    -- comparison, and a cache that can hand one vehicle's paint to another is the single worst
+    -- thing this file could do: the wrong value is then written to the database as the truth.
+    if cached and cached.fingerprint == fingerprint and cached.model == GetEntityModel(vehicle) then
         for key, value in pairs(cached.tuning) do
             properties[key] = value
         end

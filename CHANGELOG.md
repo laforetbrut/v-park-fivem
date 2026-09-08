@@ -7,6 +7,174 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.2] - 2026-09-08
+
+Three bugs, all of them serious, all of them reported from a live server. Two were introduced
+by 1.0.1.
+
+### Fixed
+
+- **Vehicles multiplied without limit when approaching a group of them.** 1.0.1 fixed one cause
+  of this and missed the real one.
+
+  `Spawn.create` recorded the vehicle sixty lines after creating it. In between sat the routing
+  bucket, the coordinates, the rotation, the orphan mode, the culling radius and half a dozen
+  statebag writes - and `SetEntityCoords` and `SetEntityRotation` on a freshly created
+  server-side entity **raise**:
+
+  ```
+  script error in native 00000000635e5289: Tried to access invalid entity: 143624
+  ```
+
+  The exception propagated out before `Store.setLive` ran, so the entity existed in the world
+  and nothing had recorded it. Nothing had recorded it, so the next pass created another - and
+  `SetEntityOrphanMode(entity, 2)` had already told the engine never to collect any of them.
+  Rising entity handles in the console (141324, 143624, 152081, 153865, 154637) are the fleet
+  growing.
+
+  **The entity is now recorded the instant it exists**, before anything can raise, and every
+  native after that point runs inside a `pcall`. A configuration that fails despawns cleanly
+  instead of abandoning what it made.
+
+- **The streaming pass died on a vehicle it could not read, and stayed dead.** `Spawn.despawn`
+  read the vehicle's final position *before* clearing its bookkeeping. A server-side entity
+  nobody has in scope can raise on a plain `GetEntityCoords` even when `DoesEntityExist` says
+  yes, so the vehicle stayed registered as live with an entity on its way out, and the pass hit
+  the same vehicle and raised again every second afterwards. That is the
+  `the streaming pass raised: ...` line, and it is why a server could stop streaming while
+  looking perfectly healthy.
+
+  **The bookkeeping is now cleared first and cannot fail**; the pose read is best-effort through
+  accessors that cannot raise. Every create and every despawn is individually protected, so one
+  vehicle that cannot be handled costs one vehicle rather than the whole pass. A pass that
+  raises anyway triggers an immediate reconciliation sweep rather than waiting for the timer.
+
+- **Vehicles loaded in the wrong colours, and were then saved that way.** A 1.0.1 regression,
+  and the two halves of the report were one bug: the property cache is keyed on the entity
+  handle, **and the game reuses entity handles**.
+
+  Handle 1234 was a custom-painted Sultan. It despawned. The next vehicle created was given
+  handle 1234, agreed with the cache's twelve-value fingerprint - which sampled colour
+  *indices* and could not see custom RGB paint at all - and the cache handed it the Sultan's
+  paint. That car was then written to the database in the wrong colour, which is why it also
+  came back wrong.
+
+  The fingerprint now includes **the model, the plate and the custom paint**, the model is
+  checked separately on every cache hit, and the caches are cleared on both paths a vehicle can
+  leave by - not just the one that told us it was leaving.
+
+- **A vehicle a player held the keys to was not persistent.** Reported for `/admincar`, and true
+  of every vehicle that never gets a row in the framework's owned-vehicles table: a dealership
+  demo, a job spawner, a heist car handed to the crew, a mate handing over their keys. See
+  *Changed* below.
+
+- **Getting the keys after getting in never asked again.** The on-entry offer that decides
+  whether to keep a vehicle was made once per vehicle per session, so a player who sat down and
+  *then* got the keys was never reconsidered. It now carries the plate and a timestamp, and
+  re-offers after `Config.Persistence.entryOfferRetrySeconds` (60). The plate is in there because
+  the table was keyed on the entity handle, which - again - the game reuses.
+
+- **A raise while dressing a vehicle made it flicker.** The client sent no answer at all, so the
+  server waited the full twenty-second timeout, despawned the vehicle and nominated somebody
+  else. Applying properties is now protected and exactly one answer leaves the restore thread
+  whatever happens inside it. A car that is dressed wrong is a much smaller problem than a car
+  that appears, vanishes and appears again.
+
+- **`Persist.adopt` could produce a duplicate of the car the player was sitting in.** It wrote
+  the statebag before registering the vehicle, unprotected, on a client-owned entity - the one
+  kind whose statebag write can fail. If it raised, the record existed and nothing was
+  registered as live, so the streaming pass created a second copy. Same fix, same order.
+
+- **`vpark:server:restoreFailed` accepted an answer from any client**, not only the one that was
+  asked. The streaming pass put the vehicle straight back, so it wasted bandwidth rather than
+  destroying anything, but it is not a message to act on.
+
+- **A failed placement lost its retry backoff.** The fifteen-second deferral was set immediately
+  before the despawn that clears it, so the vehicle was retried on the very next pass - the
+  retry storm the deferral exists to prevent.
+
+### Changed
+
+- **`Config.Persistence.mode` now defaults to `'owned'`.** It was `'all'`, which persists every
+  car anybody drives; on a busy server that is a table full of stolen taxis nobody will look for
+  again. Set it back to `'all'` for the old behaviour.
+
+- **Holding the keys counts as owning it.** `Config.Ownership.keysGrantOwnership`, on by default,
+  and it is what makes `'owned'` mode usable rather than strict. The framework's record is still
+  asked first and still wins, so handing a mate your keys does not hand them your car. One
+  export call to your key resource, at the moment somebody gets into a vehicle that is not
+  persisted yet - not per save and not per streaming pass. A key resource with no readable
+  server-side answer is treated as "no keys" and the vehicle falls through to the settle timer
+  exactly as before.
+
+- **`/vpark` works in `'owned'` mode.** A claim is neither an owned vehicle nor a job one, so
+  strictly read the mode would refuse it - and the park command would do nothing at all on a
+  stock install. `Config.Persistence.allowClaimInOwnedMode`, on by default.
+
+- **The reconciliation sweep runs every 15 seconds** rather than every 30. It is the net that
+  catches anything the creation path still manages to lose, and a stray vehicle is far more
+  visible than the cost of looking for one.
+
+### Internal
+
+- `tools/check.py` gained a twelfth check group that asserts the shipped defaults in
+  `config.lua` against the values the README, the CHANGELOG and the release notes state. A
+  default that drifts from its documentation costs an operator an afternoon.
+
+---
+
+## [1.0.2] - 2026-09-08 (français)
+
+Trois bugs, tous sérieux, tous remontés depuis un serveur en production. Deux ont été introduits
+par la 1.0.1.
+
+### Corrigé
+
+- **Les véhicules se multipliaient sans fin à l'approche.** La 1.0.1 avait corrigé une cause et
+  raté la vraie. `Spawn.create` enregistrait le véhicule soixante lignes après l'avoir créé, et
+  `SetEntityCoords` / `SetEntityRotation` sur une entité serveur fraîchement créée **lèvent une
+  erreur**. L'exception passait avant `Store.setLive` : l'entité existait dans le monde et rien
+  ne l'avait notée, donc la passe suivante en créait une autre, indéfiniment. L'entité est
+  maintenant enregistrée dès qu'elle existe, avant que quoi que ce soit puisse lever, et toute
+  la configuration qui suit est protégée.
+
+- **La passe de streaming mourait sur un véhicule illisible, et restait morte.** `Spawn.despawn`
+  lisait la position finale avant de nettoyer sa comptabilité. Une entité serveur que personne
+  n'a en portée peut lever sur un simple `GetEntityCoords`, donc le véhicule restait enregistré
+  comme vivant et la passe rebutait dessus chaque seconde. La comptabilité est désormais
+  nettoyée en premier et ne peut pas échouer ; la lecture est au mieux. Chaque création et
+  chaque suppression est protégée individuellement.
+
+- **Les véhicules chargeaient avec la mauvaise couleur, puis étaient sauvegardés ainsi.**
+  Régression 1.0.1 : le cache de propriétés est indexé sur le handle d'entité, **et le jeu
+  réutilise les handles**. Une empreinte qui ne regardait que les index de couleur ne voyait pas
+  la peinture personnalisée et laissait la Sultan repeinte céder sa couleur à la voiture
+  suivante. L'empreinte inclut maintenant le modèle, la plaque et la peinture personnalisée, et
+  les caches sont vidés sur les deux chemins de disparition.
+
+- **Un véhicule dont le joueur avait les clés n'était pas persistant.** Signalé avec
+  `/admincar`. Voir *Changé*.
+
+- **Obtenir les clés après être monté ne redemandait jamais.** L'offre est maintenant renouvelée
+  toutes les 60 secondes (`Config.Persistence.entryOfferRetrySeconds`).
+
+- **Une erreur pendant l'habillage faisait clignoter le véhicule** : aucune réponse n'était
+  envoyée, le serveur attendait vingt secondes puis supprimait et recommençait. Exactement une
+  réponse quitte désormais le fil de restauration, quoi qu'il arrive.
+
+- **`Persist.adopt` pouvait dupliquer la voiture où le joueur était assis**, pour la même raison
+  d'ordre que `Spawn.create`.
+
+### Changé
+
+- **`Config.Persistence.mode` vaut maintenant `'owned'` par défaut.**
+- **Avoir les clés vaut propriété** (`Config.Ownership.keysGrantOwnership`). Le registre du
+  framework reste prioritaire : prêter ses clés ne donne pas la voiture.
+- **`/vpark` fonctionne en mode `'owned'`** (`Config.Persistence.allowClaimInOwnedMode`).
+- **La passe de réconciliation tourne toutes les 15 secondes** au lieu de 30.
+
+---
+
 ## [1.0.1] - 2026-09-09
 
 A stability and performance release, and one fix that matters more than everything else in it.

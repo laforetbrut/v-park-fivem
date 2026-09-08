@@ -85,10 +85,26 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
     if type(data) ~= 'table' or type(netId) ~= 'number' then return end
 
     CreateThread(function()
+        --[[
+            EXACTLY ONE ANSWER LEAVES THIS THREAD, WHATEVER HAPPENS BELOW.
+
+            The server holds the vehicle in `pending` until it hears back, and a thread that
+            raises without answering leaves it there for the full twenty-second timeout before
+            it is despawned and re-nominated. On a client with a mod that breaks one of these
+            natives, that is every vehicle, every time - a fleet that visibly flickers.
+        ]]
+        local answered = false
+
+        local function answer(event, ...)
+            if answered then return end
+            answered = true
+            TriggerServerEvent(event, ...)
+        end
+
         local entity = waitForEntity(netId, 12000)
 
         if not entity then
-            TriggerServerEvent('vpark:server:restoreFailed', data.id, 'no_entity')
+            answer('vpark:server:restoreFailed', data.id, 'no_entity')
             return
         end
 
@@ -99,12 +115,25 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
 
         SetEntityAsMissionEntity(entity, true, true)
 
-        -- Properties BEFORE placement. Two reasons: fitting a body kit changes the model's
-        -- dimensions, and the probe has to measure the car that will exist rather than the
-        -- one that does; and a vehicle is invisible for these few frames anyway because it is
-        -- still a collisionless ghost.
+        --[[
+            Properties BEFORE placement. Two reasons: fitting a body kit changes the model's
+            dimensions, and the probe has to measure the car that will exist rather than the
+            one that does; and a vehicle is invisible for these few frames anyway because it
+            is still a collisionless ghost.
+
+            Through pcall, because a raise here used to mean NO ANSWER AT ALL. The server
+            waits twenty seconds for one, then despawns the vehicle and nominates somebody
+            else - so one bad property on one car showed up in play as a car that appeared,
+            vanished, and appeared again.
+
+            A car that is dressed wrong is a much smaller problem than a car that flickers,
+            and the next save corrects it.
+        ]]
         if type(data.properties) == 'table' then
-            Properties.apply(entity, data.properties, { version = data.version })
+            local dressed = pcall(Properties.apply, entity, data.properties, { version = data.version })
+            if not dressed then
+                Park.debug('could not apply properties to %s - placing it anyway', tostring(data.id))
+            end
         end
 
         local result = Placement.place(entity, {
@@ -135,7 +164,7 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
             byNet[netId] = data.id
         end
 
-        TriggerServerEvent('vpark:server:restored', data.id, result)
+        answer('vpark:server:restored', data.id, result)
     end)
 end)
 
@@ -150,7 +179,15 @@ RegisterNetEvent('vpark:client:forget', function(id)
     local record = tracked[id]
     if not record then return end
 
-    if record.entity and DoesEntityExist(record.entity) then
+    --[[
+        Cleared unconditionally, and NOT gated on the entity still existing.
+
+        This event arrives BECAUSE the server is deleting the entity, so by the time we handle
+        it `DoesEntityExist` has often already gone false - and 1.0.1's existence check meant
+        the caches were then never cleared for exactly the vehicles most likely to have their
+        handle handed to something else. Both of these only touch local tables.
+    ]]
+    if record.entity then
         Deformation.clear(record.entity)
         Properties.forget(record.entity)
     end
@@ -243,6 +280,16 @@ CreateThread(function()
                 if not record.entity or not DoesEntityExist(record.entity) then
                     -- The entity went away without us being told. The server owns that fact,
                     -- so we only stop tracking locally and let it find out on its own schedule.
+                    --
+                    -- The caches MUST be dropped here as well as in `vpark:client:forget`.
+                    -- This is the path a vehicle takes when the server restarts or the engine
+                    -- culls it, and a cache entry left against a freed handle is one the game
+                    -- can hand to an entirely different vehicle - see `tuningFingerprint`.
+                    if record.entity then
+                        Deformation.clear(record.entity)
+                        Properties.forget(record.entity)
+                    end
+
                     if record.netId then byNet[record.netId] = nil end
                     tracked[id] = nil
                     trackedCount = trackedCount - 1

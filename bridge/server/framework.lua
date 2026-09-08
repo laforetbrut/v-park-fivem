@@ -460,18 +460,52 @@ function Bridge.waitForCharacter(src, timeoutMs)
         local id = Bridge.characterId(src)
         if id then return id end
         Wait(500)
-    until Park.ticks() > deadline or not GetPlayerName(src)
+    until Park.ticks() > deadline or not Bridge.playerName(src)
 
     return nil
 end
 
+--[[
+    `GetPlayerName` without the crash.
+
+    -------------------------------------------------------------------------------------------
+    WHY THIS EXISTS
+    -------------------------------------------------------------------------------------------
+
+    `GetPlayerName(0)` does not return nil. It RAISES:
+
+        script error in native 00000000406b4b20: Argument at index 0 was null.
+
+    Zero is the console, and the console runs commands. Every audit row written for a console
+    command went through `Bridge.name(0)`, raised inside the database thread, was swallowed by
+    that thread's pcall, and the row was never written - so `/vparkmigrate run` from the server
+    console has never been audited, in any version, and said nothing about it.
+
+    A player id typed by an operator has the same shape: `/vparkowner <vehicle> 0` reached the
+    native with a zero as well.
+
+    Returns nil for anything that is not a connected player, which is what every caller was
+    already written to expect.
+]]
+function Bridge.playerName(src)
+    if type(src) ~= 'number' or src <= 0 then return nil end
+
+    local ok, name = pcall(GetPlayerName, src)
+    if not ok or type(name) ~= 'string' or name == '' then return nil end
+
+    return name
+end
+
 function Bridge.name(src)
+    -- The console is not a player and has a name worth printing.
+    if type(src) ~= 'number' or src <= 0 then return 'console' end
+
     local object = player(src)
     if object and adapter then
         local name = adapter.name(core, object)
         if type(name) == 'string' and name ~= '' then return name end
     end
-    return GetPlayerName(src) or ('player ' .. tostring(src))
+    return Bridge.playerName(src) or ('player ' .. tostring(src))
 end
 
 function Bridge.job(src)

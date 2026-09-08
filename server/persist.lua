@@ -83,15 +83,16 @@ RegisterNetEvent('vpark:server:candidate', function(payload)
     if not Runtime.ready() then return end
 
     --[[
-        An ON-ENTRY offer is accepted only for a vehicle the framework says is OWNED.
+        An ON-ENTRY offer is accepted only for a vehicle that is already the player's.
 
         The client sends one the moment a player sits in a vehicle it does not already know
         about. Accepting all of them would make the settle timer meaningless - every car
         anybody touches would be kept instantly, including the one they hopped into at a red
         light.
 
-        So the server checks the owned-vehicles table and ignores the offer otherwise. The
-        vehicle still goes through the ordinary settle path when they get out.
+        So the server checks the owned-vehicles table, then the key resource, and ignores the
+        offer otherwise. The vehicle still goes through the ordinary settle path when they get
+        out.
 
         `Config.Persistence.ownedImmediately` is the switch, and the client already honours it
         before sending; this is the same check on the side that decides.
@@ -103,9 +104,18 @@ RegisterNetEvent('vpark:server:candidate', function(payload)
         if not plate then return end
 
         local row = Bridge.ownedByPlate(plate)
-        if not row or not row.owner then return end
+        local owned = row ~= nil and row.owner ~= nil
 
-        -- Owned and out of the garage. Keep it now.
+        -- Or the player holds the keys, which since 1.0.2 is ownership in its own right. See
+        -- `Config.Ownership.keysGrantOwnership`: an admin-spawned car, a dealership demo or a
+        -- car a mate handed over is theirs, and losing it on a restart was reported as a bug.
+        if not owned and Config.Ownership and Config.Ownership.keysGrantOwnership ~= false then
+            owned = Ownership.hasKeys(src, payload.plate or plate)
+        end
+
+        if not owned then return end
+
+        -- Theirs, and out of the garage. Keep it now.
         Persist.adopt(src, payload)
         return
     end
@@ -265,9 +275,19 @@ function Persist.adopt(src, payload, explicit)
 
     Store.add(record, true)
 
-    -- The entity is already in the world and is now ours. Marking it means the placement code
-    -- will never delete it as ambient, and a restart can adopt it rather than duplicating it.
-    Entity(entity).state:set('vpark:id', record.id, true)
+    --[[
+        REGISTERED BEFORE IT IS MARKED, AND THE MARKING CANNOT RAISE.
+
+        Same rule as `Spawn.create`, and for the same reason. The statebag write used to come
+        first, unprotected, on an entity that belongs to a client - which is the one kind of
+        entity whose statebag write can fail. If it raised, the record was in the store and
+        nothing was registered as live, so the next streaming pass found a persisted vehicle
+        with no entity and CREATED ONE. The player then had two: the car they were sitting in,
+        and a copy of it.
+
+        Registering first means the worst case is a vehicle in the world without our statebag
+        on it - it is still ours, still saved, still streamed - rather than a duplicate.
+    ]]
     Store.setLive(record.id, {
         entity = entity,
         netId = netId,
@@ -275,6 +295,13 @@ function Persist.adopt(src, payload, explicit)
         placedAt = Park.ticks(),
         adopted = true,
     })
+
+    -- Marking it means the placement code will never delete it as ambient, and a restart can
+    -- adopt it rather than duplicating it.
+    local marked = pcall(function() Entity(entity).state:set('vpark:id', record.id, true) end)
+    if not marked then
+        Park.debug('%s was adopted but could not be marked - it is still ours', record.id)
+    end
 
     Park.debug('adopted %s (%s, %s) as %s', record.id, tostring(record.model_name),
         tostring(plate), ownerType)

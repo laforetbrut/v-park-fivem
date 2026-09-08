@@ -352,7 +352,7 @@ function Webhook.admin(action, src, target, detail)
     local actions = section.actions or {}
     if actions[action] == false then return end
 
-    local actorName = src == 0 and 'console' or (Bridge.name(src) or GetPlayerName(src) or ('player ' .. tostring(src)))
+    local actorName = Bridge.name(src) or ('player ' .. tostring(src))
     local mention = ''
 
     if section.mentionActor ~= false and src ~= 0 then

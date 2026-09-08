@@ -105,7 +105,7 @@ local function register(key, help, handler)
 
             if Config.Permissions and Config.Permissions.logRefusals and src ~= 0 then
                 Park.warn("%s tried /%s without permission - grant `add_ace group.admin %s allow`",
-                    GetPlayerName(src) or tostring(src), entry.name,
+                    Bridge.playerName(src) or tostring(src), entry.name,
                     tostring(Config.Permissions.ace))
             end
             return

@@ -8,6 +8,153 @@ out of it.
 
 ---
 
+## [2026-09-08 21:40] — Vehicles still multiplied, because the entity was recorded sixty lines too late
+
+**Context:** Reported from the same live server that reported the 1.0.1 multiplication. The
+1.0.1 fix was real and was not the cause. The console showed
+
+    restored 0TL0W3I0170BZ (80JTQ816) from the trash
+    script error in native 00000000635e5289: Tried to access invalid entity: 143624
+    the streaming pass raised: ...
+
+with the entity number climbing on every repetition: 141324, 143624, 152081, 153865, 154637.
+
+**Error:** `Tried to access invalid entity`, raised out of the streaming pass, once a second.
+
+**Root cause:** Two places, one rule broken twice.
+
+`Spawn.create` called `CreateVehicle` at the top of the function and `Store.setLive` sixty lines
+later. In between sat the routing bucket, the coordinates, the rotation, the orphan mode, the
+culling radius and half a dozen statebag writes. `SetEntityCoords` and `SetEntityRotation` on a
+freshly created server-side entity raise - the entity is registered but has no synchronisation
+state until a client has it in scope. The exception propagated out before `Store.setLive` ran,
+so the entity existed in the world and nothing had recorded it. `Store.isLive` then said no on
+the next pass, which created another one, and `SetEntityOrphanMode(entity, 2)` had already told
+the engine never to collect any of them.
+
+`Spawn.despawn` had the mirror image: it read the vehicle's final position **before** clearing
+its bookkeeping. The same raise left the vehicle registered as live with an entity on its way
+out, nothing ever cleared it, and the pass hit that vehicle and died on it every tick
+afterwards - which is a resource that has stopped streaming while looking perfectly healthy.
+
+`Persist.adopt` had it a third time, writing the statebag before `Store.setLive` and without a
+pcall, on a client-owned entity - the one kind whose statebag write can genuinely fail. A raise
+there produced a duplicate of the car the player was sitting in.
+
+**Fix:** The entity is recorded the instant it exists, before anything that can raise, and every
+native after that point runs inside a pcall. `Spawn.despawn` clears `Store.setLive`, `pending`
+and `deferred` first, unconditionally, and only then reads the pose through accessors that
+cannot raise. Every create and every despawn in the pass is individually protected rather than
+the pass being wrapped in one pcall, so one bad vehicle costs one vehicle. A pass that raises
+anyway triggers an immediate reconciliation sweep.
+
+**Prevention:**
+
+> **Record it, then configure it. Never the other way round.**
+>
+> A server-side entity that exists and is not in `Store.live` is invisible to every part of this
+> resource, and `orphanMode 2` guarantees the engine will not tidy it up either. The window
+> between creating an entity and recording it must contain nothing that can raise, and in
+> practice that means nothing at all.
+>
+> The mirror rule for removal: **clear the bookkeeping first, then touch the entity.** The worst
+> case is a position that was not saved. The alternative is a resource that stops.
+
+---
+
+## [2026-09-08 22:05] — `DoesEntityExist` is not permission to read an entity
+
+**Context:** Chasing the raise above.
+
+**Error:** `script error in native 00000000635e5289: Tried to access invalid entity: 143624`
+from `GetEntityCoords`, on an entity `DoesEntityExist` had just answered true for.
+
+**Root cause:** A server-created entity that no client currently has in scope is registered
+without synchronisation state. `DoesEntityExist` answers about registration; the position
+natives need the state. They are two different questions and the first is not a gate for the
+second.
+
+**Fix:** `safeCoords`, `safeRotation`, `safeExists` and `safeDelete` in `server/spawn.lua`. A nil
+answer means "could not read it", which every caller already handled by leaving the stored value
+alone. `safeDelete` is deliberately NOT gated on existence: an entity that cannot be read may
+still exist, and leaving it behind is the failure this whole release is about.
+
+**Prevention:** On the server, treat every entity read as fallible. There is no cheap check that
+makes one safe.
+
+---
+
+## [2026-09-08 22:30] — A vehicle loaded in another vehicle's colours, and was then saved that way
+
+**Context:** Reported as two symptoms - "sometimes it loads in the wrong colours" and "the same
+on restore". They were one bug seen at both ends.
+
+**Error:** No error. A Bison rendered in a Sultan's custom paint, and the database agreed.
+
+**Root cause:** A regression I introduced in 1.0.1. The property capture caches its expensive
+half against a cheap fingerprint, and the cache is keyed on the entity handle - **which the game
+reuses**. A vehicle that despawns frees its handle and the next one created can be given the
+same number.
+
+The fingerprint sampled twelve tuning values and none of them identified the vehicle. Worse, it
+read colour *indices*, and `GetVehicleColours` keeps answering the underlying index while a
+custom RGB colour is displayed, so custom paint was invisible to it entirely. Two different cars
+that agreed on twelve values shared a cache entry, and the cache overwrote the freshly read
+colours on the way out.
+
+The caches were also cleared on only one of the two paths a vehicle leaves by. The
+`vpark:client:forget` handler gated the clear on `DoesEntityExist`, and that event arrives
+*because* the server is deleting the entity - so the check usually failed for exactly the
+vehicles whose handles were about to be reused. The prune path in the wake loop did not clear
+them at all.
+
+**Fix:** The fingerprint includes the model, the plate and the custom paint. The model is
+compared separately on every cache hit. Both removal paths clear both caches, unconditionally.
+
+**Prevention:**
+
+> **An entity handle is not an identity.** Anything keyed on one needs a value in it that says
+> which vehicle it was, and the check has to be on the way OUT of the cache, not only on the way
+> in.
+
+---
+
+## [2026-09-08 23:15] — `GetPlayerName(0)` raises, so console commands were never audited
+
+**Context:** Spotted in the smoke test's boot log, at the end of `/vparkmigrate run`:
+
+    script error in native 00000000406b4b20: Argument at index 0 was null.
+    ERROR: a database thread raised: native 00000000406b4b20: Argument at index 0 was null.
+
+Every check still passed, which is why it survived two releases.
+
+**Error:** `Argument at index 0 was null` from `GetPlayerName`.
+
+**Root cause:** `GetPlayerName(0)` does not return nil, it raises. Zero is the console, and the
+console runs commands. `Bridge.name(src)` fell through to the raw native, so every audit row
+written for a console-invoked command raised inside `Database.thread`, was swallowed by that
+thread's pcall, and was silently never written. `/vparkmigrate run` from the server console has
+never been audited in any version.
+
+The same shape existed in `Actions.setOwner`, where the target id comes from operator input:
+`/vparkowner <vehicle> 0` reached the native with a zero.
+
+**Fix:** `Bridge.playerName(src)` - nil for anything that is not a connected player, pcall around
+the native. `Bridge.name` answers `'console'` for a non-positive source. Every call site moved
+over, and `tools/check.py` group 13 fails the build on a raw `GetPlayerName` outside the file
+that defines the wrapper.
+
+**Prevention:**
+
+> **A pcall that swallows an error is not a fix, it is a place errors go to be forgotten.**
+>
+> `Database.thread` catching this is correct - a database thread must not take the resource down
+> - but it meant a real defect logged one line and carried on for two releases. When a wrapper
+> catches something, the log line has to be specific enough to act on, and somebody has to read
+> it.
+
+---
+
 ## [2026-09-09 03:20] — Vehicles multiplied until the server hit its entity limit
 
 **Context:** Reported from a live server. The console filled with

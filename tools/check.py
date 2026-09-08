@@ -555,6 +555,109 @@ def check_reserved_keys():
 
 
 # ==============================================================================================
+# 12. The shipped defaults
+#
+# config.lua is documentation as much as it is configuration, and a default that drifts from
+# what the README, the CHANGELOG and the release notes say it is costs an operator an afternoon.
+#
+# Only the handful that were deliberately CHOSEN and are load-bearing enough that changing one
+# by accident would be a bug are asserted here. Everything else is free to move.
+# ==============================================================================================
+
+SHIPPED_DEFAULTS = [
+    # (section, key, expected literal, why it matters)
+    ('Persistence', 'mode', "'owned'",
+     "the default persistence mode, changed in 1.0.2 and stated everywhere"),
+    ('Persistence', 'ownedImmediately', 'true',
+     "a player's own car is kept from the moment they get in"),
+    ('Ownership', 'keysGrantOwnership', 'true',
+     "holding the keys counts as owning it, which is what makes 'owned' mode usable"),
+    ('Persistence', 'allowClaimInOwnedMode', 'true',
+     "without it /vpark does nothing at all on a stock install"),
+    ('Streaming', 'reconcileInterval', '15',
+     "the sweep that catches a stray vehicle; 0 disables it"),
+]
+
+
+def check_shipped_defaults():
+    global checks_run
+    checks_run += 1
+
+    path = os.path.join(ROOT, 'config.lua')
+    if not os.path.exists(path):
+        fail('defaults', 'there is no config.lua')
+        return
+
+    source = strip_comments(read(path))
+
+    # Split the file into its `Config.<Section> = { ... }` blocks, so a key that appears in two
+    # sections is read from the right one.
+    sections = {}
+    for match in re.finditer(r'^Config\.(\w+)\s*=\s*\{', source, re.MULTILINE):
+        name = match.group(1)
+        start = match.end()
+        depth = 1
+        index = start
+        while index < len(source) and depth > 0:
+            if source[index] == '{':
+                depth += 1
+            elif source[index] == '}':
+                depth -= 1
+            index += 1
+        sections[name] = source[start:index]
+
+    for section, key, expected, why in SHIPPED_DEFAULTS:
+        body = sections.get(section)
+        if body is None:
+            fail('defaults', f'config.lua has no Config.{section} block')
+            continue
+
+        found = re.search(r'^\s*' + re.escape(key) + r'\s*=\s*([^,\n]+),', body, re.MULTILINE)
+        if not found:
+            fail('defaults', f'Config.{section}.{key} is not set in config.lua ({why})')
+            continue
+
+        actual = found.group(1).strip()
+        if actual != expected:
+            fail('defaults',
+                 f'Config.{section}.{key} ships as {actual}, expected {expected} - {why}. '
+                 'If the change is deliberate, update SHIPPED_DEFAULTS in tools/check.py and '
+                 'the README and CHANGELOG with it.')
+
+
+# ==============================================================================================
+# 13. GetPlayerName
+#
+# `GetPlayerName(0)` RAISES rather than returning nil, and zero is the console. Every audit row
+# written for a console command went through it, raised inside a database thread, was swallowed
+# by that thread's pcall, and was silently never written.
+#
+# `Bridge.playerName` is the guarded version. The raw native is allowed in exactly one place:
+# the file that defines it.
+# ==============================================================================================
+
+PLAYER_NAME_HOME = 'bridge/server/framework.lua'
+
+
+def check_player_name():
+    global checks_run
+    checks_run += 1
+
+    for path in lua_files():
+        rel = relative(path)
+        if rel == PLAYER_NAME_HOME or rel.startswith('tools/'):
+            continue
+
+        source = strip_comments(read(path))
+        for number, line in enumerate(source.split('\n'), start=1):
+            if re.search(r'\bGetPlayerName\s*\(', line):
+                fail('playername',
+                     f'{rel}:{number} calls GetPlayerName directly. It RAISES on 0 (the '
+                     'console) rather than returning nil. Use Bridge.playerName, which is '
+                     'guarded and answers nil for anything that is not a connected player.')
+
+
+# ==============================================================================================
 
 def main():
     english = check_locales()
@@ -569,6 +672,8 @@ def main():
     check_schema_gates()
     check_reserved_keys()
     check_parameter_nils()
+    check_shipped_defaults()
+    check_player_name()
 
     print(f'v-park: {checks_run} check groups run over {len(lua_files())} Lua files')
 
