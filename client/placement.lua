@@ -1079,31 +1079,6 @@ function Placement.placeInner(entity, data)
     local settleDelay = tonumber(options().settleDelay) or 250
     if settleDelay > 0 then Wait(settleDelay) end
 
-    --[[
-        THE LAST LOOK. DID IT STAY WHERE WE PUT IT?
-
-        Everything above is careful, and none of it can promise the entity is still there a
-        quarter of a second later. It may have been unfrozen by another resource, pushed by a
-        vehicle streaming in beside it, or dropped through a piece of map that arrived after
-        the collision check said it had not.
-
-        The symptom is unmistakable and it is what this check exists for: a vehicle that
-        "appeared under the map a few metres from where I parked it". Half a metre is beyond
-        anything settling can account for, so anything past that is put back rather than
-        reported.
-
-        Cheap - one position read and, in the overwhelming majority of cases, nothing else.
-    ]]
-    local landed = GetEntityCoords(entity)
-    if landed and #(landed - target) > 0.5 then
-        Park.debug('%s drifted %.2f m while settling - putting it back',
-            tostring(data.id), #(landed - target))
-
-        FreezeEntityPosition(entity, true)
-        SetEntityCoordsNoOffset(entity, target.x, target.y, target.z, false, false, false)
-        SetEntityRotation(entity, rotation.x or 0.0, rotation.y or 0.0, heading, 2, true)
-        SetEntityVelocity(entity, 0.0, 0.0, 0.0)
-    end
 
     -- Whether physics is handed back at all is `freezeUntilTouched`. When it is on, the
     -- vehicle stays frozen until a player interacts with it, which costs no simulation and
@@ -1119,6 +1094,51 @@ function Placement.placeInner(entity, data)
 
     SetVehicleDoorsShut(entity, true)
     SetVehicleUndriveable(entity, false)
+
+    --[[
+        ============================================================================
+        HOLD IT TO THE EXACT POSE, AND MEAN IT.
+        ============================================================================
+
+        Everything above places the vehicle and then trusts it to stay placed. It mostly does,
+        and "mostly" is what "they are not quite in the right place" is made of.
+
+        A vehicle can move by a few centimetres between the coordinates being set and the
+        freeze taking hold: collision streams in underneath it and the engine resolves the
+        intersection, a vehicle materialises alongside and pushes it, the suspension settles.
+        None of that is far enough to look broken and all of it is far enough to look wrong -
+        and once the vehicle is frozen there, that is where it stays, and the next capture
+        writes it down.
+
+        1.0.7 checked once, before the freeze, and only acted past half a metre. Both were
+        wrong: half a metre is enormous for something that is supposed to be exact, and before
+        the freeze is before most of the movement.
+
+        So: after the freeze, twice, two centimetres. Re-asserting a pose on a frozen entity
+        costs three natives and nothing else, and the vehicle is then where the database says
+        it is - not approximately, exactly.
+
+        Only for a vehicle that stays frozen. One that was handed back to physics is meant to
+        settle, and holding it would be fighting the thing we just asked for.
+    ]]
+    if keepFrozen or not collisionLoaded then
+        for _ = 1, 2 do
+            Wait(150)
+
+            local at = GetEntityCoords(entity)
+            if not at then break end
+
+            if #(at - target) > 0.02 then
+                Park.debug('%s moved %.3f m after placement - re-asserting the pose',
+                    tostring(data.id), #(at - target))
+
+                FreezeEntityPosition(entity, true)
+                SetEntityCoordsNoOffset(entity, target.x, target.y, target.z, false, false, false)
+                SetEntityRotation(entity, rotation.x or 0.0, rotation.y or 0.0, heading, 2, true)
+                SetEntityVelocity(entity, 0.0, 0.0, 0.0)
+            end
+        end
+    end
 
     return {
         ok = true,

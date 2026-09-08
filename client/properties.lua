@@ -180,7 +180,11 @@ local function tuningFingerprint(vehicle)
         custom = custom .. ('/%d,%d,%d'):format(r or 0, g or 0, b or 0)
     end
 
-    return ('%d.%s.%d.%d.%d.%d.%d.%d.%d.%d.%d.%d.%s.%s.%s'):format(
+    -- The paint type, which `GetVehicleColours` cannot see: a car resprayed from metallic to
+    -- matte in the same colour has identical indices and a different paint type.
+    local paintType = GetVehicleModColor_1(vehicle) or 0
+
+    return ('%d.%s.%d.%d.%d.%d.%d.%d.%d.%d.%d.%d.%s.%s.%s.%d'):format(
         GetEntityModel(vehicle) or 0,
         tostring(GetVehicleNumberPlateText(vehicle) or ''),
         primary or 0, secondary or 0,
@@ -193,7 +197,8 @@ local function tuningFingerprint(vehicle)
         GetVehicleMod(vehicle, 23) or -1,
         tostring(IsToggleModOn(vehicle, 18)),
         tostring(IsVehicleNeonLightEnabled(vehicle, 0)),
-        custom
+        custom,
+        paintType
     )
 end
 
@@ -276,8 +281,23 @@ function Properties.capture(vehicle)
     properties.interiorColor = Properties.native('GetVehicleInteriorColour', 'GetVehicleInteriorColor', vehicle)
     properties.dashboardColor = Properties.native('GetVehicleDashboardColour', 'GetVehicleDashboardColor', vehicle)
 
-    properties.paintType1 = GetVehicleModColor_1(vehicle)
-    properties.paintType2 = GetVehicleModColor_2(vehicle)
+    --[[
+        THE WHOLE ANSWER, NOT THE FIRST THIRD OF IT.
+
+        `GET_VEHICLE_MOD_COLOR_1` returns THREE values - the paint type, the colour within that
+        type, and the pearlescent colour - and `GET_VEHICLE_MOD_COLOR_2` returns two. Storing
+        only the paint type and then feeding the setter a colour index from
+        `GetVehicleColours`, which is a DIFFERENT colour space entirely, is how a restored
+        vehicle came back in a colour nobody had ever chosen.
+
+        See `applyColours` for the other half of it, and for why the order there matters.
+    ]]
+    properties.modColor1 = { GetVehicleModColor_1(vehicle) }
+    properties.modColor2 = { GetVehicleModColor_2(vehicle) }
+
+    -- The paint types on their own, still written for anything reading the old keys.
+    properties.paintType1 = properties.modColor1[1]
+    properties.paintType2 = properties.modColor2[1]
 
     -- Custom RGB paint is a SEPARATE thing from the colour index, and only present when the
     -- flag says so. Reading it unconditionally returns the last custom colour the entity slot
@@ -521,6 +541,52 @@ local function applyModifications(vehicle, properties)
 end
 
 local function applyColours(vehicle, properties)
+    --[[
+        ==============================================================================
+        THE PAINT TYPES FIRST, THEN THE COLOURS. THIS ORDER IS THE FIX.
+        ==============================================================================
+
+        THIS IS WHY VEHICLES CHANGED COLOUR ON THEIR OWN.
+
+        `SET_VEHICLE_MOD_COLOR_1` and `SET_VEHICLE_COLOURS` write the same paint through two
+        different APIs, and whichever runs last wins. Until 1.0.9 the colours were set first
+        and the mod colours second - so the mod colours won.
+
+        And the mod colours were being fed nonsense. The capture stored only the FIRST of the
+        three values `GET_VEHICLE_MOD_COLOR_1` returns, and the apply then filled the other two
+        in from somewhere else entirely:
+
+            SetVehicleModColor_1(vehicle, paintType1, color1, 0)
+                                          ^ correct  ^ from GetVehicleColours, a different
+                                                       colour space
+                                                            ^ a literal zero, wiping the
+                                                              pearlescent colour
+
+        So the last thing to touch the paint was a call with two wrong arguments out of three.
+        The car came back in a colour nobody had chosen - and then the capture read that colour
+        and wrote it to the database, so it was wrong from then on without anybody touching it.
+        That is the "they change colour on their own" report, and it is why it never settled.
+
+        The whole triple is stored now and applied first, and `SetVehicleColours` runs after it
+        to set the primary and secondary indices, which is the order every other property
+        implementation in the ecosystem uses.
+    ]]
+    local mod1 = properties.modColor1
+    if type(mod1) == 'table' and type(mod1[1]) == 'number' then
+        SetVehicleModColor_1(vehicle, mod1[1], mod1[2] or 0, mod1[3] or 0)
+    elseif type(properties.paintType1) == 'number' then
+        -- A row written before 1.0.9 has the paint type and nothing else. Set the type and
+        -- leave the colour to `SetVehicleColours` below rather than inventing the rest.
+        SetVehicleModColor_1(vehicle, properties.paintType1, 0, 0)
+    end
+
+    local mod2 = properties.modColor2
+    if type(mod2) == 'table' and type(mod2[1]) == 'number' then
+        SetVehicleModColor_2(vehicle, mod2[1], mod2[2] or 0)
+    elseif type(properties.paintType2) == 'number' then
+        SetVehicleModColor_2(vehicle, properties.paintType2, 0)
+    end
+
     if type(properties.color1) == 'number' and type(properties.color2) == 'number' then
         SetVehicleColours(vehicle, properties.color1, properties.color2)
     end
@@ -538,12 +604,6 @@ local function applyColours(vehicle, properties)
             vehicle, properties.dashboardColor)
     end
 
-    if type(properties.paintType1) == 'number' and type(properties.color1) == 'number' then
-        SetVehicleModColor_1(vehicle, properties.paintType1, properties.color1, 0)
-    end
-    if type(properties.paintType2) == 'number' and type(properties.color2) == 'number' then
-        SetVehicleModColor_2(vehicle, properties.paintType2, properties.color2)
-    end
 end
 
 local function applyCustomPaint(vehicle, properties)

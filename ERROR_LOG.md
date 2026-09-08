@@ -8,6 +8,55 @@ out of it.
 
 ---
 
+## [2026-09-08 23:15] — Two natives for one paint, and the wrong one ran last
+
+**Context:** Reported after 1.0.8: "they still change colour on their own, that must not
+happen", and "they are still not quite in their place".
+
+**Error:** None. Both silent.
+
+**Root cause, the colour:** `SET_VEHICLE_MOD_COLOR_1` and `SET_VEHICLE_COLOURS` write the same
+paint through two different APIs. `applyColours` called them in that order - colours first, mod
+colours second - so the mod colours were the last word.
+
+And they were being given arguments from three different places:
+
+    SetVehicleModColor_1(vehicle, properties.paintType1, properties.color1, 0)
+
+`GET_VEHICLE_MOD_COLOR_1` returns three values: the paint type, the colour WITHIN that paint
+type, and the pearlescent colour. The capture stored only the first. So the second argument came
+from `GetVehicleColours`, which is a different colour space, and the third was a literal zero -
+resetting the pearlescent colour on every restore, immediately after `SetVehicleExtraColours`
+had set it correctly two lines earlier.
+
+The capture sweep then read the resulting colour off the vehicle and wrote it to the database.
+Every restore was a fresh corruption and every save made it permanent, which is exactly what
+"they change colour on their own" describes and why it never converged.
+
+**Root cause, the position:** a vehicle moves a few centimetres between its coordinates being
+set and the freeze taking hold - collision streaming in underneath it, a vehicle materialising
+alongside, the suspension settling. 1.0.7 added a check for this that ran once, BEFORE the
+freeze, and only acted past half a metre. Half a metre is enormous for something whose whole
+promise is exactness, and before the freeze is before most of the movement.
+
+**Fix:** The full `modColor1` and `modColor2` tuples are captured and applied, before the index
+colours, with `SetVehicleExtraColours` last so the pearlescent colour is authoritative. The pose
+is re-asserted after the freeze, twice, past two centimetres.
+
+**Prevention:**
+
+> **When two natives write the same state, the code has to say which one is authoritative, out
+> loud, in the order it calls them.**
+>
+> `applyColours` called both, in an order nobody had chosen deliberately, with the losing one
+> given careful arguments and the winning one given approximations. It read as thorough - two
+> APIs covered rather than one - and thoroughness was the bug.
+>
+> The tell was there to be found: the function set the pearlescent colour and then overwrote it
+> with zero, four lines apart, in a file whose header is about getting the apply order right.
+
+---
+
 ## [2026-09-08 21:30] — Probing something that could not have changed
 
 **Context:** Reported after 1.0.7: "vehicles are still not in their place, or they float in the

@@ -7,6 +7,98 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.9] - 2026-09-08
+
+**Vehicles changed colour on their own, and were never quite in the right place.**
+
+### The colour, at last
+
+`SET_VEHICLE_MOD_COLOR_1` and `SET_VEHICLE_COLOURS` write the same paint through two different
+APIs, and whichever runs last wins. The apply ran the colours first and the mod colours second,
+so the mod colours won - and they were being fed nonsense:
+
+```lua
+SetVehicleModColor_1(vehicle, paintType1, color1, 0)
+--                            ^ correct   ^ from GetVehicleColours, a different colour space
+--                                                ^ a literal zero, wiping the pearlescent
+```
+
+`GET_VEHICLE_MOD_COLOR_1` returns **three** values - the paint type, the colour within that
+type, and the pearlescent colour - and only the first was ever stored. The other two were filled
+in at apply time from somewhere else entirely, so the last thing to touch the paint on every
+restored vehicle was a call with two wrong arguments out of three. The pearlescent colour in
+particular was reset to 0 on every single restore, immediately after
+`SetVehicleExtraColours` had just set it correctly.
+
+Then the capture sweep read that wrong colour off the vehicle and wrote it to the database. That
+is why it never settled: each restore was a fresh corruption and each save made it permanent.
+
+**The whole triple is stored now, and applied before the index colours** - which is the order
+every other property implementation in the ecosystem uses. `SetVehicleExtraColours` runs last,
+so the pearlescent colour is authoritative. The tuning fingerprint samples the paint type too,
+so a respray from metallic to matte in the same colour is no longer invisible to the cache.
+
+Rows written before 1.0.9 keep working: a record with only `paintType1` sets the paint type and
+leaves the colour to `SetVehicleColours`, rather than inventing the rest.
+
+### Exactly where it was
+
+A vehicle can move by a few centimetres between its coordinates being set and the freeze taking
+hold: collision streams in underneath it and the engine resolves the intersection, a vehicle
+materialises alongside and pushes it, the suspension settles. None of that is far enough to look
+broken and all of it is far enough to look wrong - and once the vehicle is frozen there, that is
+where it stays, and the next capture writes it down.
+
+1.0.7 added a check for this. It ran once, **before** the freeze, and only acted past **half a
+metre** - which is enormous for something that is supposed to be exact, and before the freeze is
+before most of the movement.
+
+**The pose is now re-asserted after the freeze, twice, past two centimetres.** Re-asserting a
+pose on a frozen entity costs three natives and nothing else, and the vehicle is then where the
+database says it is - not approximately, exactly. Only for vehicles that stay frozen: one handed
+back to physics is meant to settle, and holding it would be fighting the thing we just asked
+for.
+
+---
+
+## [1.0.9] - 2026-09-08 (français)
+
+**Les véhicules changeaient de couleur tout seuls, et n'étaient jamais tout à fait à leur
+place.**
+
+### La couleur, enfin
+
+`SET_VEHICLE_MOD_COLOR_1` et `SET_VEHICLE_COLOURS` écrivent la même peinture par deux API
+différentes, et le dernier appelé gagne. L'application posait les couleurs d'abord et les
+couleurs de mod ensuite : ces dernières gagnaient donc, et on leur passait n'importe quoi.
+
+`GET_VEHICLE_MOD_COLOR_1` renvoie **trois** valeurs - le type de peinture, la couleur dans ce
+type, et la couleur nacrée - et seule la première était enregistrée. Les deux autres étaient
+inventées au moment d'appliquer. La couleur nacrée en particulier était remise à 0 à chaque
+restauration, juste après avoir été correctement posée.
+
+Puis la capture lisait cette mauvaise couleur sur le véhicule et l'écrivait en base. C'est pour
+ça que ça ne se stabilisait jamais : chaque restauration était une nouvelle corruption, et
+chaque sauvegarde la rendait définitive.
+
+**Le triplet complet est désormais enregistré et appliqué avant les index de couleur.**
+`SetVehicleExtraColours` passe en dernier, donc la couleur nacrée fait autorité.
+
+### Exactement à sa place
+
+Un véhicule peut bouger de quelques centimètres entre la pose de ses coordonnées et la prise du
+gel : la collision arrive dessous et le moteur résout l'intersection, un véhicule apparaît à
+côté et le pousse, la suspension se tasse. Pas assez pour paraître cassé, bien assez pour
+paraître faux - et une fois gelé là, il y reste, et la capture suivante l'enregistre.
+
+La 1.0.7 avait ajouté une vérification. Elle passait une fois, **avant** le gel, et n'agissait
+qu'au-delà d'un **demi-mètre**.
+
+**La pose est maintenant réaffirmée après le gel, deux fois, au-delà de deux centimètres.** Le
+véhicule est alors là où la base dit qu'il est - pas approximativement, exactement.
+
+---
+
 ## [1.0.8] - 2026-09-08
 
 **Vehicles came back floating in the air, or several metres from where they were parked, in

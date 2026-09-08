@@ -103,7 +103,11 @@ Schema.keys = {
     },
     colours       = { 'color1', 'color2', 'pearlescentColor', 'wheelColor',
                       'interiorColor', 'dashboardColor' },
-    customPaint   = { 'paintType1', 'paintType2', 'customPrimary', 'customSecondary' },
+    -- `modColor1` and `modColor2` are the WHOLE answer from `GET_VEHICLE_MOD_COLOR_*`:
+    -- { paintType, colour, pearlescent } and { paintType, colour }. `paintType1` and
+    -- `paintType2` are what rows written before 1.0.9 have, and are still read.
+    customPaint   = { 'modColor1', 'modColor2', 'paintType1', 'paintType2',
+                      'customPrimary', 'customSecondary' },
     windowTint    = { 'windowTint' },
     xenon         = { 'xenonColor' },
     neons         = { 'neonEnabled', 'neonColor' },
