@@ -7,6 +7,80 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.14] - 2026-09-09
+
+**A vehicle is written down the moment it is parked**, by the client that was driving it.
+
+### The gap
+
+Getting out of a persisted vehicle did nothing at all. `worthReporting` answers false for a
+vehicle v-park already tracks, which is correct - that check is about whether to ADOPT something
+new - so nothing was sent, and where the vehicle had just been left was discovered later by one
+of two things:
+
+- **the periodic capture sweep**, which runs in quarters and may be seconds away;
+- **the final pose read when the vehicle despawns**, which asks the SERVER for the entity's
+  coordinates.
+
+Both fail in the same case, and it is the ordinary one: park, get out, walk or drive away. The
+sweep has not come round yet, and by the time the vehicle leaves the streaming radius no client
+has it in scope any more - so the server-side read returns nothing and the stored position stays
+whatever it was **before the drive**.
+
+The vehicle then comes back where it used to live rather than where it was left. Reported as
+exactly that: "sometimes the position is saved in the wrong place, and if I leave the vehicle
+and go quickly it is not saved at all".
+
+### The fix
+
+The client that was driving is the one machine that certainly knows where the vehicle ended up,
+and getting out is the instant that answer stops changing. It now sends the pose then: one small
+message, once, per vehicle parked.
+
+The server accepts it only for a vehicle that is live and only from a player within fifty metres
+- generous, because a bike is left at speed and the ped lands some way from it, and checked at
+all so that a client cannot report a position for a vehicle on the other side of the map. That
+bounds what a client can do to something it could have done by driving the vehicle there, which
+is not damage.
+
+The capture sweep and the despawn read both stay. They are now the second and third ways of
+learning something that has usually already been reported.
+
+---
+
+## [1.0.14] - 2026-09-09 (français)
+
+**Un véhicule est enregistré à l'instant où il est garé**, par le client qui le conduisait.
+
+### Le trou
+
+Sortir d'un véhicule persistant ne faisait rien du tout. `worthReporting` répond faux pour un
+véhicule que v-park suit déjà - ce qui est correct, ce test sert à décider d'ADOPTER quelque
+chose de nouveau - donc rien n'était envoyé, et l'endroit où le véhicule venait d'être laissé
+était découvert plus tard par l'un de deux moyens :
+
+- **le balayage de capture périodique**, qui tourne par quarts et peut être à des secondes ;
+- **la relecture de pose à la disparition**, qui demande les coordonnées au SERVEUR.
+
+Les deux échouent dans le même cas, et c'est le cas ordinaire : se garer, sortir, partir. Le
+balayage n'est pas encore passé, et quand le véhicule quitte le rayon de streaming plus aucun
+client ne l'a en portée - donc la lecture serveur ne renvoie rien et la position enregistrée
+reste celle **d'avant le trajet**.
+
+Le véhicule revient donc là où il habitait avant, pas là où il a été laissé.
+
+### La correction
+
+Le client qui conduisait est la seule machine qui sait avec certitude où le véhicule a fini, et
+la sortie est l'instant où cette réponse cesse de changer. Il envoie donc la pose à ce
+moment-là : un petit message, une fois, par véhicule garé.
+
+Le serveur ne l'accepte que pour un véhicule vivant et depuis un joueur à moins de cinquante
+mètres. Le balayage et la relecture à la disparition restent en place, comme deuxième et
+troisième moyens d'apprendre une chose déjà rapportée la plupart du temps.
+
+---
+
 ## [1.0.13] - 2026-09-09
 
 The placement is settled. `/vparkwhere` on 1.0.12 reported 6 mm and 0 mm, and a vehicle had

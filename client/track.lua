@@ -206,6 +206,52 @@ local function onExit(vehicle)
     current.entity = nil
     current.netId = nil
 
+    --[[
+        ============================================================================
+        A VEHICLE WE ALREADY KEEP IS WRITTEN DOWN THE MOMENT IT IS PARKED.
+        ============================================================================
+
+        THIS IS THE MOMENT THE ANSWER IS KNOWN, AND UNTIL 1.0.14 NOTHING USED IT.
+
+        `worthReporting` below answers false for a vehicle v-park already tracks - correctly,
+        because that check is about whether to ADOPT something new. So getting out of a
+        persisted vehicle did nothing at all, and where it had just been parked was left to be
+        discovered later by one of two things:
+
+          - the periodic capture sweep, which runs in quarters and may be seconds away;
+          - the final pose read when the vehicle despawns, which asks the SERVER for the
+            entity's coordinates.
+
+        Both fail in the same case, and it is the ordinary one: park, get out, walk or drive
+        away. The sweep has not come round yet, and by the time the vehicle leaves the
+        streaming radius no client has it in scope any more - so the server-side read returns
+        nothing and the position stays whatever it was BEFORE the drive. The vehicle then comes
+        back where it used to live rather than where it was left, which is the "sometimes it
+        saves the wrong place, and if I leave quickly it does not save at all" report.
+
+        The client that was driving it is the one machine that certainly knows where it ended
+        up, and this is the instant it stops changing. One small message, once, per vehicle
+        parked.
+    ]]
+    local tracked, trackedId = Stream.byEntity(vehicle)
+
+    if tracked and trackedId and DoesEntityExist(vehicle) then
+        local position = GetEntityCoords(vehicle)
+        local rotation = GetEntityRotation(vehicle, 2)
+
+        if position and (position.x ~= 0.0 or position.y ~= 0.0) then
+            TriggerServerEvent('vpark:server:parked', trackedId, {
+                x = Park.coord(position.x),
+                y = Park.coord(position.y),
+                z = Park.coord(position.z),
+            }, {
+                x = Park.angle(rotation.x),
+                y = Park.angle(rotation.y),
+                z = Park.angle(rotation.z),
+            })
+        end
+    end
+
     if not worthReporting(vehicle) then return end
 
     settling[vehicle] = {

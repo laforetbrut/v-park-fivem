@@ -8,6 +8,49 @@ out of it.
 
 ---
 
+## [2026-09-09 14:40] — Nothing was written when the vehicle was actually parked
+
+**Context:** Reported after 1.0.13, and diagnosed by the user: "sometimes the position is saved
+in the wrong place - if I get out of the vehicle and leave quickly it is not saved at all".
+
+**Error:** None.
+
+**Root cause:** `onExit` in `client/track.lua` did nothing for a vehicle v-park already tracks.
+`worthReporting` returns false for one, correctly - that check decides whether to ADOPT
+something new - so the function returned before doing anything.
+
+So the position of a vehicle that had just been parked was left to be discovered by:
+
+- the periodic capture sweep, which is sliced into quarters and may be seconds away; or
+- the final pose read on despawn, which calls `GetEntityCoords` on the SERVER.
+
+Both fail together in the ordinary case. Park, get out, leave: the sweep has not come round, and
+by the time the vehicle drops out of the streaming radius no client has it in scope, so the
+server-side read returns nothing. The stored position stays whatever it was before the drive,
+and the vehicle comes back where it used to live.
+
+The irony is that 1.0.13 had just made the save path correct in principle - only a driven
+vehicle reports its position - and this is the case where the driven vehicle never got to
+report at all.
+
+**Fix:** `vpark:server:parked`, sent by the client the instant the driver gets out, carrying the
+pose. Accepted for a live vehicle from a player within fifty metres. The sweep and the despawn
+read stay as the second and third routes.
+
+**Prevention:**
+
+> **Find the moment the answer stops changing, and write it down then.**
+>
+> Everything else in this file's history is a way of discovering a fact after it happened -
+> sweeps, timeouts, reads on the way out. All of them are races against the player leaving.
+> Getting out of a vehicle is the single instant at which "where is this parked" becomes true
+> and stays true, and it was the one moment nothing was listening to.
+>
+> The tell was in the code: a function called `onExit` whose entire body was about adopting new
+> vehicles, with an early return that skipped every vehicle we already cared about.
+
+---
+
 ## [2026-09-09 12:15] — The car was where the database said; the database was wrong
 
 **Context:** Tested on 1.0.12. `/vparkwhere` reported 6 mm and 0 mm - the placement finally

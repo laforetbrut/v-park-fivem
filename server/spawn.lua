@@ -1347,6 +1347,75 @@ end)
     deliberately outside the delta hash - see `Store.hashOf` - and marking the whole row dirty
     for a timestamp would defeat the point of the hash.
 ]]
+--[[
+    A client has parked a vehicle we keep, and is telling us where.
+
+    Sent once, the instant the driver gets out. It exists because that is the moment the answer
+    is known and stops changing, and because both of the other ways of finding it out fail in
+    the ordinary case of parking and leaving: the capture sweep may be seconds away, and the
+    final read on despawn asks the server for coordinates no client has in scope any more.
+
+    -------------------------------------------------------------------------------------------
+    WHAT IS CHECKED, AND WHY THAT IS ENOUGH
+    -------------------------------------------------------------------------------------------
+
+    A client may only speak for a vehicle that is live, and only from close enough to have been
+    sitting in it a moment ago. That bounds the damage to something a player could do anyway by
+    driving the vehicle there, which is not damage.
+
+    The distance is generous - a bike is left at speed and the ped lands some way from it - and
+    it is checked at all so that a client cannot report a position for a vehicle on the other
+    side of the map.
+]]
+RegisterNetEvent('vpark:server:parked', function(id, position, rotation)
+    local src = source
+
+    if type(id) ~= 'string' or type(position) ~= 'table' then return end
+
+    local record = Store.get(id)
+    local entry = Store.live(id)
+    if not record or not entry then return end
+
+    local x = tonumber(position.x)
+    local y = tonumber(position.y)
+    local z = tonumber(position.z)
+
+    if not (Park.isFinite(x) and Park.isFinite(y) and Park.isFinite(z)) then return end
+    if math.abs(x) < 0.5 and math.abs(y) < 0.5 then return end
+
+    -- Close enough to have been in it. `GetEntityCoords` on the ped rather than on the vehicle:
+    -- the vehicle may already be out of the server's reach, which is the whole point of this.
+    local ped = GetPlayerPed(src)
+    if not ped or ped == 0 then return end
+
+    local ok, at = pcall(GetEntityCoords, ped)
+    if not ok or not at then return end
+
+    local dx, dy = at.x - x, at.y - y
+    if (dx * dx + dy * dy) > (50.0 * 50.0) then
+        Park.debug('%s: a parked report from %d came from %.0f m away - ignored',
+            id, src, math.sqrt(dx * dx + dy * dy))
+        return
+    end
+
+    local patch = { pos_x = Park.coord(x), pos_y = Park.coord(y), pos_z = Park.coord(z) }
+
+    if type(rotation) == 'table' then
+        patch.rot_x = Park.angle(tonumber(rotation.x) or record.rot_x)
+        patch.rot_y = Park.angle(tonumber(rotation.y) or record.rot_y)
+        patch.rot_z = Park.angle(tonumber(rotation.z) or record.rot_z)
+    end
+
+    Store.update(id, patch)
+
+    -- It has been driven and it is where the driver left it. Both facts matter to the despawn.
+    entry.driven = true
+    entry.seen = true
+    entry.nudged = nil
+
+    Park.debug('%s was parked at %.2f, %.2f, %.2f', id, x, y, z)
+end)
+
 RegisterNetEvent('vpark:server:touched', function(id, used)
     if type(id) ~= 'string' then return end
 
