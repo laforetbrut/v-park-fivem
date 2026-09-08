@@ -517,7 +517,7 @@ Config.Persistence = {
         Raise it if you have a very large player count and a very slow key resource. Setting
         it to 0 offers on every entry.
     ]]
-    entryOfferRetrySeconds = 60,
+    entryOfferRetrySeconds = 15,
 
     -- Also persist a vehicle the moment its driver disconnects, without waiting for
     -- `settleSeconds`.

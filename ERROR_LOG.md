@@ -8,6 +8,52 @@ out of it.
 
 ---
 
+## [2026-09-09 12:15] — The car was where the database said; the database was wrong
+
+**Context:** Tested on 1.0.12. `/vparkwhere` reported 6 mm and 0 mm - the placement finally
+exact - and a vehicle had still moved about five metres from where it was parked. Plus
+`/admincar` not making a vehicle persistent, with `/vpark` the only thing that worked.
+
+**Error:** None.
+
+**Root cause, the five metres:** with the placement reading six millimetres out, the vehicle was
+where the record said. The record was wrong.
+
+Every vehicle near a player is woken, because that is what makes it drivable before somebody
+reaches it, and a woken vehicle is simulated. On a camber, or nudged by a vehicle streaming in
+alongside, it rolls. The capture sweep read that and wrote it down as the stored position.
+
+Twelve releases of work went into making the restore put a vehicle exactly where the record
+says, and the record was being updated by physics. 1.0.11's five-centimetre threshold made each
+step smaller without stopping the walk.
+
+**Root cause, `/admincar`:** the on-entry offer is made in `onEnter`, once, when the door closes.
+`/admincar` is run from the driver's seat: the row appears in `player_vehicles` while the player
+is already sitting there, and nothing asked again. The vehicle only became persistent when they
+got out and the forty-five second settle timer expired, which reads as "the command did
+nothing".
+
+**Fix:** Position and rotation are omitted from a capture until somebody has sat in the vehicle,
+and the despawn's final pose read follows the same rule - `driven`, not merely `seen`. And the
+entry offer repeats while somebody is seated in a vehicle that is not persisted, every fifteen
+seconds.
+
+**Prevention:**
+
+> **A value that is read back and written down is a feedback loop, and it needs a gate that
+> physics cannot open.**
+>
+> The restore path was made exact five separate times. None of that could hold while the save
+> path accepted any position the entity happened to have, because the two are a loop: restore
+> reads the record, physics moves the entity, capture writes the entity back into the record.
+> The gate had to be "a person did this", and nothing smaller would have worked.
+>
+> And: **an event handler is not a state check.** `onEnter` answers "did somebody get in", which
+> is not the same question as "is this vehicle theirs" - and the second one can change its answer
+> while the first is not firing.
+
+---
+
 ## [2026-09-09 09:30] — Two questions that could not be answered, both answered anyway
 
 **Context:** Tested on 1.0.11. The same three vehicles, the same two deltas, to the millimetre:

@@ -824,9 +824,18 @@ function Spawn.despawn(id, reason)
         nobody has in scope may not answer.
     ]]
     local record = Store.get(id)
-    -- `nudged`: it is standing in a spot the search invented rather than the one it belongs
-    -- in, so reading it back would write that spot down. See the `restored` handler.
-    local couldHaveMoved = entry.frozen == false and entry.seen == true and not entry.nudged
+    --[[
+        `driven`: somebody has sat in it since it was restored.
+
+        A vehicle that was merely WOKEN has not been driven, and waking is what happens to
+        every vehicle a player walks past. A woken vehicle is simulated and can roll on a
+        camber, so reading its pose back here would record the roll as the place its owner
+        left it. Only a person driving it can change where it lives.
+
+        `nudged`: it is standing in a spot the search invented rather than the one it belongs
+        in, so reading it back would write that spot down. See the `restored` handler.
+    ]]
+    local couldHaveMoved = entry.driven == true and entry.seen == true and not entry.nudged
 
     if record and couldHaveMoved and safeExists(entity) then
         local position = safeCoords(entity)
@@ -1360,6 +1369,7 @@ RegisterNetEvent('vpark:server:touched', function(id, used)
 
             -- Driven, so wherever it ends up IS its position - including if the restore had
             -- had to stand it aside.
+            entry.driven = true
             entry.nudged = nil
 
             -- Somebody is driving it. Nothing may freeze it again.

@@ -458,6 +458,10 @@ AddEventHandler('gameEventTriggered', function(name, args)
         end
     end
 
+    -- Somebody got in. From here on this vehicle's position is worth recording: see the note
+    -- in `Stream.snapshot` about why a merely WOKEN vehicle's position is not.
+    record.driven = true
+
     -- Being entered is also the moment a vehicle stops being parked, so the server is told
     -- immediately rather than on the next sweep. The `true` marks it as USED rather than
     -- merely touched, which is the clock the cleanup sweep in Section 9c counts from.
@@ -626,12 +630,31 @@ function Stream.snapshot(id)
     -- Clean until something touches it again.
     record.captureClean = true
 
+    --[[
+        A VEHICLE NOBODY HAS DRIVEN DOES NOT REPORT WHERE IT IS.
+
+        Every vehicle near a player is woken - that is what makes it drivable before somebody
+        reaches it - and a woken vehicle is simulated. Simulated on a camber, or nudged by
+        traffic streaming in beside it, it rolls. One report had a car five metres from where it
+        was parked with the placement reading 6 mm off: the car was exactly where the database
+        said, and the database had been told about the roll.
+
+        The stored position should answer "where did somebody leave this", and only a person
+        driving it can change that answer. So position and rotation are omitted entirely until
+        somebody has sat in it - the server treats an absent field as "no news" and keeps what
+        it has, which is the pose the vehicle was parked in.
+
+        Everything else in the snapshot is still reported: damage, fuel, dirt and modifications
+        all change without anybody getting in.
+    ]]
+    local moved = record.driven == true
+
     return {
         id = id,
         properties = properties,
         statebags = Properties.captureStatebags(entity),
-        position = { x = Park.coord(position.x), y = Park.coord(position.y), z = Park.coord(position.z) },
-        rotation = { x = Park.angle(rotation.x), y = Park.angle(rotation.y), z = Park.angle(rotation.z) },
+        position = moved and { x = Park.coord(position.x), y = Park.coord(position.y), z = Park.coord(position.z) } or nil,
+        rotation = moved and { x = Park.angle(rotation.x), y = Park.angle(rotation.y), z = Park.angle(rotation.z) } or nil,
         interior = GetInteriorFromEntity(entity),
         room = GetRoomKeyFromEntity(entity),
         frozen = record.frozen == true,

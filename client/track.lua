@@ -140,6 +140,9 @@ local function onEnter(vehicle)
     local record, id = Stream.byEntity(vehicle)
 
     if record then
+        -- Driven, so its position becomes worth recording. See `Stream.snapshot`.
+        record.driven = true
+
         -- `true`: somebody got IN it. See `Config.Cleanup` for why that is a different fact
         -- from the vehicle merely having been interacted with.
         TriggerServerEvent('vpark:server:touched', id, true)
@@ -276,6 +279,25 @@ CreateThread(function()
         if vehicle ~= 0 and DoesEntityExist(vehicle) then
             if current.entity ~= vehicle then
                 if current.entity then onExit(current.entity) end
+                onEnter(vehicle)
+            else
+                --[[
+                    STILL SITTING IN IT, AND IT STILL IS NOT OURS.
+
+                    `onEnter` offers the vehicle once, when the door closes. That is the wrong
+                    and only moment, because OWNERSHIP CAN ARRIVE WHILE SOMEBODY IS SITTING
+                    THERE: `/admincar` is run from the driver's seat and writes the row from
+                    under us, and so does a dealership finishing a sale or a mate handing the
+                    keys over.
+
+                    Until 1.0.13 nothing asked again. The vehicle became the player's and
+                    v-park did not notice until they got out and the forty-five second settle
+                    timer expired - so `/admincar` looked like it did nothing and `/vpark` was
+                    the only thing that worked, which is exactly how it was reported.
+
+                    `onEnter` already keeps a timestamped mark per vehicle and honours
+                    `entryOfferRetrySeconds`, so calling it again is free until that expires.
+                ]]
                 onEnter(vehicle)
             end
         elseif current.entity then

@@ -7,6 +7,85 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.13] - 2026-09-09
+
+The placement is settled. `/vparkwhere` on 1.0.12 reported 6 mm and 0 mm, and a vehicle had
+still moved about five metres from where it was parked - which means the vehicle was exactly
+where the database said, and the database had been told the wrong thing.
+
+### A vehicle nobody has driven does not report where it is
+
+Every vehicle near a player is **woken** - that is what makes it drivable before somebody
+reaches it - and a woken vehicle is simulated. Simulated on a camber, or nudged by traffic
+streaming in beside it, it rolls. The capture sweep read the roll and wrote it down as the new
+stored position, and the next restore put the car there, correctly, six millimetres out.
+
+The stored position answers "where did somebody leave this", and **only a person driving it can
+change that answer**. Position and rotation are now omitted from a capture entirely until
+somebody has sat in the vehicle. The server treats an absent field as "no news" and keeps the
+pose the vehicle was parked in.
+
+Everything else is still reported for a woken vehicle: damage, fuel, dirt and modifications all
+change without anybody getting in. And the final pose read when a vehicle despawns follows the
+same rule - only for one that was driven, not merely woken.
+
+The five-centimetre threshold added in 1.0.11 stays, but it was treating a symptom: it made the
+drift smaller per cycle rather than stopping it.
+
+### `/admincar` makes the vehicle persistent
+
+The offer that asks the server "is this vehicle somebody's, and should it be kept" was made once,
+when the door closed. That is the wrong and only moment, because **ownership can arrive while
+somebody is sitting there**: `/admincar` is run from the driver's seat and writes the row from
+under us, and so does a dealership finishing a sale or a mate handing the keys over.
+
+Nothing asked again, so the vehicle became the player's and v-park did not notice until they got
+out and the forty-five second settle timer expired. `/admincar` looked like it did nothing and
+`/vpark` was the only thing that worked.
+
+The offer now repeats while somebody is seated in a vehicle that is not persisted, every
+`Config.Persistence.entryOfferRetrySeconds` - lowered from 60 to 15, because it is one small
+event and only while somebody is sitting in a car that is not theirs.
+
+---
+
+## [1.0.13] - 2026-09-09 (français)
+
+Le placement est réglé. `/vparkwhere` sur la 1.0.12 donnait 6 mm et 0 mm, et un véhicule avait
+quand même bougé de cinq mètres - ce qui veut dire qu'il était exactement là où la base le
+disait, et qu'on avait dit n'importe quoi à la base.
+
+### Un véhicule que personne n'a conduit ne rapporte pas sa position
+
+Tout véhicule proche d'un joueur est **réveillé** - c'est ce qui le rend conduisible avant qu'on
+l'atteigne - et un véhicule réveillé est simulé. Sur un dévers, ou bousculé par du trafic qui
+apparaît à côté, il roule. La capture lisait ce roulement et l'écrivait comme la nouvelle
+position enregistrée.
+
+La position enregistrée répond à « où quelqu'un a-t-il laissé ce véhicule », et **seule une
+personne qui le conduit peut changer cette réponse**. Position et rotation sont désormais
+totalement omises d'une capture tant que personne ne s'est assis dedans. Le serveur traite un
+champ absent comme « rien de neuf » et conserve la pose où le véhicule a été garé.
+
+Tout le reste continue d'être rapporté : dégâts, carburant, saleté et modifications changent
+sans que personne ne monte. Et la relecture de pose à la disparition suit la même règle.
+
+### `/admincar` rend bien le véhicule persistant
+
+L'offre qui demande au serveur « ce véhicule appartient-il à quelqu'un, faut-il le conserver »
+n'était faite qu'une fois, à la fermeture de la portière. C'est le mauvais moment, et le seul,
+car **la propriété peut arriver pendant qu'on est assis** : `/admincar` se tape depuis le siège
+conducteur et écrit la ligne sous nos pieds.
+
+Rien ne redemandait, donc le véhicule devenait celui du joueur sans que v-park le remarque avant
+qu'il sorte et que le délai de quarante-cinq secondes expire. `/admincar` semblait ne rien faire
+et `/vpark` était la seule chose qui marchait.
+
+L'offre est maintenant répétée tant que quelqu'un est assis dans un véhicule non persisté, toutes
+les `entryOfferRetrySeconds` - abaissées de 60 à 15.
+
+---
+
 ## [1.0.12] - 2026-09-09
 
 Two settings that were answering questions they could not answer. Both are off, and both take a
