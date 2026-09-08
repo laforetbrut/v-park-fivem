@@ -836,6 +836,187 @@ def check_store_columns():
 
 
 # ==============================================================================================
+# 16. Live entry fields
+#
+# A live entry is the server's record of a vehicle in the world. Thirteen fields, several of them
+# booleans whose interactions are the difference between a vehicle coming back where it was left
+# and coming back where it used to live - and three releases have been spent on exactly that.
+#
+# The worst of them: 1.0.14 set `driven` to mean "this has been used", not knowing that `driven`
+# was also the flag permitting the despawn to re-read the entity's position. The correct parked
+# position was written and then overwritten with a stale one seconds later.
+#
+# So every field is documented in `Store.liveFields`, and a field that is not documented is not
+# allowed to exist. Every assignment lives in server/spawn.lua, which is what makes this exact.
+# ==============================================================================================
+
+LIVE_ENTRY_FILE = 'server/spawn.lua'
+
+
+def check_live_fields():
+    global checks_run
+    checks_run += 1
+
+    store = os.path.join(ROOT, 'server/store.lua')
+    spawn = os.path.join(ROOT, LIVE_ENTRY_FILE)
+
+    if not os.path.exists(store) or not os.path.exists(spawn):
+        fail('live', 'server/store.lua or server/spawn.lua is missing')
+        return
+
+    declared = re.search(r'Store\.liveFields\s*=\s*\{(.*?)\n\}',
+                         strip_comments(read(store)), re.DOTALL)
+    if not declared:
+        fail('live', 'Store.liveFields is not declared in server/store.lua')
+        return
+
+    allowed = set(re.findall(r'(\w+)\s*=\s*true', declared.group(1)))
+
+    source = strip_comments(read(spawn))
+
+    for number, line in enumerate(source.split('\n'), start=1):
+        found = re.match(r'\s*entry\.(\w+)\s*=[^=]', line)
+        if found and found.group(1) not in allowed:
+            fail('live',
+                 f'{LIVE_ENTRY_FILE}:{number} writes `entry.{found.group(1)}`, which is not in '
+                 'Store.liveFields. Add it there WITH a note saying who sets it, who reads it '
+                 'and what clears it - the interactions between these fields are what three '
+                 'releases of position bugs were made of.')
+
+
+# ==============================================================================================
+# 17. Locale call sites supply the right number of values
+#
+# `L` wraps `string.format` in a pcall and returns the RAW TEMPLATE when the format fails. That
+# is the right behaviour at runtime - a missing argument in a log line must not kill the caller -
+# and it means a call site that passes the wrong number of values does not raise, does not log,
+# and does not stop working. It just quietly prints `lifecycle: %d expired, %d owner-absent`.
+#
+# Group 4 already checks that English and every translation agree on their specifiers. Nothing
+# checked that the CALL SITE agrees with either of them, which is the half a human gets wrong:
+# add a field to a stats line, forget to pass it.
+#
+# Deliberately conservative, because a check that cries wolf is worse than no check. A Lua call
+# can expand to several values - `L('stats.health', Spawn.health())` legitimately fills three
+# specifiers from one argument - so a call site that looks SHORT is only reported when none of
+# its arguments could expand. A call site with more arguments than specifiers is always wrong.
+# ==============================================================================================
+
+
+def split_arguments(text):
+    """Top-level commas only: `f(a, g(b, c), {d, e})` is three arguments, not five."""
+    parts, depth, quote, current = [], 0, None, []
+
+    index = 0
+    while index < len(text):
+        character = text[index]
+
+        if quote:
+            if character == '\\':
+                current.append(text[index:index + 2])
+                index += 2
+                continue
+            if character == quote:
+                quote = None
+            current.append(character)
+        elif character in '"\'':
+            quote = character
+            current.append(character)
+        elif character in '([{':
+            depth += 1
+            current.append(character)
+        elif character in ')]}':
+            depth -= 1
+            current.append(character)
+        elif character == ',' and depth == 0:
+            parts.append(''.join(current).strip())
+            current = []
+        else:
+            current.append(character)
+
+        index += 1
+
+    tail = ''.join(current).strip()
+    if tail:
+        parts.append(tail)
+
+    return parts
+
+
+def call_arguments(source, opening):
+    """The text between the parentheses of the call starting at `opening`, or None if unbalanced."""
+    depth, quote, index = 0, None, opening
+
+    while index < len(source):
+        character = source[index]
+
+        if quote:
+            if character == '\\':
+                index += 2
+                continue
+            if character == quote:
+                quote = None
+        elif character in '"\'':
+            quote = character
+        elif character == '(':
+            depth += 1
+        elif character == ')':
+            depth -= 1
+            if depth == 0:
+                return source[opening + 1:index]
+
+        index += 1
+
+    return None
+
+
+def check_locale_arity(english):
+    global checks_run
+    checks_run += 1
+
+    if not english:
+        return
+
+    for path in lua_files():
+        if '/locales/' in relative(path):
+            continue
+
+        source = strip_comments(read(path))
+        name = relative(path)
+
+        for found in re.finditer(r"\bL\(\s*'([A-Za-z0-9_.]+)'", source):
+            key = found.group(1)
+            if key not in english:
+                continue  # group 4b already reports this
+
+            specifiers = [spec for spec in FORMAT_SPEC.findall(english[key]) if spec != '%%']
+            if not specifiers:
+                continue
+
+            inner = call_arguments(source, source.index('(', found.start()))
+            if inner is None:
+                continue
+
+            arguments = split_arguments(inner)[1:]  # drop the key itself
+            line = source[:found.start()].count('\n') + 1
+
+            if len(arguments) > len(specifiers):
+                fail('locale-arity',
+                     f'{name}:{line} passes {len(arguments)} values to `{key}`, which has '
+                     f'{len(specifiers)} specifiers {specifiers}')
+
+            elif len(arguments) < len(specifiers):
+                # A call in the argument list may expand to several values, so short is only
+                # provably wrong when nothing there can expand.
+                expandable = any('(' in argument for argument in arguments)
+                if not expandable:
+                    fail('locale-arity',
+                         f'{name}:{line} passes {len(arguments)} values to `{key}`, which has '
+                         f'{len(specifiers)} specifiers {specifiers}. `L` pcalls string.format, '
+                         'so this prints the raw template instead of failing')
+
+
+# ==============================================================================================
 
 def main():
     english = check_locales()
@@ -854,6 +1035,8 @@ def main():
     check_player_name()
     check_theme_layout()
     check_store_columns()
+    check_live_fields()
+    check_locale_arity(english)
 
     print(f'v-park: {checks_run} check groups run over {len(lua_files())} Lua files')
 

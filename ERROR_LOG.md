@@ -8,6 +8,38 @@ out of it.
 
 ---
 
+## [2026-09-09 01:55] - A net event took a vehicle id on trust
+
+**Context:** reading the parked and touched handlers with fresh eyes after the position work was
+finally correct, looking for what could still go wrong.
+
+**Error:** `vpark:server:parked` accepted a position for any vehicle id from any client. Its one
+proximity test compared the reporting player's ped to the position CARRIED IN THE MESSAGE, and the
+sender chooses that value - so sending your own coordinates passed from anywhere on the map. Ids
+are not secret: `vpark:id` is a replicated statebag every client in scope reads and keeps. Any
+persistent vehicle whose id had ever been seen could be relocated permanently to the sender's
+feet. `vpark:server:touched` required no proof at all and wrote a database row per call.
+
+**Root cause:** a validation written against the wrong adversary. The check was there to catch a
+report that contradicted itself - a client claiming a position nowhere near itself - and it does
+that. It was then read as though it established proximity to the VEHICLE, which it never did,
+because every value in it either comes from the sender or is compared against a value from the
+sender. A check whose inputs are all attacker-controlled proves nothing no matter how it reads.
+
+**Fix:** both handlers now measure the distance between the player's ped and the vehicle entity,
+both read on the server, neither supplied by the message. When the entity cannot be read the row's
+stored position is the reference with a wider radius, because refusing outright would risk
+discarding a legitimate drive. `parked` additionally accepts the player the server watched get in,
+once, when there is nothing left to measure at all.
+
+**Prevention:** for a net event, list which values come from the client before deciding what has
+been proven. If every input to a check is attacker-controlled, or is only ever compared against
+another attacker-controlled input, the check is a consistency test and not an authorisation. The
+smoke test now asserts the property from outside: a report that cannot be proven leaves the row
+exactly where it was.
+
+---
+
 ## [2026-09-09 18:05] — A per-client table used to answer a server-wide question
 
 **Context:** Reported after 1.0.15: "almost, there is still one vehicle that went back to an old

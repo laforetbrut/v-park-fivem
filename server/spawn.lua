@@ -135,6 +135,11 @@ local stats = {
     grounded = 0,
     passes = 0,
     lastPassMs = 0,
+
+    -- See `Park.timing`. The last duration on its own says almost nothing about a loop that
+    -- runs forever; these two say whether it costs anything and whether it ever stalls.
+    passMs = Park.timing(),
+    reconcileMs = Park.timing(60),
     reconciled = 0,
 }
 
@@ -1088,6 +1093,7 @@ local function pass()
 
     stats.passes = stats.passes + 1
     stats.lastPassMs = Park.ticks() - started
+    Park.observe(stats.passMs, stats.lastPassMs)
 end
 
 CreateThread(function()
@@ -1377,6 +1383,81 @@ end)
     it is checked at all so that a client cannot report a position for a vehicle on the other
     side of the map.
 ]]
+--[[
+    ================================================================================================
+    A CLIENT MAY ONLY SPEAK FOR A VEHICLE IT IS ACTUALLY NEXT TO
+    ================================================================================================
+
+    `vpark:server:touched` and `vpark:server:parked` are net events, which means ANY client can
+    trigger them for ANY id, and an id is not a secret: `vpark:id` is a replicated statebag, so
+    every client that has ever been near a vehicle knows its id and keeps knowing it.
+
+    The parked handler checked that the REPORTED POSITION was within 50 m of the reporting
+    player's ped. That sounds like a proximity check and is not one, because the attacker chooses
+    the reported position: send your own coordinates and the check passes from anywhere on the
+    map. Any persistent vehicle whose id you had ever seen could be dragged to your feet, for
+    good, from across the world - and `touched` needed no proof at all, so it could be used to
+    mark a vehicle driven and make the despawn overwrite a correct position with a stale one,
+    which is the 1.0.15 bug turned into a tool.
+
+    `touched` also writes a row on every call, so it was a database write per message from an
+    unauthenticated client.
+
+    This is the proof, and it is the one an attacker cannot fabricate: THE DISTANCE BETWEEN THE
+    PLAYER'S PED AND THE VEHICLE ENTITY, both read on the server. Neither value comes from the
+    message. It is readable exactly when a client has the vehicle in scope, which is exactly when
+    a player is sitting in it or standing beside it - so the honest path always passes, and a
+    report from the other side of the map never does.
+
+    Returns:
+      true   proven next to it
+      false  proven NOT next to it
+      nil    could not tell, because the server cannot read the entity right now
+]]
+local function nearEnoughToSpeakFor(src, entry, metres, record)
+    local ped = GetPlayerPed(src)
+    if not ped or ped == 0 then return false end
+
+    local who = safeCoords(ped)
+    if not who then return nil end
+
+    local where = (entry and entry.entity) and safeCoords(entry.entity) or nil
+    local tolerance = metres or 30.0
+
+    --[[
+        WHEN THE ENTITY CANNOT BE READ, MEASURE AGAINST THE ROW INSTEAD OF REFUSING.
+
+        A deliberate trade, and it is the safer half of it. Refusing an unreadable entity would
+        be the stricter rule and it risks the worst bug this resource has had: a legitimate
+        `somebody got in` refused means the drive that follows is discarded and the vehicle comes
+        back where it used to live. Five releases went into stopping that.
+
+        The row's position is where the vehicle was left, which is where a player getting into it
+        is standing - a real reference point the sender does not supply, just a looser one. The
+        radius is widened to allow for a drive that has already happened without a report. What
+        it gives up is precision; what it keeps is the part that matters, that a report from the
+        other side of the map is refused.
+    ]]
+    if not where and record then
+        local x, y, z = tonumber(record.pos_x), tonumber(record.pos_y), tonumber(record.pos_z)
+
+        if Park.isFinite(x) and Park.isFinite(y) and Park.isFinite(z) then
+            where = { x = x, y = y, z = z }
+            tolerance = math.max(tolerance, 150.0)
+        end
+    end
+
+    if not where then return nil end
+
+    local dx, dy, dz = who.x - where.x, who.y - where.y, who.z - where.z
+    local distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+    if distance <= tolerance then return true end
+
+    Park.debug('%d spoke for a vehicle %.0f m away - refused', src, distance)
+    return false
+end
+
 RegisterNetEvent('vpark:server:parked', function(id, position, rotation)
     local src = source
 
@@ -1405,6 +1486,26 @@ RegisterNetEvent('vpark:server:parked', function(id, position, rotation)
     if (dx * dx + dy * dy) > (50.0 * 50.0) then
         Park.debug('%s: a parked report from %d came from %.0f m away - ignored',
             id, src, math.sqrt(dx * dx + dy * dy))
+        return
+    end
+
+    --[[
+        AND THE REPORTER MUST BE ABLE TO SPEAK FOR THIS VEHICLE.
+
+        The distance test above compares the ped to the REPORTED position, which the sender
+        chooses - it stops a report that contradicts itself and nothing else. This one compares
+        the ped to the VEHICLE, on the server, using two values the sender does not supply.
+
+        When the entity cannot be read - the player has stepped out and every client has lost
+        scope in the same instant - fall back to `occupant`, which is who the server recorded
+        getting in. Both are unforgeable, so one of them always answers.
+    ]]
+    local proven = nearEnoughToSpeakFor(src, entry, 30.0, record)
+
+    if proven == false then return end
+    if proven == nil and entry.occupant ~= src then
+        Park.debug('%s: a parked report from %d that cannot be checked and was not the occupant',
+            id, src)
         return
     end
 
@@ -1442,14 +1543,39 @@ RegisterNetEvent('vpark:server:parked', function(id, position, rotation)
     entry.seen = true
     entry.nudged = nil
 
+    -- Single use. `occupant` is permission to speak for this vehicle once, granted when the
+    -- server watched somebody get in, and spent here. Otherwise it stands until the entry is
+    -- dropped, and a player id is reused by the server the moment its slot is - so a standing
+    -- permission outlives the person it was granted to.
+    entry.occupant = nil
+
     Park.debug('%s was parked at %.2f, %.2f, %.2f', id, x, y, z)
 end)
 
 RegisterNetEvent('vpark:server:touched', function(id, used)
+    local src = source
+
     if type(id) ~= 'string' then return end
 
     local record = Store.get(id)
     if not record then return end
+
+    --[[
+        PROVEN BEFORE ANYTHING IS WRITTEN. See `nearEnoughToSpeakFor`.
+
+        This handler took an id on trust and then marked the vehicle driven, unfrozen and no
+        longer parked - which is permission for the despawn to overwrite a correct position with
+        a stale one, the 1.0.15 bug turned into a tool. It also wrote a database row on every
+        call, so it was one write per message from an unauthenticated client.
+
+        A vehicle that is not in the world is not a vehicle anybody just got into, so that is
+        refused outright. Ten metres, because the claim being made is `I am inside it` - widened
+        to the row's position and a looser radius when the entity itself cannot be read, which
+        `nearEnoughToSpeakFor` explains and argues for.
+    ]]
+    local entry = Store.live(id)
+    if not entry then return end
+    if nearEnoughToSpeakFor(src, entry, 10.0, record) ~= true then return end
 
     --[[
         Somebody got IN it, so it is awake and it can move.
@@ -1460,21 +1586,22 @@ RegisterNetEvent('vpark:server:touched', function(id, used)
         streaming radius between two sweeps would have the drive discarded.
     ]]
     if used then
-        local entry = Store.live(id)
-        if entry then
-            entry.frozen = false
-            entry.seen = true
+        -- Who the server watched get in. The only thing left to check a parked report against
+        -- once every client has lost scope and there is no distance to measure.
+        entry.occupant = src
 
-            -- Driven, so wherever it ends up IS its position - including if the restore had
-            -- had to stand it aside, and including overriding the last parked report.
-            entry.driven = true
-            entry.nudged = nil
-            entry.parked = nil
+        entry.frozen = false
+        entry.seen = true
 
-            -- Somebody is driving it. Nothing may freeze it again.
-            if entry.entity then
-                pcall(function() Entity(entry.entity).state:set('vpark:hold', nil, true) end)
-            end
+        -- Driven, so wherever it ends up IS its position - including if the restore had had to
+        -- stand it aside, and including overriding the last parked report.
+        entry.driven = true
+        entry.nudged = nil
+        entry.parked = nil
+
+        -- Somebody is driving it. Nothing may freeze it again.
+        if entry.entity then
+            pcall(function() Entity(entry.entity).state:set('vpark:hold', nil, true) end)
         end
     end
 
@@ -1533,6 +1660,8 @@ end)
 ]]
 function Spawn.reconcile()
     if not GetAllVehicles then return 0 end
+
+    local startedAt = Park.ticks()
 
     local ok, all = pcall(GetAllVehicles)
     if not ok or type(all) ~= 'table' then return 0 end
@@ -1652,6 +1781,8 @@ function Spawn.reconcile()
 
     stats.condemned = stuck
 
+    Park.observe(stats.reconcileMs, Park.ticks() - startedAt)
+
     return removed
 end
 
@@ -1673,10 +1804,93 @@ CreateThread(function()
     end
 end)
 
+--[[
+    How many vehicles are in each of the three states that can go wrong.
+
+    `pending`   created and not yet confirmed by a client. A handful at a time is the streaming
+                pass working; a number that only grows means clients are not answering.
+    `condemned` handles the engine has been asked to delete and has not. Should be zero, or
+                briefly non-zero between a despawn and the next reconciliation sweep.
+    `waiting`   vehicles whose restore is going to be asked for again, because a client could
+                not take network control of them.
+]]
+function Spawn.health()
+    local pendingCount, waiting = 0, 0
+
+    for _ in pairs(pending) do pendingCount = pendingCount + 1 end
+
+    for _, entry in pairs(Store.allLive()) do
+        if entry.restoreAt then waiting = waiting + 1 end
+    end
+
+    local condemnedCount = 0
+    for _ in pairs(condemned) do condemnedCount = condemnedCount + 1 end
+
+    return pendingCount, condemnedCount, waiting
+end
+
 function Spawn.stats()
     return stats
 end
 
 function Spawn.pending()
     return pending
+end
+
+--[[
+    Everything the server knows about one vehicle it is holding, for `/vparkdiag`.
+
+    Five releases were spent guessing at the contents of a live entry, because there was no way
+    to look at one. `/vparkwhere` ended that from inside the game - a player reported `1.250 m`
+    and that number named the cause in one reading. This is the same idea from the console: the
+    flags that decide where a vehicle is allowed to be saved, next to where it actually is.
+
+    The natives stay in this file so they go through the safe wrappers. A read that fails is
+    reported as unreadable rather than raising, because a diagnostic that can kill the resource
+    is worse than no diagnostic.
+]]
+function Spawn.inspect(id)
+    local entry = Store.live(id)
+    if not entry then return nil end
+
+    local position = safeCoords(entry.entity)
+    local rotation = safeRotation(entry.entity)
+
+    local report = {
+        entity = entry.entity,
+        netId = entry.netId,
+        exists = safeExists(entry.entity),
+        placer = entry.placer,
+        placedAt = entry.placedAt,
+        adopted = entry.adopted == true,
+
+        ready = entry.ready == true,
+        seen = entry.seen == true,
+        retryAt = entry.restoreAt,
+        retries = entry.restoreTries or 0,
+
+        frozen = entry.frozen == true,
+        driven = entry.driven == true,
+        parked = entry.parked == true,
+        nudged = entry.nudged == true,
+
+        occupant = entry.occupant,
+    }
+
+    -- The same condition the despawn uses, reported rather than acted on. If this says `no`
+    -- and a vehicle is still being saved in the wrong place, the fault is not in the despawn.
+    report.wouldReadPose = report.driven and report.seen
+        and not report.nudged and not report.parked
+
+    if position then
+        report.x = Park.coord(position.x)
+        report.y = Park.coord(position.y)
+        report.z = Park.coord(position.z)
+    end
+
+    if rotation then
+        report.heading = Park.angle(rotation.z)
+    end
+
+    return report
 end

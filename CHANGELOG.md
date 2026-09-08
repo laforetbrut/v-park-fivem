@@ -7,6 +7,152 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.17] - 2026-09-09
+
+**It works, so this release does not change what it does. It hardens it, measures it, and closes
+a hole found while reading it.**
+
+Fifteen releases went into one property: a vehicle comes back exactly where it was left. That
+property now holds, and everything here exists to keep it holding - a guard around the fields
+three releases were lost to, numbers where there were guesses, and a diagnostic that answers from
+the console instead of needing somebody standing next to the car.
+
+### Security
+
+- **A client can no longer speak for a vehicle it is not standing next to.** `vpark:server:parked`
+  and `vpark:server:touched` are net events, so any client can trigger them for any id - and an id
+  is not a secret, because `vpark:id` is a replicated statebag that every client in scope reads and
+  keeps.
+
+  The parked handler checked that the reported position was within 50 m of the reporting player.
+  That looks like a proximity check and is not one: **the sender chooses the reported position**, so
+  sending your own coordinates passed it from anywhere on the map. Any persistent vehicle whose id
+  you had ever seen could be dragged to your feet, permanently. `touched` needed no proof at all,
+  which made it a way to mark a vehicle driven and have the despawn overwrite a correct position
+  with a stale one - the 1.0.16 bug turned into a tool - and it wrote a database row on every call,
+  so it was one write per message from an unauthenticated client.
+
+  Both now require a proof the sender cannot fabricate: **the distance between the player's ped and
+  the vehicle entity, both read on the server**. Neither value comes from the message. It is
+  readable exactly when a client has the vehicle in scope, which is exactly when somebody is in it
+  or beside it, so the honest path always passes.
+
+  When the entity cannot be read, the row's own position is used as the reference with a wider
+  radius, rather than refusing. That is the deliberately safer half of the trade: refusing would be
+  stricter and would risk discarding a real drive, which is the worst bug this resource has had.
+
+### Added
+
+- **`/vparkdiag [id|plate]`, the console half of `/vparkwhere`.** With no argument, every vehicle in
+  the world ordered by how far it has drifted from its stored place, worst first. With one, the
+  whole record: stored pose, actual pose, the distance between them, entity and net id, and the
+  four flags that decide whether that vehicle's position is allowed to be written down at all.
+
+  `/vparkwhere` needs a player standing next to the vehicles and reports what the client sees.
+  Neither is available while reading a log after the fact, and the flags only exist on the server.
+
+- **`/vparkstats` reports an average and a worst case, not just the last reading.** For the
+  streaming pass, the capture sweep and the reconciliation. The duration of the last pass is very
+  nearly no information: a loop that is fine ninety-nine times and terrible on the hundredth reads
+  as fine, and the one reading that mattered has been overwritten by the time anybody looks.
+
+- **A health line in `/vparkstats` and `/vparkdiag`:** how many vehicles are waiting on a client,
+  waiting to be deleted, and queued for another restore attempt. The difference between a resource
+  that is busy and one that is stuck.
+
+### Prevention
+
+- **A live entry's fields are now a documented list, and an undocumented one fails the build.**
+  Every one of the fourteen says who sets it, who reads it and what clears it. 1.0.16 was caused by
+  setting `driven` to mean `this has been used`, not knowing `driven` was also the flag permitting
+  the despawn to re-read the entity's position: the correct parked position was written and then
+  overwritten with a stale one seconds later. One word doing two jobs, and the second undid the
+  first. That is not a mistake anybody makes reading fourteen undocumented booleans off a table.
+
+- **A locale line and its call site must agree on how many values there are.** `L` wraps
+  `string.format` in a pcall and returns the raw template when the format fails, which is right at
+  runtime and means a call site passing the wrong number of values does not raise, does not log and
+  does not stop working. It quietly prints `lifecycle: %d expired, %d owner-absent`.
+
+- **Two new integration sections.** That a full write cycle over a row never touches its position,
+  to the millimetre, over four unrelated writes and a despawn. And that a report which cannot be
+  proven leaves the row exactly where it was.
+
+104 automated checks on a real qb-core server with oxmysql and MariaDB 11.4, and 17 static check
+groups over 32 Lua files.
+
+---
+
+## [1.0.17] - 2026-09-09 (français)
+
+**Ça fonctionne, donc cette version ne change pas ce que le script fait. Elle le blinde, elle le
+mesure, et elle ferme un trou trouvé en le relisant.**
+
+Quinze versions pour une seule propriété : un véhicule revient exactement où il a été laissé.
+Cette propriété tient maintenant, et tout ce qui suit existe pour qu'elle continue de tenir : une
+barrière autour des champs qui ont coûté trois versions, des chiffres là où il y avait des
+suppositions, et un diagnostic qui répond depuis la console au lieu d'exiger quelqu'un debout à
+côté de la voiture.
+
+### Sécurité
+
+- **Un client ne peut plus parler au nom d'un véhicule à côté duquel il ne se trouve pas.**
+  `vpark:server:parked` et `vpark:server:touched` sont des net events : n'importe quel client peut
+  les déclencher pour n'importe quel id, et un id n'est pas un secret, puisque `vpark:id` est un
+  statebag répliqué que tous les clients à portée lisent et gardent.
+
+  Le handler vérifiait que la position **rapportée** était à moins de 50 m du joueur. Ça ressemble
+  à un test de proximité mais ce n'en est pas un : **c'est l'expéditeur qui choisit la position
+  rapportée**, donc envoyer ses propres coordonnées passait le test depuis n'importe où sur la
+  carte. N'importe quel véhicule persistant dont on avait vu l'id une fois pouvait être traîné à
+  ses pieds, définitivement. `touched` n'exigeait aucune preuve, ce qui en faisait un moyen de
+  marquer un véhicule comme conduit et de laisser le despawn écraser une position correcte par une
+  périmée, et il écrivait une ligne en base à chaque appel.
+
+  Les deux exigent maintenant une preuve que l'expéditeur ne peut pas fabriquer : **la distance
+  entre le ped du joueur et l'entité du véhicule, lues toutes les deux sur le serveur**. Aucune des
+  deux valeurs ne vient du message.
+
+  Quand l'entité est illisible, c'est la position de la ligne en base qui sert de référence avec un
+  rayon plus large, plutôt qu'un refus. C'est la moitié volontairement plus prudente du compromis :
+  refuser serait plus strict et risquerait de jeter un vrai trajet, ce qui est le pire bug que ce
+  script ait eu.
+
+### Ajouté
+
+- **`/vparkdiag [id|plaque]`, la moitié console de `/vparkwhere`.** Sans argument, tous les
+  véhicules du monde classés par écart avec leur place enregistrée, le pire en premier. Avec un
+  argument, la fiche complète : pose enregistrée, pose réelle, distance entre les deux, entité et
+  netId, et les quatre drapeaux qui décident si la position de ce véhicule peut être écrite.
+
+- **`/vparkstats` affiche une moyenne et un pire cas, plus seulement la dernière mesure.** La durée
+  de la dernière passe ne dit presque rien : une boucle correcte quatre-vingt-dix-neuf fois et
+  catastrophique la centième se lit comme correcte.
+
+- **Une ligne de santé** : combien de véhicules attendent un client, attendent une suppression, ou
+  sont en attente d'une nouvelle tentative de restauration. La différence entre un script occupé et
+  un script bloqué.
+
+### Prévention
+
+- **Les champs d'une entrée vivante sont une liste documentée, et un champ non documenté fait
+  échouer la vérification.** La 1.0.16 venait de là : `driven` servait à deux choses, et la seconde
+  défaisait la première.
+
+- **Une ligne de traduction et son appel doivent être d'accord sur le nombre de valeurs.** `L`
+  encapsule `string.format` dans un pcall et renvoie le modèle brut en cas d'échec, donc un appel
+  qui passe le mauvais nombre de valeurs n'échouait pas, ne se signalait pas, et affichait
+  simplement `lifecycle: %d expired`.
+
+- **Deux nouvelles sections de test d'intégration.** Qu'un cycle d'écriture complet ne touche jamais
+  la position, au millimètre. Et qu'un rapport qui ne peut pas être prouvé laisse la ligne où elle
+  était.
+
+104 vérifications automatisées sur un vrai serveur qb-core avec oxmysql et MariaDB 11.4, et 17
+groupes de vérifications statiques sur 32 fichiers Lua.
+
+---
+
 ## [1.0.16] - 2026-09-09
 
 **Getting out of a vehicle only saved its position on one client in the server.**

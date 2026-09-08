@@ -1840,6 +1840,10 @@ Config.Commands = {
     -- Prints, per restored vehicle around you, how far it is from where the database says it
     -- should be. The answer to "they are not quite in the right place", in numbers.
     ['where']  = { name = 'vparkwhere',   permission = 'admin',    enabled = true },
+    -- The console half of the same question. `/vparkwhere` needs a player standing next to the
+    -- vehicles and reports what the client sees; this reports what the SERVER thinks, including
+    -- the four flags that decide whether a vehicle's position may be written down at all.
+    diag       = { name = 'vparkdiag',    permission = 'admin',    enabled = true },
     migrate    = { name = 'vparkmigrate', permission = 'admin',    enabled = true },
 
     -- A console-only command. Never available in game, whatever `permission` says elsewhere.

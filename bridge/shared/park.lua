@@ -269,6 +269,50 @@ function Park.ticks()
 end
 
 --[[
+    ================================================================================================
+    TIMING A LOOP THAT RUNS FOREVER
+    ================================================================================================
+
+    `/vparkstats` reported the duration of the LAST pass, which is very nearly no information: a
+    loop that is fine ninety-nine times and terrible on the hundredth reads as fine, and the one
+    reading that mattered has already been overwritten by the time anybody looks.
+
+    An average says whether a loop costs anything at all. A worst case says whether it ever
+    stalls. Between them they turn "I think the server is lagging" into a number, which is the
+    lesson `/vparkwhere` taught the hard way: measure before proposing a mechanism.
+
+    Reset every `window` samples so that a spike at boot - when every vehicle in range is being
+    created at once - does not sit in the worst case for the rest of the session. At one sample a
+    second, the shipped window is five minutes.
+]]
+function Park.timing(window)
+    return { count = 0, total = 0.0, worst = 0.0, last = 0.0, window = window or 300 }
+end
+
+function Park.observe(timing, milliseconds)
+    if type(timing) ~= 'table' then return end
+
+    local ms = tonumber(milliseconds) or 0.0
+
+    timing.count = timing.count + 1
+    timing.total = timing.total + ms
+    timing.last = ms
+
+    if ms > timing.worst then timing.worst = ms end
+
+    if timing.count >= (timing.window or 300) then
+        timing.count = 1
+        timing.total = ms
+        timing.worst = ms
+    end
+end
+
+function Park.average(timing)
+    if type(timing) ~= 'table' or timing.count == 0 then return 0.0 end
+    return timing.total / timing.count
+end
+
+--[[
     Format a duration in seconds as the shortest thing a human reads at a glance.
 ]]
 function Park.duration(seconds)

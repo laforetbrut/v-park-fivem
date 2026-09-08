@@ -143,6 +143,19 @@ Locale.register('fr', {
     -- ---------------------------------------------------------------------------------
     -- /vparkstats
     -- ---------------------------------------------------------------------------------
+    ['diag.empty']    = "v-park ne tient aucun véhicule dans le monde pour le moment",
+    ['diag.header']   = "v-park tient %d véhicules dans le monde, le plus éloigné de sa place en premier :",
+    ['diag.line']     = "  %s  %s [%s]  écart %s  %s",
+    ['diag.not_live'] = "%s est enregistré mais absent du monde, il n'y a rien à comparer",
+    ['diag.vehicle']  = "v-park sur %s (%s [%s]) :",
+    ['diag.stored']   = "  enregistré  %s, %s, %s  cap %s",
+    ['diag.world']    = "  monde       %s, %s, %s  cap %s  (écart %s)",
+    ['diag.entity']   = "  entité      %s, netId %s, lisible %s, gelé %s",
+    ['diag.progress'] = "  progression prêt %s, vu %s, %d tentatives, placé il y a %s",
+    ['diag.position'] = "  position    conduit %s, garé %s, décalé %s -> un despawn relirait sa pose : %s",
+    ['diag.placer']   = "  placeur     %s  |  %s",
+    ['stats.timing']  = "temps : passe de streaming %.1f ms moy / %.1f ms pire  |  balayage de capture %.1f / %.1f  |  réconciliation %.1f / %.1f",
+    ['stats.health']  = "restauration : %d en attente d'un client, %d en attente de suppression, %d redemandés",
     ['stats.header']       = "v-park, en ce moment :",
     ['stats.store']        = "registre : %d conservés, %d actifs, %d en attente, %d cellules",
     ['stats.spawn']        = "streaming : %d créés, %d retirés, %d échecs, dernier passage %d ms",

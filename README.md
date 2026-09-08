@@ -224,6 +224,7 @@ resource. Rename any of them in `Config.Commands`; set `enabled = false` to remo
 | `/vparkpurge <filter> [confirm]` | Bulk removal. Always previews first |
 | `/vparkprobe [model]` | Run the placement probe where you stand, and print the result |
 | `/vparkwhere` | Report how far each restored vehicle near you is from where the database says it should be - per axis, plus heading, frozen, dressed and owner |
+| `/vparkdiag [id\|plate]` | What the SERVER thinks. With no argument, every vehicle in the world ordered by how far it drifted from its stored place; with one, the full record - stored pose, actual pose, drift, entity and net id, and the four flags that decide whether its position may be saved. Works from the console, unlike `/vparkwhere` |
 | `/vparkdebug` | Toggle debug logging and the on-screen overlay |
 | `/vparkmigrate <scan\|dry\|run\|rollback>` | The Advanced Parking migration |
 
@@ -421,7 +422,16 @@ one frame rather than forty-five; the client has **one** timer whose interval co
 the nearest tracked vehicle is (200 ms in a car park, 2 s in an empty field); and there is no
 `Wait(0)` in the client code outside a placement in progress and the debug overlay.
 
-`/vparkstats` prints what it is actually costing you, which beats any number written here.
+`/vparkstats` prints what it is actually costing you, which beats any number written here. It
+reports an average AND a worst case over a sliding window for the streaming pass, the capture
+sweep and the reconciliation, because the duration of the last pass hides a spike: a loop that
+is fine ninety-nine times and terrible on the hundredth reads as fine. It also reports how many
+vehicles are waiting on a client, waiting to be deleted, or queued for another restore attempt,
+which is the difference between a resource that is busy and one that is stuck.
+
+When a vehicle is not where it should be, `/vparkdiag` names the number: it prints the stored
+pose, the actual pose, the distance between them, and the four flags that decide whether that
+vehicle's position is allowed to be written down at all.
 
 ---
 
@@ -685,6 +695,7 @@ importer à la main.
 | `/vparkadmin cleanup preview` | Ce que le nettoyage déplacerait. Ne change rien |
 | `/vparkgoto` / `/vparkhere` | Se téléporter au véhicule / le faire venir |
 | `/vparkprobe` | Tester le placement là où vous êtes |
+| `/vparkdiag [id\|plaque]` | Ce que le SERVEUR pense : sans argument, tous les véhicules du monde classés par écart avec leur place enregistrée ; avec un argument, la fiche complète. Fonctionne depuis la console |
 | `/vparkmigrate scan` | Analyser la table Advanced Parking |
 
 La liste complète est dans la section anglaise ci-dessus.

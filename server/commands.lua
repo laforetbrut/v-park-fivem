@@ -389,7 +389,183 @@ register('stats', {
         L('stats.persist', persist.written, persist.batches, persist.captures, persist.lastFlushMs),
         L('stats.database', db.queries, db.writes, db.errors, db.averageMs, db.slowestMs),
         L('stats.lifecycle', life.expired, life.semiExpired, life.cleaned or 0, life.evicted, life.externalDeletes),
+
+        --[[
+            The two lines that answer "is this resource costing me anything" and "is anything
+            stuck", which used to need a guess.
+
+            `lastPassMs` was the only timing here, and the duration of the last pass is very
+            nearly no information: a loop that is fine ninety-nine times and terrible on the
+            hundredth reads as fine. An average and a worst case say whether a loop costs
+            anything at all and whether it ever stalls.
+        ]]
+        L('stats.timing',
+            Park.average(spawn.passMs), (spawn.passMs or {}).worst or 0,
+            Park.average(persist.sweepMs), (persist.sweepMs or {}).worst or 0,
+            Park.average(spawn.reconcileMs), (spawn.reconcileMs or {}).worst or 0),
+
+        L('stats.health', Spawn.health()),
     })
+end)
+
+--[[
+    The console half of `/vparkwhere`.
+
+    `/vparkwhere` needs a player standing next to the vehicles, and it reports what the CLIENT
+    sees. Neither of those is available while reading a log after the fact, and the numbers that
+    matter most - the four flags deciding whether a vehicle's position may be written down - only
+    exist on the server.
+
+    With no argument: every vehicle in the world, worst drift first. With one: everything the
+    server knows about that vehicle.
+]]
+
+-- Formatted here rather than by the locale, because a `%.3f` given a nil raises and half of
+-- these values are legitimately nil - a vehicle awaiting a client has no readable position.
+local function number(value, decimals)
+    if value == nil then return '?' end
+    return ('%.' .. tostring(decimals or 3) .. 'f'):format(tonumber(value) or 0)
+end
+
+local function yesNo(value)
+    return value and 'yes' or 'no'
+end
+
+-- How far the vehicle is from the row that says where it belongs. nil when either end is
+-- unreadable, which is a different answer from zero and must not be printed as zero.
+local function driftOf(record, report)
+    if not record or not report or not report.x then return nil end
+
+    local dx = (tonumber(record.pos_x) or 0) - report.x
+    local dy = (tonumber(record.pos_y) or 0) - report.y
+    local dz = (tonumber(record.pos_z) or 0) - report.z
+
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+
+-- The client that was nominated to dress and place this vehicle. It may well have disconnected
+-- since - that is normal and not an error - and saying so is more useful than saying `nobody`,
+-- which is what a vehicle nobody was ever nominated for gets.
+local function placerOf(report)
+    if not report.placer then return 'nobody' end
+
+    local name = Bridge.playerName(report.placer)
+    if name then return ('%s (%d)'):format(name, report.placer) end
+
+    return ('%d, disconnected'):format(report.placer)
+end
+
+local function flagsOf(report)
+    local flags = {}
+
+    if not report.ready then flags[#flags + 1] = 'not-ready' end
+    if not report.seen then flags[#flags + 1] = 'unseen' end
+    if report.frozen then flags[#flags + 1] = 'frozen' end
+    if report.driven then flags[#flags + 1] = 'driven' end
+    if report.parked then flags[#flags + 1] = 'parked' end
+    if report.nudged then flags[#flags + 1] = 'nudged' end
+    if report.adopted then flags[#flags + 1] = 'adopted' end
+    if report.retryAt then flags[#flags + 1] = 'awaiting-retry' end
+    if report.occupant then flags[#flags + 1] = 'occupant-' .. tostring(report.occupant) end
+    if not report.exists then flags[#flags + 1] = 'unreadable' end
+
+    return #flags > 0 and table.concat(flags, ' ') or 'clean'
+end
+
+register('diag', {
+    description = 'What the server knows about the vehicles it is holding, and where they drifted',
+    params = { { name = 'id|plate', help = 'optional; omit to list every vehicle in the world' } },
+}, function(src, args)
+    local reference = args[1]
+
+    if reference and reference ~= '' then
+        local record = Store.resolve(reference)
+        if not record then
+            reply(src, L('error.unknown_vehicle'))
+            return
+        end
+
+        local report = Spawn.inspect(record.id)
+        if not report then
+            reply(src, L('diag.not_live', record.id))
+            return
+        end
+
+        local drift = driftOf(record, report)
+        local now = Park.ticks()
+
+        replyMany(src, {
+            L('diag.vehicle', record.id, record.model_name or '?', record.plate or '?'),
+
+            L('diag.stored',
+                number(record.pos_x), number(record.pos_y), number(record.pos_z),
+                number(record.rot_z, 1)),
+
+            L('diag.world',
+                number(report.x), number(report.y), number(report.z),
+                number(report.heading, 1),
+                drift and (number(drift) .. ' m') or 'unreadable'),
+
+            L('diag.entity',
+                tostring(report.entity or '?'), tostring(report.netId or '?'),
+                yesNo(report.exists), yesNo(report.frozen)),
+
+            -- `placedAt` is a game tick, so milliseconds. `Park.duration` wants seconds.
+            L('diag.progress',
+                yesNo(report.ready), yesNo(report.seen), report.retries,
+                report.placedAt and Park.duration((now - report.placedAt) / 1000) or '?'),
+
+            L('diag.position',
+                yesNo(report.driven), yesNo(report.parked), yesNo(report.nudged),
+                yesNo(report.wouldReadPose)),
+
+            L('diag.placer', placerOf(report), flagsOf(report)),
+        })
+
+        return
+    end
+
+    -- No argument: the whole world, worst drift first, because the one that moved is the one
+    -- being looked for.
+    local rows = {}
+
+    for id in pairs(Store.allLive()) do
+        local report = Spawn.inspect(id)
+        local record = Store.get(id)
+
+        if report then
+            rows[#rows + 1] = {
+                id = id,
+                model = (record and record.model_name) or '?',
+                plate = (record and record.plate) or '?',
+                drift = driftOf(record, report),
+                flags = flagsOf(report),
+            }
+        end
+    end
+
+    -- An unreadable position sorts last, not first: it is a vehicle that has not reached a
+    -- client yet, which is normal, and it must not push a real drift off the top of the list.
+    table.sort(rows, function(a, b)
+        return (a.drift or -1) > (b.drift or -1)
+    end)
+
+    if #rows == 0 then
+        reply(src, L('diag.empty'))
+        return
+    end
+
+    local lines = { L('diag.header', #rows) }
+
+    for _, row in ipairs(rows) do
+        lines[#lines + 1] = L('diag.line', row.id, row.model, row.plate,
+            row.drift and (number(row.drift) .. ' m') or '?', row.flags)
+    end
+
+    local pendingCount, condemnedCount, waiting = Spawn.health()
+    lines[#lines + 1] = L('stats.health', pendingCount, condemnedCount, waiting)
+
+    replyMany(src, lines)
 end)
 
 register('zones', {

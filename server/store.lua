@@ -538,6 +538,91 @@ end
 -- What is in the world
 -- ---------------------------------------------------------------------------------------
 
+--[[
+    ================================================================================================
+    WHAT A LIVE ENTRY IS ALLOWED TO CARRY, AND WHO IS ALLOWED TO SAY SO
+    ================================================================================================
+
+    A live entry is the server's record of a vehicle that exists in the world right now. It is
+    created by `Store.setLive` and then written to, in place, by `server/spawn.lua` - and only by
+    `server/spawn.lua`, which is checked.
+
+    THIS LIST EXISTS BECAUSE THE FIELDS ON IT HAVE COST THREE RELEASES BETWEEN THEM.
+
+    1.0.14 set `driven` to record that a vehicle had been used, not knowing that `driven` was
+    also the flag permitting the despawn to re-read the entity's position - so the correct parked
+    position was written and then overwritten with a stale one seconds later. One word doing two
+    jobs, and the second job undid the first.
+
+    That is not a mistake anybody makes reading thirteen undocumented booleans off a table. So
+    each one is written down here with who sets it, who reads it, and what clears it, and
+    `tools/check.py` group 16 fails the build on any field that is not.
+
+    ------------------------------------------------------------------------------------------
+    IDENTITY - set once at creation, never changed
+    ------------------------------------------------------------------------------------------
+
+    entity        The script handle. `Spawn.create` writes it before anything else can happen to
+                  the vehicle; nothing else ever writes it.
+    netId         The network id, needed to address a client. Written by `dress` once the entity
+                  is configured, and by `Persist.adopt` for a vehicle that already existed.
+    placer        The client nominated to dress and place it. Read when re-sending a restore and
+                  when telling that client to forget the vehicle.
+    placedAt      When it was created. Diagnostics only.
+    adopted       True when the vehicle already existed and we took it over, rather than having
+                  created it. Distinguishes the two paths in the panel and the logs.
+
+    ------------------------------------------------------------------------------------------
+    PROGRESS - how far through being restored it is
+    ------------------------------------------------------------------------------------------
+
+    ready         Dressed, addressable, and handed to a client. Set by `dress`.
+    seen          The entity has been observed to exist at least once. REQUIRED before the
+                  lifecycle sweep may conclude something else deleted it - an orphaned setter
+                  entity answers false to `DoesEntityExist` by design, and without this a vehicle
+                  that had not reached a client yet would have its row deleted.
+    restoreAt     Tick at which to send the restore instruction again, after a client answered
+                  that it could not take network control. Cleared when it is sent or succeeds.
+    restoreTries  How many times that has happened. Capped at three.
+
+    ------------------------------------------------------------------------------------------
+    POSITION - who is allowed to say where this vehicle is
+    ------------------------------------------------------------------------------------------
+
+    These four decide whether the despawn re-reads the entity's pose, and they are the ones to
+    think hardest about. The rule they encode: THE STORED POSITION CHANGES WHEN A PERSON MOVES
+    THE VEHICLE, AND NOT OTHERWISE.
+
+    frozen        Whether the vehicle is frozen. A frozen vehicle cannot have moved. Set from the
+                  placement result and updated from every snapshot.
+    driven        Somebody has sat in it since it was restored. Waking is not driving: every
+                  vehicle near a player is woken, and a woken vehicle is simulated and rolls.
+                  Only this permits a pose to be read back.
+    parked        The client that was driving has reported the final pose. That report is better
+                  information than anything the server can read, so it BLOCKS the despawn read
+                  entirely. Cleared when somebody gets in again.
+    nudged        The placement stood the vehicle aside because its bay was occupied. It is not
+                  where it belongs, so its position must not be written down. Cleared when
+                  somebody drives it.
+
+    ------------------------------------------------------------------------------------------
+    AUTHORSHIP - who is allowed to speak for this vehicle
+    ------------------------------------------------------------------------------------------
+
+    occupant      The player the server watched get into it, set by `vpark:server:touched` only
+                  after reading, on the server, that their ped was within ten metres of the
+                  entity. It is the fallback proof for a parked report that arrives after every
+                  client has lost scope, at which point there is nothing left to measure. An id
+                  is not a secret - `vpark:id` is replicated - so a handler that takes one on
+                  trust lets any client speak for any vehicle it has ever seen.
+]]
+Store.liveFields = {
+    entity = true, netId = true, placer = true, placedAt = true, adopted = true,
+    ready = true, seen = true, restoreAt = true, restoreTries = true,
+    frozen = true, driven = true, parked = true, nudged = true,
+    occupant = true,
+}
+
 function Store.setLive(id, entry)
     if live[id] and not entry then
         live[id] = nil

@@ -53,6 +53,10 @@ local sliceCursor = 0
 local flushing = false
 
 local stats = {
+    -- See `Park.timing`: the average and the worst case of the capture sweep, which is the
+    -- loop that touches every live vehicle.
+    sweepMs = Park.timing(),
+
     written = 0,
     batches = 0,
     skipped = 0,
@@ -566,6 +570,7 @@ end
     server is rather than to how large the table is.
 ]]
 local function sweep()
+    local sweepStartedAt = Park.ticks()
     local slices = math.max(1, math.floor(tonumber(saveConfig().sweepSlices) or 4))
     sliceCursor = (sliceCursor % slices) + 1
 
@@ -619,6 +624,8 @@ local function sweep()
             requests[token] = nil
         end
     end
+
+    Park.observe(stats.sweepMs, Park.ticks() - sweepStartedAt)
 end
 
 -- ---------------------------------------------------------------------------------------

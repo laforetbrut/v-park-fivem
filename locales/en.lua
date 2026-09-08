@@ -147,6 +147,19 @@ Locale.register('en', {
     -- ---------------------------------------------------------------------------------
     -- /vparkstats
     -- ---------------------------------------------------------------------------------
+    ['diag.empty']    = 'v-park is holding nothing in the world right now',
+    ['diag.header']   = 'v-park is holding %d vehicles in the world, furthest from home first:',
+    ['diag.line']     = '  %s  %s [%s]  drift %s  %s',
+    ['diag.not_live'] = '%s is stored but is not in the world, so there is nothing to compare',
+    ['diag.vehicle']  = 'v-park on %s (%s [%s]):',
+    ['diag.stored']   = '  stored    %s, %s, %s  heading %s',
+    ['diag.world']    = '  world     %s, %s, %s  heading %s  (drift %s)',
+    ['diag.entity']   = '  entity    %s, netId %s, readable %s, frozen %s',
+    ['diag.progress'] = '  progress  ready %s, seen %s, %d retries, placed %s ago',
+    ['diag.position'] = '  position  driven %s, parked %s, nudged %s -> a despawn would re-read its pose: %s',
+    ['diag.placer']   = '  placer    %s  |  %s',
+    ['stats.timing']  = 'timing: streaming pass %.1f ms avg / %.1f ms worst  |  capture sweep %.1f / %.1f  |  reconcile %.1f / %.1f',
+    ['stats.health']  = 'restore: %d awaiting a client, %d awaiting deletion, %d re-asked',
     ['stats.header']       = 'v-park, right now:',
     ['stats.store']        = 'store: %d kept, %d live, %d pending, %d cells',
     ['stats.spawn']        = 'streaming: %d created, %d removed, %d failed, last pass %d ms',
