@@ -56,19 +56,34 @@ end
 --[[
     Is OneSync on?
 
-    `onesync_enabled` is the modern convar; `onesync` carries the mode name on newer builds and
-    `onesync_enableInfinity` on older ones. Checking all three because a server that reports
-    OneSync under only one of them still has OneSync, and refusing to boot on a working server
-    would be worse than the problem this check exists to catch.
+    Returns `'on'`, `'off'` or `'unknown'`, and the third value is the reason this function is
+    longer than it looks like it should be.
+
+    OneSync is reported under three different convars depending on the build - `onesync_enabled`
+    on modern ones, `onesync` carrying a mode name, `onesync_enableInfinity` on older ones - and
+    a server that reports it under only one of them still has OneSync.
+
+    More awkwardly, a server that has never SET any of them reads all three as their defaults,
+    which is indistinguishable from a server that set them to off. On a current FXServer with a
+    valid licence key OneSync is on by default and nothing appears in `server.cfg`, so treating
+    "nothing is set" as "off" would refuse to boot on a perfectly good server - which is a worse
+    outcome than the problem this check exists to catch.
+
+    So: an explicit off is an off, an explicit on is an on, and silence is `'unknown'` and gets
+    a loud warning rather than a refusal.
 ]]
-local function oneSyncEnabled()
-    if GetConvar('onesync_enabled', 'false') == 'true' then return true end
-    if GetConvar('onesync_enableInfinity', 'false') == 'true' then return true end
+local function oneSyncState()
+    local enabled = GetConvar('onesync_enabled', '')
+    local infinity = GetConvar('onesync_enableInfinity', '')
+    local mode = GetConvar('onesync', '')
 
-    local mode = GetConvar('onesync', 'off')
-    if mode ~= 'off' and mode ~= '' and mode ~= 'false' then return true end
+    if enabled == 'true' or infinity == 'true' then return 'on' end
+    if mode ~= '' and mode ~= 'off' and mode ~= 'false' then return 'on' end
 
-    return false
+    -- An explicit off, from whichever convar this build actually uses.
+    if enabled == 'false' or mode == 'off' or mode == 'false' then return 'off' end
+
+    return 'unknown'
 end
 
 -- ---------------------------------------------------------------------------------------
@@ -223,6 +238,10 @@ local function banner()
         print('^3[v-park]^7 IN MEMORY: nothing will survive a server restart')
     end
 
+    if state.oneSync ~= 'on' then
+        print(('^3[v-park]^7 OneSync: %s'):format(tostring(state.oneSync)))
+    end
+
     if state.garageResource then
         print(('^2[v-park]^7 garages: ^5%s^7 (%d)'):format(state.garageResource, #Runtime.garages()))
     end
@@ -239,18 +258,26 @@ CreateThread(function()
     state.version = GetResourceMetadata(Park.resource, 'version', 0) or 'unknown'
 
     -- 1. OneSync.
-    state.oneSync = oneSyncEnabled()
+    local oneSync = oneSyncState()
+    state.oneSync = oneSync
 
-    if not state.oneSync then
+    if oneSync == 'off' then
         if Config.General and Config.General.requireOneSync ~= false then
-            Park.error('OneSync is not enabled, and v-park cannot work without it.')
+            Park.error('OneSync is switched off, and v-park cannot work without it.')
             Park.error('Server-created entities need it; without it nothing would exist for other players.')
-            Park.error("Enable OneSync, or set Config.General.requireOneSync = false to start anyway.")
+            Park.error('Enable OneSync, or set Config.General.requireOneSync = false to start anyway.')
             return
         end
 
-        Park.warn('OneSync is not enabled. Running anyway, because the config says to.')
+        Park.warn('OneSync is switched off. Running anyway, because the config says to.')
         Park.warn('Expect vehicles that exist for one player and not for others.')
+
+    elseif oneSync == 'unknown' then
+        -- Nothing set either way. Almost always a current server with OneSync on by default
+        -- and nothing about it in server.cfg, so this warns rather than refusing.
+        Park.warn('could not tell whether OneSync is enabled - no onesync convar is set')
+        Park.warn('carrying on, because that is the normal state of a server that leaves it at its default')
+        Park.warn('if vehicles exist for one player and not for others, that is why')
     end
 
     -- 2. Framework. Given a moment first: on a cold boot every resource starts in the same
