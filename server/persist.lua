@@ -405,17 +405,53 @@ function Persist.applySnapshot(id, snapshot)
         -- A position at the origin is a vehicle whose coordinates were not readable, not a
         -- vehicle at the origin. Writing it would move a car to the middle of the ocean.
         if math.abs(position.x) > 0.5 or math.abs(position.y) > 0.5 then
-            patch.pos_x = Park.coord(position.x)
-            patch.pos_y = Park.coord(position.y)
-            patch.pos_z = Park.coord(position.z)
+            --[[
+                A MOVE OF A FEW CENTIMETRES IS NOT A MOVE.
+
+                A vehicle that has been woken - which every vehicle near a player has been - is
+                simulated again, and simulation settles it. Measured with `/vparkwhere` on cars
+                that had been restored correctly: seventeen millimetres on one, three on
+                another. Each of those was being written back as the new truth, and the next
+                restore put the car there, and it settled again.
+
+                Individually invisible and cumulatively exactly the complaint: "it is not quite
+                where I left it". A stored position should change when somebody DRIVES the car,
+                not because physics breathed on it.
+
+                Five centimetres is below anything a person can see and far above anything
+                settling produces. A genuine drive clears it in the first metre.
+            ]]
+            local moved = math.abs(position.x - (record.pos_x or 0.0))
+                + math.abs(position.y - (record.pos_y or 0.0))
+                + math.abs(position.z - (record.pos_z or 0.0))
+
+            if moved > 0.05 then
+                patch.pos_x = Park.coord(position.x)
+                patch.pos_y = Park.coord(position.y)
+                patch.pos_z = Park.coord(position.z)
+            end
         end
     end
 
+    --[[
+        The same argument as the position, one line up.
+
+        A vehicle settling on its suspension changes its pitch and roll by fractions of a
+        degree, and writing that back means the next restore sets a rotation the car will
+        settle out of again. Half a degree is well under what anybody can see and well over
+        anything settling produces.
+    ]]
     local rotation = snapshot.rotation
     if type(rotation) == 'table' then
-        patch.rot_x = Park.angle(tonumber(rotation.x) or record.rot_x)
-        patch.rot_y = Park.angle(tonumber(rotation.y) or record.rot_y)
-        patch.rot_z = Park.angle(tonumber(rotation.z) or record.rot_z)
+        local turned = math.abs(Park.angleDelta(tonumber(rotation.x) or record.rot_x, record.rot_x))
+            + math.abs(Park.angleDelta(tonumber(rotation.y) or record.rot_y, record.rot_y))
+            + math.abs(Park.angleDelta(tonumber(rotation.z) or record.rot_z, record.rot_z))
+
+        if turned > 0.5 then
+            patch.rot_x = Park.angle(tonumber(rotation.x) or record.rot_x)
+            patch.rot_y = Park.angle(tonumber(rotation.y) or record.rot_y)
+            patch.rot_z = Park.angle(tonumber(rotation.z) or record.rot_z)
+        end
     end
 
     if type(snapshot.interior) == 'number' then patch.interior = snapshot.interior end

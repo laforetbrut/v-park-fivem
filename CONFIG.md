@@ -59,13 +59,13 @@ again. Set it back to `'all'` if you were running 1.0.0 or 1.0.1 and want the ol
 
 Two settings keep `'owned'` from being uselessly strict, and both are on by default:
 
-- **`Config.Ownership.keysGrantOwnership`** - holding the keys counts as owning it. Without
-  this, `/admincar`, a dealership demo, a job spawner and a mate handing over their keys all
-  produce cars that vanish on the next restart, because none of them write a row in
-  `player_vehicles`. The framework's record is still asked **first** and still wins, so lending
-  somebody your keys does not lend them your car. It costs one export call to your key resource
-  at the moment somebody gets into a vehicle that is not persisted yet - not per save, not per
-  streaming pass. A key resource with no readable server-side answer is treated as "no keys".
+- **`Config.Ownership.keysGrantOwnership`** - **off**, and it should stay off on any server with
+  a working owned-vehicles table. It was on by default until 1.0.11, on the stated but unchecked
+  premise that `/admincar` does not register the vehicle to anybody. It does:
+  `qb-adminmenu`'s SaveCar runs `INSERT INTO player_vehicles`. What the setting actually did was
+  make everything that hands over keys without registering a vehicle - `/car`, dealership test
+  drives, job spawners, admin spawn menus - produce permanent rows. Turn it on only if your key
+  resource genuinely is the only record of who owns what.
 
 - **`Config.Persistence.allowClaimInOwnedMode`** - `/vpark` works. A claim is neither an owned
   vehicle nor a job one, so read strictly the mode would refuse it and the park command would do

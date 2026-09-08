@@ -7,6 +7,148 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.11] - 2026-09-09
+
+Fixed from measurements rather than from reasoning. `/vparkwhere`, added in 1.0.10, reported
+this on three cars parked together:
+
+```
+0TL1XPC029AV2  PREMIER  off by 1.250 m   dx -1.250  dy +0.000  dz +0.000  heading -0.00
+0TL1XPN03STI2  PREMIER  off by 0.017 m   dx -0.005  dy +0.016  dz -0.001  heading -0.00
+0TL1XP201FY36  PREMIER  off by 0.003 m   dx +0.003  dy +0.001  dz -0.001  heading +0.00
+```
+
+Two different faults, and the numbers name both.
+
+### One vehicle moved exactly one search step
+
+1250 mm on a single axis and nothing on the other two is not drift. It is exactly
+`Config.Placement.search.step`, which means the probe reported the bay blocked and the search
+moved the car one ring outwards - and then `moved` sent that position back to the server, which
+saved it.
+
+The blocker was **another one of our own vehicles**. 1.0.8 took map geometry out of this test on
+the grounds that it cannot have changed since the vehicle was parked. Our own fleet cannot have
+changed either: a persisted vehicle standing at its saved pose was standing there when every
+other persisted vehicle nearby was saved. **They coexisted.** Two cars parked in adjacent bays
+are not in each other's way and never were - and the box this probe tests is bigger than the
+body, because it contains the mirrors and a margin the exporter added, so two cars parked thirty
+centimetres apart overlap in it.
+
+**A vehicle carrying one of our ids is no longer a blocker.** What is left is what genuinely can
+have arrived: ambient traffic, and cars other players are driving. The check is made where the
+overlap is found rather than while the vehicle pool is being read, so it costs a handful of
+statebag reads per placement instead of one per vehicle on the street.
+
+### The other two were drifting a few millimetres at a time
+
+Seventeen millimetres and three. Both cars had been restored correctly and then **woken** -
+every vehicle near a player is - and a woken vehicle is simulated again, and simulation settles
+it. Each of those settlements was being written back as the new stored position, and the next
+restore put the car there, and it settled again.
+
+Individually invisible, cumulatively exactly the complaint. **A stored position now changes when
+somebody drives the car, not because physics breathed on it**: a capture whose position differs
+by less than five centimetres, or whose rotation differs by less than half a degree, leaves the
+stored value alone. Both thresholds are below what anybody can see and far above anything
+settling produces, and a genuine drive clears them in the first metre.
+
+### A place the search invented is never written down
+
+The two fixes above stop the search being triggered wrongly. This one stops a wrong trigger from
+ever becoming permanent.
+
+The search runs when the saved bay is occupied, and it answers with the nearest spot that is
+not. **That is a way to avoid two cars overlapping for the next few minutes. It is not where the
+vehicle belongs** - and saving it meant the vehicle never went home again, because the invented
+spot became the saved spot and the next restore started from there.
+
+A `nudged` placement no longer updates the stored position, and the vehicle is flagged so the
+despawn does not write it back either when the player walks away. The car may stand aside until
+the obstruction goes, and the database still knows where it lives. A ground correction is still
+written, because that is a real correction to a Z that was wrong.
+
+### `/car` no longer makes a vehicle persistent
+
+`Config.Ownership.keysGrantOwnership` is **off**, and the reason it was ever on was a mistake.
+
+1.0.2 turned it on to fix a real report: a car given with `/admincar` was not being kept. The
+reasoning was that `/admincar` does not register the vehicle to anybody, so a strict reading of
+`mode = 'owned'` would never keep it.
+
+That reasoning was wrong. `/admincar` on qb-core is `qb-adminmenu`'s SaveCar, and its server half
+runs `INSERT INTO player_vehicles`. It writes the row. The vehicle is owned by the framework's
+own definition and was always going to be kept; nothing needed widening.
+
+What the widening did instead was keep everything else - `/car`, dealership test drives, job
+spawners, admin spawn menus - because all of them hand over the keys without registering the
+vehicle to anybody. **The framework's register is the authority on who owns a car.** That is
+what it is for.
+
+---
+
+## [1.0.11] - 2026-09-09 (français)
+
+Corrigé à partir de mesures et non de raisonnement. `/vparkwhere`, ajouté en 1.0.10, a donné
+ceci sur trois voitures garées ensemble : une à **1,250 m** d'écart sur un seul axe, les deux
+autres à 17 et 3 millimètres.
+
+### La première avait bougé d'exactement un pas de recherche
+
+1250 mm sur un seul axe et rien sur les deux autres, ce n'est pas une dérive : c'est exactement
+`Config.Placement.search.step`. La sonde a donc déclaré la place bloquée et la recherche a
+décalé la voiture d'un cran - puis cette position a été renvoyée au serveur et sauvegardée.
+
+Le bloqueur était **un autre de nos propres véhicules**. La 1.0.8 avait sorti la carte de ce
+test au motif qu'elle ne peut pas avoir changé depuis que la voiture était garée. Notre propre
+flotte non plus : un véhicule persistant à sa pose sauvegardée était déjà là quand tous les
+autres ont été sauvegardés. **Ils coexistaient.** Deux voitures dans des places voisines ne se
+gênent pas et ne se sont jamais gênées - et la boîte testée est plus grande que la carrosserie.
+
+**Un véhicule portant un de nos identifiants n'est plus un bloqueur.** Reste ce qui peut
+réellement être arrivé : le trafic ambiant et les voitures conduites par d'autres joueurs.
+
+### Les deux autres dérivaient de quelques millimètres à chaque fois
+
+Dix-sept millimètres et trois. Les deux avaient été restaurées correctement puis **réveillées** -
+tout véhicule près d'un joueur l'est - et un véhicule réveillé est de nouveau simulé, donc il se
+tasse. Chacun de ces tassements était réécrit comme la nouvelle position.
+
+Invisible isolément, cumulativement exactement la plainte. **Une position enregistrée ne change
+plus que si quelqu'un conduit la voiture** : une capture dont la position diffère de moins de
+cinq centimètres, ou dont la rotation diffère de moins d'un demi-degré, laisse la valeur
+enregistrée intacte.
+
+### Une place inventée par la recherche n'est jamais enregistrée
+
+Les deux correctifs ci-dessus empêchent la recherche de se déclencher à tort. Celui-ci empêche
+un déclenchement à tort de devenir définitif.
+
+La recherche répond avec l'emplacement libre le plus proche. **C'est une façon d'éviter que deux
+voitures se chevauchent pendant quelques minutes, ce n'est pas la place du véhicule** - et
+l'enregistrer signifiait qu'il ne rentrait plus jamais chez lui, puisque la place inventée
+devenait la place sauvegardée.
+
+Un placement décalé ne met plus à jour la position enregistrée, et le véhicule est marqué pour
+que la disparition ne la réécrive pas non plus. La voiture peut se ranger à côté le temps que
+l'obstacle parte, la base sait toujours où elle habite.
+
+### `/car` ne rend plus un véhicule persistant
+
+`Config.Ownership.keysGrantOwnership` est **désactivé**, et la raison pour laquelle il était
+activé était une erreur.
+
+La 1.0.2 l'avait activé pour corriger un vrai signalement : une voiture donnée avec `/admincar`
+n'était pas conservée. Le raisonnement était que `/admincar` n'enregistre le véhicule à
+personne. C'était faux : `/admincar` sur qb-core exécute `INSERT INTO player_vehicles`. Le
+véhicule est possédé au sens du framework et allait de toute façon être conservé.
+
+Ce que l'élargissement a fait, c'est conserver tout le reste - `/car`, les essais de
+concessionnaire, les spawners de métier - qui donnent les clés sans enregistrer le véhicule.
+**Le registre du framework fait autorité sur qui possède une voiture.**
+
+---
+
 ## [1.0.10] - 2026-09-08
 
 **No vehicle came back in quite the right place.** Not some of them - none of them, which is the

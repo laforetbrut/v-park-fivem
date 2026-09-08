@@ -248,7 +248,41 @@ local function overlappingVehicles(centre, half, heading, ignore, margin)
                 if math.abs(localX) < half.x + otherHalf.x + margin
                     and math.abs(localY) < half.y + otherHalf.y + margin
                     and math.abs(localZ) < half.z + otherHalf.z + margin then
-                    out[#out + 1] = entry.entity
+
+                    --[[
+                        OUR OWN VEHICLES ARE NOT OBSTACLES. SAME ARGUMENT AS THE MAP.
+
+                        A persisted vehicle standing at its saved pose was standing there when
+                        every other persisted vehicle nearby was saved. They coexisted. Two
+                        cars parked in adjacent bays are not in each other's way and never
+                        were - and the box tested here is bigger than the body, because it
+                        contains the mirrors and a margin the exporter added, so two cars
+                        parked thirty centimetres apart overlap in it.
+
+                        The measured symptom, from `/vparkwhere` on three cars parked together:
+
+                            0TL1XPC029AV2  PREMIER  off by 1.250 m  dx -1.250  dy 0  dz 0
+
+                        1250 mm on one axis and nothing on the other two is not drift. It is
+                        exactly `Config.Placement.search.step`: the probe called the bay
+                        blocked because a neighbour's box overlapped, the search moved the car
+                        one ring outwards, and `moved` sent that position back to be saved.
+
+                        1.0.8 took the map out of this test for the same reason. This is the
+                        other half: neither the world nor our own fleet can have changed since
+                        the vehicle was parked. What is left is what genuinely can have
+                        arrived - ambient traffic, and cars other players are driving.
+
+                        Asked HERE rather than while building the snapshot, and that matters:
+                        a statebag read per vehicle in the pool would be two hundred reads per
+                        placement on a busy street. Only a handful of vehicles ever overlap,
+                        and only those are asked.
+                    ]]
+                    local ok, id = pcall(function() return Entity(entry.entity).state['vpark:id'] end)
+
+                    if not (ok and id ~= nil) then
+                        out[#out + 1] = entry.entity
+                    end
                 end
             end
         end

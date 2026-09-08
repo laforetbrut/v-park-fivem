@@ -1637,31 +1637,35 @@ Config.Ownership = {
     followFrameworkOwner = true,
 
     --[[
-        HOLDING THE KEYS COUNTS AS OWNING IT.
+        Should holding the keys count as owning the vehicle?
 
-        Added in 1.0.2, and it is the other half of making `mode = 'owned'` the default.
+        OFF, AND THE REASON IT WAS EVER ON WAS A MISTAKE ON MY PART.
 
-        The framework's owned-vehicles table is not the only way a car becomes somebody's.
-        `/admincar`, a dealership demo, a job spawner, a player handing a mate the keys, a
-        heist vehicle given to the crew - none of those write a row in `player_vehicles`, and
-        in a strict reading of 'owned' every one of them is traffic that vanishes on restart.
+        1.0.2 turned this on to fix a real report: a car the player had given themselves with
+        `/admincar` was not being kept. The reasoning was that `/admincar` does not write a row
+        in the framework's owned-vehicles table, so a strict reading of `mode = 'owned'` would
+        never keep it.
 
-        That is wrong, and it was reported as exactly that: a car the player had given
-        themselves the keys to was not kept, and obviously should have been.
+        That reasoning was simply wrong. `/admincar` on qb-core is
+        `qb-adminmenu`'s SaveCar, and its server half does exactly this:
 
-        So the resolution order is now the framework's record first, because it is the
-        strongest evidence there is, and the key resource second. A player who holds the keys
-        is recorded as the owner with `owner_type = 'owned'` and gets the owned expiry.
+            INSERT INTO player_vehicles (license, citizenid, vehicle, hash, mods, plate, state)
 
-        WHAT THIS COSTS. One export call to your key resource per vehicle, at the moment
-        somebody gets into one that is not persisted yet. Not per save, not per streaming
-        pass. A key resource with no readable server-side answer returns nothing, which is
-        treated as "no keys", and the vehicle falls through to the settle timer exactly as it
-        did before.
+        It writes the row. The vehicle IS owned by the framework's own definition, and
+        `matchOwnedByPlate` above was always going to keep it. Nothing needed widening.
 
-        Turn it off for a strict "only what the framework sold them" reading.
+        What the widening did instead was keep everything else. `/car` spawns a vehicle and
+        hands over the keys without registering it to anybody, and so does every dealership
+        test drive, job spawner and admin spawn menu on most servers - so with this on, every
+        one of them became a permanent row. Reported as, precisely: "/car makes it persistent,
+        that is not normal; it should be /admincar".
+
+        The framework's register is the authority on who owns a car. That is what it is for.
+
+        Turn this on only if your server has no owned-vehicles table worth reading, and your
+        key resource genuinely is the only record of who owns what.
     ]]
-    keysGrantOwnership = true,
+    keysGrantOwnership = false,
 }
 
 -- ===========================================================================================

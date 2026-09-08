@@ -570,8 +570,9 @@ SHIPPED_DEFAULTS = [
      "the default persistence mode, changed in 1.0.2 and stated everywhere"),
     ('Persistence', 'ownedImmediately', 'true',
      "a player's own car is kept from the moment they get in"),
-    ('Ownership', 'keysGrantOwnership', 'true',
-     "holding the keys counts as owning it, which is what makes 'owned' mode usable"),
+    ('Ownership', 'keysGrantOwnership', 'false',
+     "the framework's register is the authority on ownership; keys are held by anybody who was "
+     "handed a spawned car, which is not the same thing"),
     ('Persistence', 'allowClaimInOwnedMode', 'true',
      "without it /vpark does nothing at all on a stock install"),
     ('Streaming', 'reconcileInterval', '15',

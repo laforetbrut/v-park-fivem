@@ -8,6 +8,100 @@ out of it.
 
 ---
 
+## [2026-09-09 05:10] — Widening ownership on a premise I never checked
+
+**Context:** Reported alongside the position measurements: "when I do /car premier it makes it
+persistent, that is not normal - it should be when I do /admincar in the car".
+
+**Error:** None. Working exactly as configured.
+
+**Root cause:** `Config.Ownership.keysGrantOwnership`, added in 1.0.2 and on by default.
+
+It was added to fix a real report - a car the player had given themselves with `/admincar` was
+not being kept - and the reasoning written into the config comment was:
+
+    `/admincar`, a dealership demo, a job spawner [...] none of those write a row in
+    `player_vehicles`
+
+I never checked that. `/admincar` on qb-core is `qb-adminmenu`'s SaveCar, and its server half is:
+
+    MySQL.insert('INSERT INTO player_vehicles (license, citizenid, vehicle, hash, mods, plate,
+                  state) VALUES (?, ?, ?, ?, ?, ?, ?)')
+
+It writes the row. The vehicle was owned by the framework's own definition and
+`matchOwnedByPlate` was always going to keep it. The original report had some other cause, and
+the fix for it was a widening of what "owned" means that was never needed.
+
+What the widening did keep was everything else. `/car` spawns a vehicle and hands over the keys
+without registering it to anybody, and so does every dealership test drive, job spawner and
+admin spawn menu on most servers. All of them became permanent rows.
+
+**Fix:** `keysGrantOwnership = false`. The framework's register is the authority on ownership,
+which is what it is for. The option stays for a server whose key resource genuinely is the only
+record of who owns what.
+
+**Prevention:**
+
+> **A config comment that states a fact about another resource is a claim, and claims get
+> checked.**
+>
+> The comment asserting that `/admincar` writes no row was the entire justification for the
+> setting, it was three lines long, it was confident, and reading the command would have taken
+> a minute. Instead it shipped as a default and turned every spawned car on the server into a
+> permanent row for nine releases.
+>
+> The tell: the fix widened a definition to solve a specific report, without first confirming
+> the report was not explained by the definition that already existed.
+
+---
+
+## [2026-09-09 03:20] — Our own parked cars were treated as obstacles
+
+**Context:** The first report in this file to arrive as measurements rather than as a
+description. `/vparkwhere` on three cars parked together:
+
+    0TL1XPC029AV2  PREMIER  off by 1.250 m   dx -1.250  dy +0.000  dz +0.000
+    0TL1XPN03STI2  PREMIER  off by 0.017 m   dx -0.005  dy +0.016  dz -0.001
+    0TL1XP201FY36  PREMIER  off by 0.003 m   dx +0.003  dy +0.001  dz -0.001
+
+**Error:** None. Two separate faults, and the numbers separate them.
+
+**Root cause, the 1.25 m:** exactly `Config.Placement.search.step`, on one axis, with nothing on
+the other two. That is not drift, it is the search having moved the vehicle one ring outwards
+because the probe reported the bay blocked - and then `result.moved` sending the new position
+back to be saved.
+
+The blocker was another of our own vehicles. 1.0.8 removed map geometry from this test because
+the map cannot have changed since the vehicle was parked; the same argument applies to our own
+fleet and had not been made. A persisted vehicle at its saved pose was standing there when every
+other persisted vehicle nearby was saved, so they coexisted by construction. And the box tested
+is the model's bounding box, which includes the mirrors and the exporter's margin, so two cars
+parked thirty centimetres apart overlap in it - meaning neighbours were blocking each other
+routinely rather than rarely.
+
+**Root cause, the millimetres:** both cars had been restored correctly and then woken, which
+every vehicle near a player is. A woken vehicle is simulated, and simulation settles it by
+millimetres. Every one of those settlements was captured and written back as the new stored
+position, so the next restore placed the car at the settled position and it settled again.
+
+**Fix:** A vehicle carrying a `vpark:id` is not a blocker, checked where the overlap is found
+rather than while reading the vehicle pool - a handful of statebag reads per placement instead
+of one per vehicle on the street. And a capture whose position differs by less than five
+centimetres, or whose rotation by less than half a degree, leaves the stored values alone.
+
+**Prevention:**
+
+> **Ask for the number before proposing the mechanism.**
+>
+> Five releases went into "not quite in the right place" and produced five plausible mechanisms,
+> each fixed, each leaving the symptom. The first measurement identified two real faults in
+> minutes, because `1.250` is not a plausible amount of drift - it is a constant from the
+> config, and a constant names its own source.
+>
+> The diagnostic should have been the first release, not the sixth.
+
+---
+
 ## [2026-09-09 01:40] — Setting the position of an entity we had just frozen
 
 **Context:** Reported after 1.0.9: the colours were finally correct, and "no vehicle reappears in

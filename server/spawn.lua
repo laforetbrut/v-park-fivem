@@ -824,7 +824,9 @@ function Spawn.despawn(id, reason)
         nobody has in scope may not answer.
     ]]
     local record = Store.get(id)
-    local couldHaveMoved = entry.frozen == false and entry.seen == true
+    -- `nudged`: it is standing in a spot the search invented rather than the one it belongs
+    -- in, so reading it back would write that spot down. See the `restored` handler.
+    local couldHaveMoved = entry.frozen == false and entry.seen == true and not entry.nudged
 
     if record and couldHaveMoved and safeExists(entity) then
         local position = safeCoords(entity)
@@ -1232,7 +1234,37 @@ RegisterNetEvent('vpark:server:restored', function(id, result)
         stats[result.outcome] = (stats[result.outcome] or 0) + 1
     end
 
-    if result.moved and type(result.position) == 'table' then
+    --[[
+        ================================================================================
+        A PLACE THE SEARCH INVENTED IS NEVER WRITTEN DOWN.
+        ================================================================================
+
+        The search runs when the saved bay is occupied, and it answers with the nearest spot
+        that is not. That answer is a way to avoid two cars overlapping for the next few
+        minutes. IT IS NOT WHERE THE VEHICLE BELONGS, and saving it means the vehicle never
+        goes home again - the invented spot becomes the saved spot, and the next restore starts
+        from there.
+
+        Measured, with `/vparkwhere`, on three cars parked together:
+
+            0TL1YS402S8YV  off by 1.250 m   dx +0.000  dy -1.250  dz +0.000
+            0TL1YSE03933L  off by 1.250 m   dx +1.250  dy +0.000  dz +0.000
+
+        1250 mm is exactly `Config.Placement.search.step`. Each of those cars had been moved
+        one ring outwards, in a different direction, and the move had been written to the
+        database - so they were not going to come back on their own.
+
+        1.0.8 stopped the map from triggering that, and 1.0.11 stopped our own parked
+        neighbours from triggering it. This is the line that means a future false positive
+        costs one restore rather than the vehicle's real position: the car may stand in the
+        wrong spot until the obstruction goes away, and the database still knows where it
+        lives.
+
+        A ground correction IS written, because that is a real correction to a stored Z that
+        was wrong - it comes back as `grounded` or as `exact` with a moved Z, never as
+        `nudged`.
+    ]]
+    if result.moved and result.outcome ~= 'nudged' and type(result.position) == 'table' then
         Store.update(id, {
             pos_x = result.position.x,
             pos_y = result.position.y,
@@ -1240,7 +1272,25 @@ RegisterNetEvent('vpark:server:restored', function(id, result)
             rot_z = result.heading or 0.0,
         })
 
-        Park.debug('%s was moved to fit and its stored position was corrected', id)
+        Park.debug('%s was corrected to %s and its stored position was updated',
+            id, tostring(result.outcome))
+
+    elseif result.moved and result.outcome == 'nudged' then
+        --[[
+            And it must stay left alone.
+
+            The despawn reads the final pose back for any vehicle that could have moved, and a
+            vehicle standing in a spot the search invented has moved - so without this flag the
+            invented spot would be written down the moment the player walked away, which is
+            the whole thing this is preventing, one step later.
+
+            Cleared when somebody actually drives it, in `vpark:server:touched`: a car that has
+            been driven is wherever the driver left it, and that is a real position.
+        ]]
+        entry.nudged = true
+
+        Park.debug('%s was moved aside to fit; its stored position is left alone so it can '
+            .. 'go back when the way is clear', id)
     end
 end)
 
@@ -1307,6 +1357,10 @@ RegisterNetEvent('vpark:server:touched', function(id, used)
         if entry then
             entry.frozen = false
             entry.seen = true
+
+            -- Driven, so wherever it ends up IS its position - including if the restore had
+            -- had to stand it aside.
+            entry.nudged = nil
 
             -- Somebody is driving it. Nothing may freeze it again.
             if entry.entity then
