@@ -64,6 +64,12 @@ CREATE TABLE IF NOT EXISTS `v_park_vehicles` (
     `model_name`     VARCHAR(64)  DEFAULT NULL,
     `class`          TINYINT      NOT NULL DEFAULT 0,
 
+    -- The type string CREATE_VEHICLE_SERVER_SETTER needs: automobile, bike, boat, heli,
+    -- plane, submarine, trailer, train and the rest. NOT the class, and not derivable from it
+    -- for every model. Captured from a client, guessed from the class when absent. Added in
+    -- schema version 2; see shared/classes.lua.
+    `vehicle_type`   VARCHAR(24)  DEFAULT NULL,
+
     `owner`          VARCHAR(64)  DEFAULT NULL,
     `owner_type`     VARCHAR(16)  NOT NULL DEFAULT 'unowned',
     `owner_name`     VARCHAR(64)  DEFAULT NULL,

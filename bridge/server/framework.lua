@@ -102,6 +102,28 @@ ADAPTERS.qb = {
         return ((charinfo.firstname or '') .. ' ' .. (charinfo.lastname or '')):gsub('^%s+', '')
     end,
 
+    --[[
+        The roleplay name of a character who is NOT connected.
+
+        qb-core keeps it as JSON in `players`.`charinfo`, keyed by citizenid. The admin panel
+        asks for it so a list of owners reads as names rather than as a column of
+        `KLJ61534` - which is exactly what an operator cannot act on.
+
+        `table` is separate from the query so a server that renamed it can be handled, and the
+        column list is explicit rather than `*` because charinfo rows are large.
+    ]]
+    offlineNames = {
+        query = 'SELECT `citizenid` AS `id`, `charinfo` FROM `players` WHERE `citizenid` IN (%s)',
+        read = function(row)
+            local info = Park.decode(row.charinfo)
+            if type(info) ~= 'table' then return nil end
+
+            local name = ((info.firstname or '') .. ' ' .. (info.lastname or ''))
+            name = name:gsub('^%s+', ''):gsub('%s+$', '')
+            return name ~= '' and name or nil
+        end,
+    },
+
     job = function(_, player)
         local job = player and player.PlayerData and player.PlayerData.job
         if type(job) ~= 'table' then return nil end
@@ -191,6 +213,16 @@ ADAPTERS.esx = {
         return player and (player.getName and try(player.getName) or player.name) or nil
     end,
 
+    -- ESX keys `users` on the identifier, which IS its character id.
+    offlineNames = {
+        query = 'SELECT `identifier` AS `id`, `firstname`, `lastname` FROM `users` WHERE `identifier` IN (%s)',
+        read = function(row)
+            local name = ((row.firstname or '') .. ' ' .. (row.lastname or ''))
+            name = name:gsub('^%s+', ''):gsub('%s+$', '')
+            return name ~= '' and name or nil
+        end,
+    },
+
     job = function(_, player)
         local job = player and player.job
         if type(job) ~= 'table' then return nil end
@@ -271,6 +303,16 @@ ADAPTERS.ox = {
         end
         return player.name
     end,
+
+    offlineNames = {
+        query = 'SELECT `charId` AS `id`, `firstName`, `lastName` FROM `characters` WHERE `charId` IN (%s)',
+        read = function(row)
+            local name = ((row.firstName or row.firstname or '') .. ' '
+                .. (row.lastName or row.lastname or ''))
+            name = name:gsub('^%s+', ''):gsub('%s+$', '')
+            return name ~= '' and name or nil
+        end,
+    },
 
     --[[
         ox_core has groups, not jobs. The active group is the closest equivalent, and
@@ -840,6 +882,123 @@ function Bridge.notify(src, event, message, kind)
     end
 
     TriggerClientEvent('vpark:client:notify', src, message, kind or 'info')
+end
+
+-- ---------------------------------------------------------------------------------------
+-- Roleplay names
+-- ---------------------------------------------------------------------------------------
+
+--[[
+    characterId -> the roleplay name, for characters who are not connected.
+
+    -------------------------------------------------------------------------------------------
+    WHY THIS EXISTS
+    -------------------------------------------------------------------------------------------
+
+    A record stores `owner_name` as it was when the vehicle was persisted, and only when a
+    player was online to be asked. Every other row - one whose owner came from the framework's
+    owned-vehicles table, one brought in by the migration, one whose owner has since changed -
+    has a citizenid and nothing else.
+
+    The admin panel then shows a column of `KLJ61534`, which is not something an operator can
+    act on. This resolves those to "Jean Dupont" the way the rest of the server does.
+
+    Bounded, and never invalidated on a timer: a character's name changes at most once in the
+    life of a server, and a stale one for the length of a session is a much smaller problem
+    than a query per row per refresh.
+]]
+local nameCache = {}
+local nameCacheCount = 0
+
+local NAME_CACHE_LIMIT = 500
+
+function Bridge.cachedName(characterId)
+    if type(characterId) ~= 'string' then return nil end
+    local name = nameCache[characterId]
+    -- `false` is "we asked and the framework does not know", which is a real answer and stops
+    -- the same id being queried on every refresh.
+    if name == false then return nil end
+    return name
+end
+
+--[[
+    Look up every name we do not already have, in ONE query.
+
+    Called by the panel with the ids on the page it is about to send. A page is at most a
+    hundred rows and the second time it is asked for the same page it queries nothing at all.
+
+    Returns quietly and changes nothing when there is no database, no framework, or no adapter
+    that knows where names live - all of which are ordinary configurations, not errors.
+]]
+function Bridge.resolveNames(ids)
+    if type(ids) ~= 'table' or #ids == 0 then return end
+    if not (adapter and adapter.offlineNames) then return end
+    if not (Database and Database.available and Database.available()) then return end
+
+    local wanted, count = {}, 0
+
+    for _, id in ipairs(ids) do
+        if type(id) == 'string' and nameCache[id] == nil then
+            -- Marked before the query, not after: two panels open at once would otherwise ask
+            -- for the same hundred ids twice.
+            nameCache[id] = false
+            nameCacheCount = nameCacheCount + 1
+            count = count + 1
+            wanted[count] = id
+        end
+    end
+
+    if count == 0 then return end
+
+    -- Placeholders rather than interpolation. These ids come from our own table, but a
+    -- citizenid is ultimately whatever a framework wrote there.
+    local marks = string.rep('?', count, ', ')
+
+    local rows = Database.query(adapter.offlineNames.query:format(marks), wanted)
+    if type(rows) ~= 'table' then return end
+
+    local found = 0
+    for _, row in ipairs(rows) do
+        local id = row.id and tostring(row.id)
+        local ok, name = pcall(adapter.offlineNames.read, row)
+
+        if id and ok and type(name) == 'string' and name ~= '' then
+            nameCache[id] = name
+            found = found + 1
+        end
+    end
+
+    Park.trace('resolved %d of %d character name(s)', found, count)
+
+    --[[
+        Bounded by emptying it rather than by evicting the oldest.
+
+        An LRU here would be several times the code for a table whose entries are two short
+        strings, and the cost of being wrong is one extra query. Five hundred characters is
+        more than any single panel session looks at.
+    ]]
+    if nameCacheCount > NAME_CACHE_LIMIT then
+        nameCache = {}
+        nameCacheCount = 0
+        Park.debug('the character name cache reached %d entries and was emptied', NAME_CACHE_LIMIT)
+    end
+end
+
+--[[
+    The best name we have for a character, online or not.
+
+    Online wins: it is current, and it costs nothing.
+]]
+function Bridge.displayName(characterId, stored)
+    if type(characterId) ~= 'string' then return stored end
+
+    local src = Ownership and Ownership.sourceOf and Ownership.sourceOf(characterId)
+    if src then
+        local live = Bridge.name(src)
+        if type(live) == 'string' and live ~= '' and live ~= 'console' then return live end
+    end
+
+    return Bridge.cachedName(characterId) or stored
 end
 
 -- ---------------------------------------------------------------------------------------

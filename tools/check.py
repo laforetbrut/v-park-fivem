@@ -658,6 +658,165 @@ def check_player_name():
 
 
 # ==============================================================================================
+# 14. The theme file sets appearance, not layout
+#
+# html/css/sandy.css loads after panel.css, so anything it declares at equal specificity wins.
+# It is meant to carry colours, textures and typography only - that split is what makes "a theme
+# is one CSS file" true rather than aspirational.
+#
+# It declared `position: relative` on `#modal`, which overrode the `position: absolute` that
+# made the dialog an overlay. The dialog became a flex item of the root, took a third of the
+# width away from the panel and rendered in a squashed strip on the right. Every dialog in the
+# resource was affected, from 1.0.0 to 1.0.3.
+#
+# These properties decide where a thing is. They belong in panel.css.
+# ==============================================================================================
+
+THEME_FILE = 'html/css/sandy.css'
+
+LAYOUT_PROPERTIES = (
+    'position', 'display', 'inset', 'float', 'flex', 'grid-template',
+    'width', 'height', 'margin', 'padding',
+)
+
+
+def check_theme_layout():
+    global checks_run
+    checks_run += 1
+
+    path = os.path.join(ROOT, THEME_FILE)
+    if not os.path.exists(path):
+        fail('theme', f'{THEME_FILE} is missing')
+        return
+
+    source = read(path)
+
+    # Blank the comments, keeping the line count, so prose about `position` is not a finding.
+    cleaned = []
+    index = 0
+    while index < len(source):
+        if source[index:index + 2] == '/*':
+            end = source.find('*/', index + 2)
+            end = len(source) if end < 0 else end + 2
+            cleaned.append(''.join(c if c == '\n' else ' ' for c in source[index:end]))
+            index = end
+        else:
+            cleaned.append(source[index])
+            index += 1
+
+    # A theme may position the decorative layers it invents itself.
+    selector = ''
+    inside_pseudo = False
+
+    for number, line in enumerate(''.join(cleaned).split('\n'), start=1):
+        stripped = line.strip()
+
+        if stripped.endswith('{'):
+            selector = stripped[:-1].strip()
+            inside_pseudo = '::before' in selector or '::after' in selector
+            continue
+
+        if stripped.startswith('}'):
+            selector, inside_pseudo = '', False
+            continue
+
+        # A pseudo-element the theme creates does not exist in panel.css, so it cannot be
+        # overriding anything and it has to place itself.
+        if inside_pseudo:
+            continue
+
+        # Custom properties are values, not declarations: `--panel-shadow: ...` is fine.
+        if stripped.startswith('--'):
+            continue
+
+        for prop in LAYOUT_PROPERTIES:
+            if re.match(r'^' + re.escape(prop) + r'\s*:', stripped):
+                fail('theme',
+                     f'{THEME_FILE}:{number} sets `{prop}`, which is layout. The theme file '
+                     'loads after panel.css and wins at equal specificity, so a layout '
+                     'property here silently overrides the structure. Move it to '
+                     'html/css/panel.css.')
+
+
+# ==============================================================================================
+# 15. Store.columns and Store.toValues, position by position
+#
+# `upsertBatch` walks `Store.columns` by index and reads the matching entry of
+# `Store.toValues`. If the two ever disagree - a column added to one and not the other - every
+# value after that point is written into the wrong column, and MariaDB reports it as whatever
+# constraint happens to break first:
+#
+#     Column 'owner_type' cannot be null
+#     Incorrect integer value: 'MIG00001' for column class
+#
+# Which is a plate in the class column, and it is silent for every column where the types happen
+# to be compatible. This has now happened twice: once in 1.0.0 and again in 1.0.4, when
+# `vehicle_type` was added to the column list and not to the value list.
+#
+# Every entry of `toValues` must mention `record.<the column at that position>`, whatever else it
+# wraps it in.
+# ==============================================================================================
+
+def check_store_columns():
+    global checks_run
+    checks_run += 1
+
+    path = os.path.join(ROOT, 'server/store.lua')
+    if not os.path.exists(path):
+        fail('store', 'server/store.lua is missing')
+        return
+
+    source = strip_comments(read(path))
+
+    columns_match = re.search(r'Store\.columns\s*=\s*\{(.*?)\n\}', source, re.DOTALL)
+    if not columns_match:
+        fail('store', 'could not find the Store.columns table')
+        return
+
+    columns = re.findall(r"'([\w]+)'", columns_match.group(1))
+
+    values_match = re.search(r'function Store\.toValues\(record\)\s*return\s*\{(.*?)\n\s*\}',
+                             source, re.DOTALL)
+    if not values_match:
+        fail('store', 'could not find the Store.toValues table')
+        return
+
+    # Split on the commas that separate entries, ignoring commas inside brackets.
+    entries = []
+    depth = 0
+    current = ''
+    for char in values_match.group(1):
+        if char in '({[':
+            depth += 1
+        elif char in ')}]':
+            depth -= 1
+
+        if char == ',' and depth == 0:
+            if current.strip():
+                entries.append(current.strip())
+            current = ''
+        else:
+            current += char
+
+    if current.strip():
+        entries.append(current.strip())
+
+    if len(entries) != len(columns):
+        fail('store',
+             f'Store.columns has {len(columns)} entries and Store.toValues has {len(entries)}. '
+             'They are read together by index in upsertBatch, so a mismatch writes every value '
+             'after the gap into the wrong column.')
+        return
+
+    for index, (column, entry) in enumerate(zip(columns, entries), start=1):
+        if not re.search(r'record\.' + re.escape(column) + r'\b', entry):
+            fail('store',
+                 f'Store.toValues entry {index} is `{entry}`, where Store.columns says '
+                 f'`{column}`. They are read together by index; every value after a mismatch '
+                 'goes into the wrong column.')
+
+
+# ==============================================================================================
 
 def main():
     english = check_locales()
@@ -674,6 +833,8 @@ def main():
     check_parameter_nils()
     check_shipped_defaults()
     check_player_name()
+    check_theme_layout()
+    check_store_columns()
 
     print(f'v-park: {checks_run} check groups run over {len(lua_files())} Lua files')
 

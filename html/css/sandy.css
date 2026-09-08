@@ -284,13 +284,9 @@
     --row-detail-edge:    var(--amber);
 
     /* --------------------------------------------------------------------- menu --- */
-    --menu-bg:          #2c241a;
-    --menu-bg-hover:    #3d3325;
-    --menu-edge:        #1e1912;
-    --menu-divider:     rgba(214, 198, 164, 0.14);
-    --menu-fg:          rgba(214, 198, 164, 0.88);
-    --menu-fg-hover:    #f2e4c8;
-    --menu-danger-fg:   #d98a7a;
+    /* The dark dropdown these described became a centred dialog in 1.0.4, which is drawn on
+       the sheet like every other one. Nothing reads them any more; they are left out rather
+       than left in, so a theme author is not asked to colour something that does not exist. */
 
     /* -------------------------------------------------------------------- footer --- */
     --footer-bg:        rgba(23, 18, 10, 0.14);
@@ -354,15 +350,14 @@
     z-index: 1;
 }
 
-/* Everything the user can touch sits above the two decorative layers. */
-#masthead,
-#tabs,
-.view,
-#toast,
-#modal {
-    position: relative;
-    z-index: 2;
-}
+/*
+    The two layers above are decorative pseudo-elements this file invents, so this file
+    positions them. That is the ONLY layout it does.
+
+    Raising the real elements above them is structure, and it lives in panel.css under
+    "STACKING" - see the note there, which is where a theme file setting `position` cost every
+    dialog in the resource its position for four releases.
+*/
 
 /*
     Stencilled section rules. The horizontal line under the toolbar is dashed rather than

@@ -15,6 +15,70 @@
 Classes = {}
 
 --[[
+    ============================================================================================
+    THE OTHER TAXONOMY: THE SERVER SETTER TYPE
+    ============================================================================================
+
+    `CREATE_VEHICLE_SERVER_SETTER` takes a TYPE STRING, and it is not the class. It is one of
+
+        automobile  bike  boat  heli  plane  submarine  trailer  train
+        quadbike  blimp  submarinecar  amphibious_automobile  amphibious_quadbike  heli_blade
+
+    and the resource needs it because that native is the only reliable way to create a vehicle
+    from the server. See the note in server/spawn.lua.
+
+    -------------------------------------------------------------------------------------------
+    THIS MAP IS THE FALLBACK, NOT THE ANSWER
+    -------------------------------------------------------------------------------------------
+
+    The real answer comes from `GetVehicleType` on a client, which reads it off the model, and
+    is stored per vehicle. This map exists for the two cases where that answer is not available:
+    a row written by a version before 1.0.4, and a row imported by the Advanced Parking
+    migration, which has a class and no type.
+
+    It is a guess, and for a small number of models it is a wrong one - an amphibious Stromberg
+    is class 6 and type `amphibious_automobile`, the Toreador likewise, and several class 14
+    entries are `submarine` rather than `boat`. Those spawn as automobiles and misbehave until
+    somebody drives one, at which point the real type is captured and stored and it is right
+    from then on.
+
+    Erring towards `automobile` is deliberate: it is the type that works for the overwhelming
+    majority of models, and a wrong guess costs one restore rather than a missing vehicle.
+]]
+Classes.setterTypes = {
+    [8]  = 'bike',      -- motorcycles
+    [13] = 'bike',      -- bicycles: the game models them as bikes, not as their own type
+    [14] = 'boat',
+    [15] = 'heli',
+    [16] = 'plane',
+    [21] = 'train',
+}
+
+--[[
+    Every type the native will accept. Anything else is refused rather than passed through,
+    because a bad type string is a vehicle that never appears and no error that says why.
+]]
+Classes.validSetterTypes = {
+    automobile = true, bike = true, boat = true, heli = true, plane = true,
+    submarine = true, trailer = true, train = true, quadbike = true, blimp = true,
+    submarinecar = true, amphibious_automobile = true, amphibious_quadbike = true,
+    heli_blade = true,
+}
+
+--[[
+    The type string to create this vehicle with.
+
+    `stored` is what a client captured, and it wins whenever it is one the native accepts.
+]]
+function Classes.setterType(class, stored)
+    if type(stored) == 'string' and Classes.validSetterTypes[stored] then
+        return stored
+    end
+
+    return Classes.setterTypes[tonumber(class) or -1] or 'automobile'
+end
+
+--[[
     id -> a short lowercase key, and a locale key for display.
 
     The key is what appears in a config, in a command argument and in the audit log. The

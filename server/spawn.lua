@@ -41,10 +41,59 @@ local pending = {}
 -- ids that failed placement in a way that says "try again later" rather than "give up".
 local deferred = {}
 
--- id -> consecutive creation failures. Cleared on the first success. A vehicle that cannot be
--- created five times running is not going to be created on the sixth, and retrying it every
--- second forever is how one bad row fills a console.
+-- id -> consecutive creation failures. Cleared on the first vehicle that actually reaches a
+-- client. A vehicle that cannot be spawned five times running is not going to be spawned on
+-- the sixth, and retrying it every second forever is how one bad row fills a console.
 local failures = {}
+
+--[[
+    ============================================================================================
+    THE TWO BOOKS OF HANDLES. READ THIS BEFORE CHANGING ANYTHING IN THIS FILE.
+    ============================================================================================
+
+    `Store.live` records the vehicles that are in the world and working. It is indexed by
+    vehicle id and it is what the rest of the resource reads.
+
+    These two are indexed by ENTITY HANDLE, and they exist because 1.0.2 and 1.0.3 both leaked
+    entities that nothing could find.
+
+    `ours`       every handle CreateVehicle has ever handed us that we have not finished with.
+                 Written before anything else can happen to the entity, so an entity that fails
+                 at any later step is still findable. The reconciliation sweep reads it.
+
+    `condemned`  handles we have decided to remove and have not yet SEEN removed.
+
+    -------------------------------------------------------------------------------------------
+    WHY `condemned` CANNOT JUST BE A DELETE CALL
+    -------------------------------------------------------------------------------------------
+
+    Two facts that together caused the leak:
+
+      - `DeleteEntity` on an entity that is not ready raises, and the entity survives. It is in
+        the log as `script error in native 00000000faa3d236`.
+
+      - `DoesEntityExist` answers false for an entity that is NOT READY YET as well as for one
+        that is gone. So immediately after a failed delete we cannot tell "deleted" from "not
+        born yet", and every version so far assumed the former.
+
+    The consequence was an undressed, unmarked copy of the car left in the world on every
+    failed creation - carrying no `vpark:id` statebag, because setting it was the step that
+    failed - so the reconciliation sweep, which looked only at that statebag, could not see a
+    single one of them. They piled up on the vehicle's saved coordinates until a player
+    teleported there and got into one instead of their own car: different colour, different
+    plate, no keys.
+
+    So a condemned handle stays condemned until `GetAllVehicles` stops listing it. That is the
+    only source of truth that does not lie about an entity in this state.
+]]
+local ours = {}
+local condemned = {}
+
+-- Forward-declared so that `Spawn.create` can call something defined below it. Assigned, not
+-- redeclared, further down; writing `local function` twice would give two different upvalues
+-- and the call above would reach neither.
+local dress
+local noteFailure
 
 local stats = {
     spawned = 0,
@@ -111,6 +160,79 @@ end
 
 Spawn.safeCoords = safeCoords
 Spawn.safeRotation = safeRotation
+
+--[[
+    Give up an entity for good.
+
+    Condemned UNCONDITIONALLY, including when the delete appears to succeed, because at this
+    moment we cannot tell whether it did - see the note on `condemned`. The sweep clears it
+    when `GetAllVehicles` stops listing the handle, and not before.
+]]
+local function release(entity)
+    if not entity or entity == 0 then return end
+
+    ours[entity] = nil
+    condemned[entity] = condemned[entity] or Park.ticks()
+
+    pcall(DeleteEntity, entity)
+end
+
+Spawn.release = release
+
+--[[
+    Is this entity one we created?
+
+    Asked by the adoption path. A vehicle of ours that a player gets into before it has been
+    dressed carries no `vpark:id` statebag yet, so the client cannot tell it apart from an
+    ambient car - and offering it as a new candidate would write a SECOND row for a vehicle
+    that already has one, with whatever random plate the model spawned with.
+
+    That is how one car became two records and two records became four vehicles.
+]]
+function Spawn.owns(entity)
+    if not entity or entity == 0 then return nil end
+    return ours[entity]
+end
+
+--[[
+    Wait for a created entity to become one the natives will accept.
+
+    -------------------------------------------------------------------------------------------
+    THIS IS THE FIX 1.0.2 AND 1.0.3 BOTH MISSED
+    -------------------------------------------------------------------------------------------
+
+    `CreateVehicle` returns a handle synchronously and the entity is NOT usable when it does.
+    For a frame or two afterwards every native against that handle fails:
+
+        script error in native 000000009e35dab6: Tried to access invalid entity: 135949
+        script error in native 00000000635e5289: Tried to access invalid entity: 135949
+
+    1.0.1 saw `DoesEntityExist` answer false in that window and concluded the test was
+    worthless. 1.0.2 wrapped the configuration in a pcall so the failure was survivable, and
+    treated it as the vehicle's fault: warn, delete, back off, try again. The vehicle never
+    spawned, and every attempt leaked a copy.
+
+    Both readings were wrong. `DoesEntityExist` answering false there is not noise to be
+    ignored or a failure to be reported - it is the entity telling us IT IS NOT READY YET.
+    The answer is to wait for it, which is what every other server-side spawner in FiveM does.
+
+    Bounded, because an entity nobody ever takes ownership of never becomes ready and this must
+    not be an unbounded loop. The one extra frame after it first answers true is deliberate:
+    existing and being fully assigned are one tick apart, and the natives want the second one.
+]]
+local function waitUntilReady(entity, timeoutMs)
+    local deadline = Park.ticks() + (tonumber(timeoutMs) or 3000)
+
+    while Park.ticks() < deadline do
+        if safeExists(entity) then
+            Wait(0)
+            return safeExists(entity)
+        end
+        Wait(0)
+    end
+
+    return false
+end
 
 -- ---------------------------------------------------------------------------------------
 -- Players
@@ -227,6 +349,46 @@ local function nominate(record, players)
 end
 
 --[[
+    One vehicle failed to spawn. Decide when, or whether, to try it again.
+
+    -------------------------------------------------------------------------------------------
+    THE BACKOFF ESCALATES, AND IT STOPS
+    -------------------------------------------------------------------------------------------
+
+    A flat ten seconds was not enough. A vehicle whose model this build does not have, or whose
+    entity never becomes ready, fails identically every time, so a flat retry is an infinite
+    loop with a delay in it - one that creates and deletes an entity on every turn, and on the
+    console reads as a vehicle spawning over and over.
+
+    10s, 20s, 40s, 80s, then stop and say so once. Cleared only when a vehicle actually reaches
+    a client, in `dress`.
+]]
+noteFailure = function(record, why)
+    local count = (failures[record.id] or 0) + 1
+    failures[record.id] = count
+
+    stats.failed = stats.failed + 1
+
+    -- Once per vehicle, not once per attempt. The old code warned on every pass, which is a
+    -- wall of identical lines hiding the one line that would have explained it.
+    if count == 1 then
+        Park.warn('could not spawn %s (model %s): %s',
+            record.id, tostring(record.model_name or record.model), tostring(why))
+    end
+
+    if count >= 5 then
+        Park.error('%s (%s) failed to spawn %d times running - it will not be retried this session',
+            record.id, tostring(record.model_name or record.model), count)
+        Park.error('the usual causes are a model this build does not have, or an entity limit already reached')
+        record.invalidModel = true
+        deferred[record.id] = nil
+        return
+    end
+
+    deferred[record.id] = Park.ticks() + math.min(120000, 10000 * (2 ^ (count - 1)))
+end
+
+--[[
     Everything that is done to a vehicle after it exists.
 
     Separate from `Spawn.create` for one reason: it is called through `pcall`, and a pcall
@@ -289,6 +451,69 @@ local function configure(entity, record)
 end
 
 --[[
+    Put one vehicle into the world. The native call, and nothing else.
+
+    -------------------------------------------------------------------------------------------
+    WHY THIS IS `CreateVehicleServerSetter` AND NOT `CreateVehicle`
+    -------------------------------------------------------------------------------------------
+
+    THIS IS THE ROOT CAUSE OF THE MULTIPLICATION, AND 1.0.1, 1.0.2 AND 1.0.3 ALL MISSED IT.
+
+    Server-side `CreateVehicle` is an RPC. It returns a handle immediately, but the entity is
+    not created until a client has been asked to make it and has answered. Until that round
+    trip completes the handle refers to nothing, and every native against it fails:
+
+        script error in native 000000009e35dab6: Tried to access invalid entity: 135949
+
+    That window is where all three previous releases went wrong. 1.0.1 saw `DoesEntityExist`
+    answer false in it and concluded the check was worthless. 1.0.2 wrapped the configuration
+    in a pcall and treated the failure as the vehicle's fault - warn, delete, back off, retry -
+    so the vehicle never spawned, and each attempt left an undressed copy behind because the
+    delete failed for the same reason the configuration did. 1.0.3 changed nothing here.
+
+    `CreateVehicleServerSetter` is not an RPC. The CFX documentation is explicit: server setter
+    natives "immediately and guaranteed register an entity with the server", orphaned until a
+    client comes into scope. There is no window. It also supports every vehicle type rather
+    than automobiles alone, which is a second bug fixed by the same line: a boat or a
+    helicopter created through the RPC path is exactly the kind of vehicle that never became
+    real.
+
+    The price is the type string, which the server cannot work out for itself. See
+    `Classes.setterType` and the `vehicle_type` column.
+
+    `CreateVehicle` remains as a fallback for a build without the setter native, with the wait
+    in `waitUntilReady` behind it. That combination is what the rest of the ecosystem does, and
+    it works; it is simply not as good as not having the race at all.
+]]
+local function spawnEntity(record)
+    local heading = record.rot_z or 0.0
+
+    if CreateVehicleServerSetter then
+        local kind = Classes.setterType(record.class, record.vehicle_type)
+
+        local ok, entity = pcall(CreateVehicleServerSetter,
+            record.model, kind,
+            record.pos_x, record.pos_y, record.pos_z,
+            heading)
+
+        if ok and entity and entity ~= 0 then return entity end
+
+        Park.debug('the setter native did not create %s as `%s` - falling back', record.id, kind)
+    end
+
+    local ok, entity = pcall(CreateVehicle,
+        record.model,
+        record.pos_x, record.pos_y, record.pos_z,
+        heading,
+        true,   -- networked
+        true)   -- script-owned, so the engine does not treat it as ambient
+
+    if ok and entity and entity ~= 0 then return entity end
+
+    return nil
+end
+
+--[[
     Create one vehicle in the world.
 
     Returns the entity, or nil.
@@ -313,121 +538,116 @@ function Spawn.create(record, players)
     local placer = nominate(record, players or onlinePlayers())
     if not placer then return nil end
 
-    local entity = CreateVehicle(
-        record.model,
-        record.pos_x, record.pos_y, record.pos_z,
-        record.rot_z,
-        true,   -- networked
-        true    -- script-owned, so the engine does not treat it as ambient
-    )
+    local entity = spawnEntity(record)
 
     --[[
-        A HANDLE OF ZERO IS THE ONLY FAILURE. `DoesEntityExist` IS NOT ASKED HERE.
+        A HANDLE OF ZERO IS THE ONLY FAILURE HERE.
 
-        This is the bug that multiplied vehicles across a live server, and it is worth stating
-        exactly.
+        `spawnEntity` has already tried the setter native and, if this build lacks it, the RPC
+        one. Nothing came back, so nothing was created and there is nothing to clean up.
 
-        `CreateVehicle` returns a handle immediately, but the entity is not registered
-        synchronously: `DoesEntityExist` on that handle answers FALSE for a tick or two
-        afterwards. The first version treated that as a failed creation, logged a warning, and
-        returned - WITHOUT DELETING the entity it had just successfully created.
-
-        So every pass created another one. And because `SetEntityOrphanMode(entity, 2)` tells
-        the engine to keep an entity nobody is near, none of them were ever collected. The
-        server filled with copies of the same car until it hit its entity limit, at which point
-        `CreateVehicle` really did start returning zero and the console filled with
-
-            WARN: could not create vehicle 0TL0UEP01QT7G (model BISON)
-
-        several times a second. The warning was true by then; it was a symptom, not the cause.
-
-        A zero handle is a genuine failure and nothing was created. Anything else IS created and
-        is ours to manage - including ours to delete if we then decide not to keep it, which is
-        what every early return below does.
+        Every other answer IS an entity, and it is ours - including ours to delete if we later
+        decide not to keep it, which is what `release` is for. 1.0.1 tested `DoesEntityExist`
+        here instead, saw the false it answers for a frame or two after an RPC creation,
+        concluded the creation had failed, and returned WITHOUT deleting what it had made.
     ]]
     if not entity or entity == 0 then
-        failures[record.id] = (failures[record.id] or 0) + 1
-        stats.failed = stats.failed + 1
-
-        -- Logged once per vehicle rather than once per attempt. The old code warned on every
-        -- pass, which on a full entity pool is a wall of identical lines that hides the one
-        -- line that would have explained it.
-        if failures[record.id] == 1 then
-            Park.warn('could not create vehicle %s (model %s)',
-                record.id, tostring(record.model_name or record.model))
-        end
-
-        if failures[record.id] >= 5 then
-            Park.error('%s (%s) failed to create %d times - it will not be retried this session',
-                record.id, tostring(record.model_name or record.model), failures[record.id])
-            Park.error('the usual causes are an entity limit already reached, or a model this build does not have')
-            record.invalidModel = true
-        end
-
-        -- Back off regardless. Retrying the same creation on the very next pass, every pass,
-        -- is how a single failing vehicle becomes a wall of console output.
-        deferred[record.id] = Park.ticks() + 10000
+        noteFailure(record, 'the game would not create it')
         return nil
     end
 
-    failures[record.id] = nil
-
     --[[
-        REGISTERED FIRST. CONFIGURED SECOND. THIS ORDER IS THE WHOLE FIX.
+        WRITTEN DOWN BEFORE ANYTHING ELSE CAN HAPPEN TO IT.
 
-        Between `CreateVehicle` and `Store.setLive` there used to be sixty lines of natives:
-        the routing bucket, the coordinates, the rotation, the orphan mode, the culling radius
-        and half a dozen statebag writes. Any one of them raising - and
-        `SetEntityCoords`/`SetEntityRotation` on a freshly created entity demonstrably does -
-        left an entity in the world that nothing had recorded.
+        In both books, in this order, and before a single other native touches the entity:
 
-        Nothing recorded it, so `Store.isLive` said no, so the next pass created another one.
-        And `SetEntityOrphanMode` had already told the engine never to collect it. That is the
-        multiplication, and it is why it accelerated: each pass added copies faster than
-        anything removed them.
+          `ours`       so that whatever goes wrong from here on, the handle can still be found
+                       and deleted. This is what was missing: an entity that failed before its
+                       statebag was set existed in the world and appeared in no index at all.
 
-        So the entity is registered the instant it exists, before anything can raise, and
-        everything after that point runs inside a pcall. A configuration that fails now
-        despawns cleanly - which deletes the entity, because `despawn` owns that - instead of
-        abandoning it.
+          `Store.live` so that the next streaming pass does not create a second one.
+
+          `pending`    so that the timeout sweep collects it if the thread below never
+                       finishes.
     ]]
-    -- Through pcall like everything else that touches the entity. A network id we cannot read
-    -- is handled below, after the vehicle is safely registered.
-    local gotId, netId = pcall(NetworkGetNetworkIdFromEntity, entity)
-    if not gotId then netId = nil end
+    ours[entity] = record.id
 
     Store.setLive(record.id, {
         entity = entity,
-        netId = netId,
         placer = placer.src,
         placedAt = Park.ticks(),
+        -- Not usable yet. `ready` becomes true when a client has been told to restore it.
+        ready = false,
     })
 
     pending[record.id] = Park.ticks()
 
+    -- The entity is not usable for another frame or two. Everything else happens on its own
+    -- thread so the streaming pass keeps its millisecond budget.
+    CreateThread(function() dress(record, entity, placer.src) end)
+
+    return entity
+end
+
+--[[
+    Wait for the entity, then configure it and hand it to a client.
+
+    Runs on its own thread, once per created vehicle. Every exit from here either leaves a
+    working vehicle registered or releases the handle: there is no path that leaves an entity
+    in the world and nothing pointing at it.
+]]
+dress = function(record, entity, placerSrc)
+    local ready = waitUntilReady(entity, tonumber(streaming().readyTimeout) or 3000)
+
+    --[[
+        Still ours?
+
+        The wait above yields, and a despawn - the player drove off, an admin deleted it, the
+        server emptied - can happen while it does. Acting on a stale entity here would put a
+        vehicle back in the world that something has already decided should not be.
+    ]]
+    local entry = Store.live(record.id)
+    if not entry or entry.entity ~= entity then
+        release(entity)
+        return
+    end
+
+    if not ready then
+        Park.warn('%s did not become a usable entity in time - removing it', record.id)
+        pcall(Spawn.despawn, record.id, 'entity never became ready')
+        noteFailure(record, 'the entity never became usable')
+        return
+    end
+
     local configured = pcall(configure, entity, record)
+
+    local gotId, netId = pcall(NetworkGetNetworkIdFromEntity, entity)
+    if not gotId then netId = nil end
 
     --[[
         A configuration that raised, or an entity with no network id, is not usable.
 
         No network id means no client can ever be told to dress or place it: the restore
         instruction is addressed by network id. Either way the answer is the same - despawn,
-        which deletes the entity because that is what despawn owns, and back off.
+        which releases the handle, and back off.
     ]]
     if not configured or not netId or netId == 0 then
-        if not configured then
-            Park.warn('%s was created but could not be configured - removing it', record.id)
-        else
-            Park.warn('%s was created but has no network id - removing it', record.id)
-        end
+        Park.warn('%s was created but could not be %s - removing it',
+            record.id, configured and 'addressed' or 'configured')
 
         pcall(Spawn.despawn, record.id, 'configuration failed')
-        stats.failed = stats.failed + 1
-        deferred[record.id] = Park.ticks() + 10000
-        return nil
+        noteFailure(record, configured and 'it had no network id' or 'it could not be configured')
+        return
     end
 
-    TriggerClientEvent('vpark:client:restore', placer.src, netId, {
+    entry.netId = netId
+    entry.ready = true
+
+    -- It exists, it is dressed and a client can be told about it. THIS is a success, and it is
+    -- the only place the failure counter is cleared.
+    failures[record.id] = nil
+
+    TriggerClientEvent('vpark:client:restore', placerSrc, netId, {
         id = record.id,
         version = record.updated_at,
         position = { x = record.pos_x, y = record.pos_y, z = record.pos_z },
@@ -440,11 +660,9 @@ function Spawn.create(record, players)
     })
 
     stats.spawned = stats.spawned + 1
-    Park.debug('created %s (%s) for player %d', record.id, tostring(record.model_name), placer.src)
+    Park.debug('created %s (%s) for player %d', record.id, tostring(record.model_name), placerSrc)
 
     Ownership.onRestored(record, entity, netId)
-
-    return entity
 end
 
 -- ---------------------------------------------------------------------------------------
@@ -507,9 +725,10 @@ function Spawn.despawn(id, reason)
         pcall(TriggerClientEvent, 'vpark:client:forget', placer, id)
     end
 
-    -- Unconditional, and not gated on `safeExists`. An entity that cannot be read may still
-    -- exist, and leaving it behind is exactly the failure this whole release is about.
-    safeDelete(entity)
+    -- Through `release`, not a bare delete. An entity that cannot be read may still exist, and
+    -- a delete that silently did not take is the leak this whole version is about; `release`
+    -- keeps the handle until `GetAllVehicles` agrees it is gone.
+    release(entity)
 
     stats.despawned = stats.despawned + 1
     Park.trace('despawned %s (%s)', id, reason or 'out of range')
@@ -661,8 +880,22 @@ local function pass()
     ]]
     local attempted = 0
 
+    --[[
+        How many vehicles are created and not yet handed to a client.
+
+        A ceiling on this is a ceiling on how wrong things can go at once. Each one holds an
+        entity that is not usable yet, and if something is preventing entities from becoming
+        ready - a server at its limit, a client that has stopped acknowledging - then creating
+        another six every second makes it worse rather than better.
+    ]]
+    local waiting = 0
+    for _ in pairs(pending) do waiting = waiting + 1 end
+
+    local waitingCeiling = math.max(spawnBudget * 2, 8)
+
     for _, record in ipairs(order) do
         if attempted >= spawnBudget then break end
+        if waiting >= waitingCeiling then break end
         if Park.ticks() - started > budget then break end
         if Store.liveCount() >= maximumEntities and maximumEntities > 0 then break end
 
@@ -680,6 +913,7 @@ local function pass()
 
                 if ok and entity then
                     created = created + 1
+                    waiting = waiting + 1
                 elseif not ok then
                     Park.error('creating %s raised: %s', record.id, tostring(entity))
                     -- It may have been created before it raised. Despawn covers both cases:
@@ -880,38 +1114,61 @@ function Spawn.reconcile()
     local removed = 0
     local duplicates = 0
     local orphans = 0
+    local unmarked = 0
+
+    -- What the engine says is actually in the world. The only answer that does not lie about
+    -- an entity in the not-ready state - see the note on `condemned`.
+    local present = {}
+    for index = 1, #all do present[all[index]] = true end
 
     for index = 1, #all do
         local entity = all[index]
 
-        if safeExists(entity) then
-            local id
+        --[[
+            OUR OWN BOOK IS ASKED FIRST, AND THE STATEBAG SECOND.
+
+            The statebag is set during configuration, so an entity that failed BEFORE that step
+            carries nothing at all. Every version up to 1.0.3 asked only the statebag, which
+            meant the sweep could not see the exact entities the bug was producing - an
+            undressed copy with a random plate, sitting on the vehicle's saved coordinates.
+
+            `ours` is written the instant `CreateVehicle` returns, so it covers them. The
+            statebag still matters for entities left behind by a PREVIOUS start of the
+            resource, which our book cannot know about.
+        ]]
+        local id = ours[entity]
+        local marked = false
+
+        if not id then
             local read = pcall(function() id = Entity(entity).state['vpark:id'] end)
+            marked = read and type(id) == 'string'
+            if not marked then id = nil end
+        end
 
-            if read and type(id) == 'string' then
-                local record = Store.get(id)
-                local live = Store.live(id)
+        if type(id) == 'string' then
+            local record = Store.get(id)
+            local live = Store.live(id)
 
-                if not record then
-                    -- Ours by its statebag, unknown to the store. Nothing will ever claim it.
-                    orphans = orphans + 1
-                    safeDelete(entity)
-                    removed = removed + 1
+            if not record then
+                -- Ours, unknown to the store. Nothing will ever claim it.
+                orphans = orphans + 1
+                release(entity)
+                removed = removed + 1
 
-                elseif not live then
-                    -- The record exists but we have no entity registered for it, so this one
-                    -- is left over. Adopting it would be tempting and wrong: it has not been
-                    -- dressed or placed, and we cannot tell whether it ever was.
-                    orphans = orphans + 1
-                    safeDelete(entity)
-                    removed = removed + 1
+            elseif not live then
+                -- The record exists but we have no entity registered for it, so this one is
+                -- left over. Adopting it would be tempting and wrong: we cannot tell whether
+                -- it was ever dressed or placed.
+                orphans = orphans + 1
+                release(entity)
+                removed = removed + 1
 
-                elseif live.entity ~= entity then
-                    -- A second copy of a vehicle we already have. THE ONE AN OPERATOR SEES.
-                    duplicates = duplicates + 1
-                    safeDelete(entity)
-                    removed = removed + 1
-                end
+            elseif live.entity ~= entity then
+                -- A second copy of a vehicle we already have. THE ONE AN OPERATOR SEES.
+                duplicates = duplicates + 1
+                if not marked then unmarked = unmarked + 1 end
+                release(entity)
+                removed = removed + 1
             end
         end
 
@@ -920,11 +1177,41 @@ function Spawn.reconcile()
         if index % 200 == 0 then Wait(0) end
     end
 
+    --[[
+        The condemned list. Handles we have asked the engine to delete and have not yet seen
+        it delete.
+
+        This is where a failed `DeleteEntity` is finally noticed. A handle the engine no longer
+        lists is genuinely gone and is forgotten; one it still lists is asked again.
+    ]]
+    local stuck = 0
+    for entity, since in pairs(condemned) do
+        if not present[entity] then
+            condemned[entity] = nil
+
+        elseif Park.ticks() - since > 120000 then
+            -- Two minutes of asking. Say it once, loudly, and stop: a handle that will not go
+            -- is a bug worth knowing about and not one worth spinning on forever.
+            Park.error('entity %d would not delete after two minutes - giving up on it', entity)
+            condemned[entity] = nil
+
+        else
+            stuck = stuck + 1
+            pcall(DeleteEntity, entity)
+        end
+    end
+
     if removed > 0 then
-        Park.warn('reconciliation removed %d stray vehicle(s): %d orphan(s), %d duplicate(s)',
-            removed, orphans, duplicates)
+        Park.warn('reconciliation removed %d stray vehicle(s): %d orphan(s), %d duplicate(s), %d of them unmarked',
+            removed, orphans, duplicates, unmarked)
         stats.reconciled = (stats.reconciled or 0) + removed
     end
+
+    if stuck > 0 then
+        Park.debug('%d condemned entity(ies) are still in the world and were asked again', stuck)
+    end
+
+    stats.condemned = stuck
 
     return removed
 end

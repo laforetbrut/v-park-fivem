@@ -407,75 +407,97 @@
 }
 
 /*
-    The overflow menu.
+    ==============================================================================================
+    THE ROW ACTION SHEET. CENTRED, AND THAT IS THE POINT.
+    ==============================================================================================
 
-    Absolutely positioned inside the row rather than appended to the body, so it scrolls with
-    the table and disappears with the row. `right: 0` anchors it to the column edge; the table
-    scrolls vertically only, so it can never be clipped horizontally.
+    Until 1.0.4 the overflow actions were a dropdown: absolutely positioned inside the row,
+    anchored to the right edge of the actions column, opening downwards - or upwards, once
+    1.0.3 taught it to flip, because `#table-wrap` clips its overflow and on the lower rows a
+    ten-item menu ran 239 pixels out of the bottom of the table.
 
-    -------------------------------------------------------------------------------------------
-    IT CAN VERY MUCH BE CLIPPED VERTICALLY, AND WAS
-    -------------------------------------------------------------------------------------------
+    It was reported as looking bad and being in the wrong place, and that was right. A dark
+    ten-item slab hanging off the right of a light table covered the header and three rows,
+    changed direction depending on where you clicked, and never said which vehicle it was
+    about.
 
-    `#table-wrap` is `overflow-y: auto`, and a menu that only ever opened downwards ran straight
-    out of the bottom of it. Measured on the last row of a full page: 239 pixels of the menu
-    below the visible area, which is the bottom five entries - To garage, Impound and Delete
-    among them - simply unreachable.
-
-    So `.is-up` flips it above the button, and JS sets a max-height from whichever side has
-    more room. `.is-up` is applied by measurement rather than by guessing at a row index,
-    because the number of rows that fit depends on the panel height.
+    None of that is fixable by moving it. A list of ten actions is not a dropdown, it is a
+    dialog, so it is one now: centred, on the same scrim as every other dialog in the panel,
+    with the vehicle named at the top. It cannot be clipped, it cannot cover the table, it
+    cannot flip, and there is no geometry to get wrong.
 */
-.act-menu {
+#sheet {
     position: absolute;
-    top: calc(100% + 3px);
-    right: 0;
-    z-index: 4;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 8;
+    background: var(--modal-scrim);
+}
 
+.sheet-box {
+    width: min(400px, 84%);
+    max-height: 82%;
     display: flex;
     flex-direction: column;
-    min-width: 132px;
-
-    /* Set from JS to whatever the space allows; this is the ceiling, not the usual value. */
-    max-height: 320px;
-    overflow-y: auto;
-
-    background: var(--menu-bg);
-    border: 1px solid var(--menu-edge);
+    background: var(--sheet);
+    border: var(--edge-strong);
     box-shadow: var(--hard-shadow);
 }
 
-.act-menu.is-up {
-    top: auto;
-    bottom: calc(100% + 3px);
+.sheet-head {
+    padding: 14px 18px 12px;
+    background: var(--mast-bg);
+    border-bottom: var(--edge-strong);
+    flex: 0 0 auto;
 }
 
-.act-menu .act {
-    height: 26px;
+#sheet-title {
+    font-family: var(--font-display);
+    font-size: 15px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--mast-title);
+}
+
+#sheet-sub {
+    margin-top: 2px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--mast-subtitle);
+}
+
+/*
+    One action per line, full width. A grid of small buttons packs more into the box and makes
+    every one of them a smaller target for somebody who is doing this in a game, with a mouse,
+    while something else is happening.
+*/
+#sheet-actions {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+#sheet-actions .act {
+    height: 34px;
     justify-content: flex-start;
-    padding: 0 10px;
-    border: 0;
-    border-bottom: 1px solid var(--menu-divider);
-    background: transparent;
-    color: var(--menu-fg);
+    padding: 0 14px;
+    font-size: 11px;
+    letter-spacing: 0.1em;
 }
 
-.act-menu .act:last-child {
-    border-bottom: 0;
-}
-
-.act-menu .act:hover {
-    background: var(--menu-bg-hover);
-    color: var(--menu-fg-hover);
-}
-
-.act-menu .btn-danger {
-    color: var(--menu-danger-fg);
-}
-
-.act-menu .btn-danger:hover {
-    background: var(--btn-danger-bg);
-    color: var(--btn-danger-fg);
+.sheet-foot {
+    display: flex;
+    justify-content: flex-end;
+    padding: 10px 14px;
+    border-top: 1px solid var(--rule);
+    flex: 0 0 auto;
 }
 
 /* ======================================================================= SELECTION === */
@@ -646,12 +668,6 @@ th.col-actions {
 tbody tr.is-detail {
     background: var(--row-detail);
     box-shadow: inset 3px 0 0 var(--row-detail-edge);
-}
-
-/* The row that owns an open menu has to stack above the ones below it. */
-tbody tr.has-menu {
-    position: relative;
-    z-index: 3;
 }
 
 /*
@@ -995,6 +1011,39 @@ tbody tr.has-menu {
     overflow: hidden;
     text-overflow: ellipsis;
     pointer-events: none;
+}
+
+/* ======================================================================== STACKING === */
+
+/*
+    The panel carries two decorative layers from the theme: a worn edge along its top and a
+    faint vignette over the sheet, both pseudo-elements, both `pointer-events: none`. Anything
+    the user can touch has to sit above them.
+
+    -------------------------------------------------------------------------------------------
+    THIS RULE USED TO LIVE IN THE THEME FILE, AND IT BROKE EVERY DIALOG
+    -------------------------------------------------------------------------------------------
+
+    It listed `#toast` and `#modal` as well, and set `position: relative` on all of them. Both
+    of those are `position: absolute` here - and the theme file loads second, so at equal
+    specificity it won.
+
+    `#modal` therefore stopped being an overlay and became a flex ITEM of `#root`. Measured at
+    1280x720: the panel went from 1178 pixels wide at x=51 to 1061 at x=0, and the dialog was
+    squashed into a 175-pixel strip at x=1083 instead of being centred. Refuel, rename, set
+    owner, choose a garage and confirm a delete were all affected, from 1.0.0 to 1.0.3.
+
+    So the list is only the elements that are in NORMAL FLOW and need lifting. Anything already
+    positioned carries its own z-index a few lines from its `position`, where the two can be
+    read together. `tools/check.py` group 14 fails the build if the theme sets a layout
+    property on anything but its own pseudo-elements.
+*/
+#masthead,
+#tabs,
+.view,
+#detail {
+    position: relative;
+    z-index: 2;
 }
 
 /* =========================================================================== MODAL === */

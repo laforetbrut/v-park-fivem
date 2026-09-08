@@ -393,7 +393,7 @@ end
 -- and is a far better outcome than a downgrade that loses data.
 -- ---------------------------------------------------------------------------------------
 
-local SCHEMA_VERSION = 1
+local SCHEMA_VERSION = 2
 
 --[[
     The vehicles table.
@@ -639,6 +639,21 @@ local function buildSchema()
 
     if current < SCHEMA_VERSION then
         -- Upgrades go here, one `if current < N` block each, additive only.
+
+        --[[
+            Version 2, 1.0.4. `vehicle_type` carries the string
+            `CREATE_VEHICLE_SERVER_SETTER` needs, which is not the class and is not derivable
+            from it for every model.
+
+            NULL on every existing row, and that is correct: `Classes.setterType` guesses from
+            the class until a client next reports the real type, at which point the row is
+            corrected for good. Nothing has to be backfilled and nothing breaks in the
+            meantime.
+        ]]
+        if current < 2 then
+            ensureColumn('vehicles', 'vehicle_type', 'VARCHAR(24) DEFAULT NULL AFTER `class`')
+        end
+
         Database.meta('schema_version', SCHEMA_VERSION)
         Park.log('schema upgraded from version %d to %d', current, SCHEMA_VERSION)
     end

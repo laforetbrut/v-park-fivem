@@ -1186,6 +1186,20 @@ Config.Streaming = {
     -- looking for one.
     reconcileInterval = 15,
 
+    --[[
+        How long to wait for a newly created entity to become usable, in milliseconds.
+
+        Since 1.0.4 vehicles are created with `CREATE_VEHICLE_SERVER_SETTER`, which registers
+        the entity immediately and has no such window, so on a normal server this timer is
+        never reached. It matters on a build old enough to lack that native, where the
+        fallback is `CreateVehicle` - an RPC that returns a handle referring to nothing until a
+        client has answered.
+
+        Three seconds is far more than the round trip needs and short enough that a vehicle
+        which is never going to appear does not hold a slot. Reaching it is reported.
+    ]]
+    readyTimeout = 3000,
+
     -- Server-side entity settings, applied to every vehicle we create.
     entity = {
         -- Keep the entity alive when no player is near it, rather than letting the engine

@@ -95,6 +95,16 @@ local function describe(vehicle)
         modelName = GetDisplayNameFromVehicleModel(model),
         class = GetVehicleClass(vehicle),
         plate = Park.plate(GetVehicleNumberPlateText(vehicle)),
+
+        --[[
+            The type string `CREATE_VEHICLE_SERVER_SETTER` needs, read off the live entity.
+
+            The server cannot work this out for itself - there is no server native that maps a
+            model to a type - and getting it wrong is a vehicle that gets created and never
+            becomes real. `Classes.setterType` falls back to a guess from the class when this
+            is missing, which is what happens for every row written before 1.0.4.
+        ]]
+        vehicleType = GetVehicleType and GetVehicleType(vehicle) or nil,
         position = { x = Park.coord(position.x), y = Park.coord(position.y), z = Park.coord(position.z) },
         rotation = { x = Park.angle(rotation.x), y = Park.angle(rotation.y), z = Park.angle(rotation.z) },
         interior = GetInteriorFromEntity(vehicle),

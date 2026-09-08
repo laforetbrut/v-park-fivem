@@ -473,5 +473,9 @@ function Stream.snapshot(id)
         interior = GetInteriorFromEntity(entity),
         room = GetRoomKeyFromEntity(entity),
         frozen = record.frozen == true,
+
+        -- Fills in `vehicle_type` for a row written before 1.0.4. The server writes it once
+        -- and then ignores this field; see `Persist.applySnapshot`.
+        vehicleType = GetVehicleType and GetVehicleType(entity) or nil,
     }
 end

@@ -54,6 +54,7 @@ Locale.register('en', {
     ['refuse.unknown']              = 'That vehicle cannot be kept.',
     ['refuse.disabled']             = 'Vehicle persistence is switched off on this server.',
     ['refuse.gone']                 = 'That vehicle no longer exists.',
+    ['refuse.already_ours']         = 'That vehicle is already kept by v-park.',
     ['refuse.class_excluded']       = 'This kind of vehicle is never kept.',
     ['refuse.model_excluded']       = 'This model is never kept.',
     ['refuse.model_not_whitelisted']= 'Only certain models are kept, and this is not one.',

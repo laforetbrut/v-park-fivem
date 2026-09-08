@@ -50,6 +50,7 @@ Locale.register('fr', {
     ['refuse.unknown']              = "Ce véhicule ne peut pas être conservé.",
     ['refuse.disabled']             = "La persistance des véhicules est désactivée sur ce serveur.",
     ['refuse.gone']                 = "Ce véhicule n'existe plus.",
+    ['refuse.already_ours']         = "Ce véhicule est déjà conservé par v-park.",
     ['refuse.class_excluded']       = "Ce type de véhicule n'est jamais conservé.",
     ['refuse.model_excluded']       = "Ce modèle n'est jamais conservé.",
     ['refuse.model_not_whitelisted']= "Seuls certains modèles sont conservés, et celui-ci n'en fait pas partie.",

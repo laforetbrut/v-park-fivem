@@ -8,6 +8,104 @@ out of it.
 
 ---
 
+## [2026-09-08 12:40] — Server-side `CreateVehicle` is an RPC, and that was the whole bug
+
+**Context:** Three releases of chasing vehicle multiplication. Each one fixed something real
+and none of them found the cause. The log that finally gave it away:
+
+    script error in native 000000009e35dab6: Tried to access invalid entity: 135949
+    script error in native 00000000635e5289: Tried to access invalid entity: 135949
+    WARN: 0TL1R3201WDS5 was created but could not be configured - removing it
+    script error in native 00000000faa3d236: Tried to access invalid entity: 135949
+
+with the same vehicle id every time and a different entity handle every time.
+
+**Error:** `Tried to access invalid entity`, on an entity created microseconds earlier.
+
+**Root cause:** Server-side `CreateVehicle` is an **RPC**. It returns a handle synchronously and
+the entity is not created until a client has been asked to make it and has answered. Until then
+the handle refers to nothing.
+
+Every previous release misread that window:
+
+- **1.0.1** saw `DoesEntityExist` answer false in it and concluded the check was worthless. The
+  right conclusion was that the entity was telling us it was not ready yet.
+- **1.0.2** wrapped the configuration in a pcall and treated the failure as the vehicle's
+  fault: warn, delete, back off, retry. The vehicle never spawned.
+- **1.0.3** changed nothing here.
+
+The fourth line above is the important one. `DeleteEntity` failed for the same reason the
+configuration did, so **every attempt left an entity in the world** - undressed, with a random
+plate, and carrying no `vpark:id` statebag because setting it was the step that failed. The
+reconciliation sweep looked only at that statebag, so it was blind to exactly the entities the
+bug produced. They accumulated on the vehicle's saved coordinates, and a player teleporting to
+their car arrived in a stack of unmarked copies of it.
+
+That is the whole reported symptom in one chain: wrong colours, wrong plate, no keys, and
+vehicles spawning without end.
+
+**Fix:** `CREATE_VEHICLE_SERVER_SETTER`, which the CFX documentation describes as immediately
+and guaranteed registering the entity. No window, nothing to race. The RPC path stays as a
+fallback for a build without it, and now waits for the entity rather than assuming it. Plus:
+every handle recorded before anything else touches it, a condemned list that retries a delete
+until `GetAllVehicles` says the entity is gone, and a refusal to adopt an entity we created.
+
+**Prevention:**
+
+> **When a native fails immediately after another native created the thing it operates on, ask
+> whether the creating native is asynchronous before assuming the failing one is at fault.**
+>
+> Three releases were spent making the failure survivable, better reported and better cleaned
+> up. All of that was downstream. The question that would have found it in an afternoon - "what
+> does this native actually do?" - was never asked, because `CreateVehicle` looked too ordinary
+> to check.
+>
+> The corollary: an error that is caught, logged and retried is not fixed. Every one of those
+> releases made the log tidier, which made the real cause harder to see rather than easier.
+
+---
+
+## [2026-09-08 14:05] — The theme file set `position`, and every dialog moved
+
+**Context:** Reported as "if you click on refuel, look, the box shifts everything and lands in
+the wrong place".
+
+**Error:** No error. The refuel dialog rendered in a narrow strip against the right edge, and
+the panel itself became narrower when it opened.
+
+**Root cause:** `html/css/panel.css` has `#modal { position: absolute; inset: 0 }`, which makes
+it a full-panel overlay that centres its box. `html/css/sandy.css` - the THEME file, which
+loads second - had this:
+
+```css
+#masthead, #tabs, .view, #toast, #modal { position: relative; z-index: 2; }
+```
+
+Same specificity, later file, so `relative` won. `#modal` stopped being out of flow and became
+a flex ITEM of `#root`, which is `display: flex`. Measured at 1280x720: the panel went from
+1178 pixels wide at x=51 to 1061 at x=0, and the dialog was squashed into 175 pixels at x=1083.
+
+Every dialog in the resource - refuel, rename, set owner, choose a garage, confirm a delete -
+had been in the wrong place since 1.0.0. The rule was written to lift interactive elements above
+two decorative pseudo-element layers, which is a real need; `#modal` and `#toast` simply did not
+belong in the list, because they were already positioned and already carried a z-index.
+
+**Fix:** The stacking rule moved to panel.css and lists only elements that are in normal flow.
+`tools/check.py` group 14 now fails the build if the theme file sets `position`, `display`,
+`inset`, `float`, `flex`, `width`, `height`, `margin` or `padding` on anything but its own
+`::before` / `::after` decorations.
+
+**Prevention:**
+
+> **A file whose contract is "appearance only" needs that contract enforced, not merely stated.**
+>
+> panel.css opens with a header explaining that the theme carries colours, textures and
+> typography and that nothing else sets a literal colour. The split was documented, believed,
+> and violated in the fourth rule of the theme file, and it stayed that way for four releases
+> because the symptom looked like a dialog that had always been ugly.
+
+---
+
 ## [2026-09-08 04:10] — Two panels opened on the right, both in the wrong place
 
 **Context:** Reported after 1.0.2: "when you click on certain things a box appears on the right,

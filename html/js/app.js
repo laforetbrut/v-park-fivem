@@ -261,7 +261,17 @@ function ownerCell(row) {
     const cell = el('td');
     cell.appendChild(el('span', 'v-model', row.owner || '—'));
 
+    /*
+        The character id belongs on the second line, next to the type.
+
+        The server resolves the roleplay name for the first line - on qb-core out of
+        `players.charinfo`, so a vehicle whose owner has never been online while v-park was
+        running still reads as a person. But the id is what an operator types into another
+        command or quotes in a ticket, so it has to be visible somewhere, and it is only
+        omitted when it IS the name, which happens when nothing could resolve it.
+    */
     const sub = [row.ownerType];
+    if (row.ownerId && row.ownerId !== row.owner) sub.push(row.ownerId);
     if (row.job) sub.push(row.job);
     if (row.owner) sub.push(row.ownerOnline ? t('panel.owner_online') : t('panel.owner_offline'));
 
@@ -329,18 +339,50 @@ function inlineActions() {
 }
 
 /*
-    Close any open overflow menu.
+    Close the row action sheet.
 
-    A single open menu at a time, tracked on the document rather than per row, because the
-    alternative is a click handler per row that has to know about every other row.
+    Named `closeMenus` still because every caller means "put away whatever the row opened",
+    and in 1.0.4 that became one centred dialog rather than a dropdown per row.
 */
 function closeMenus() {
-    document.querySelectorAll('.act-menu').forEach((menu) => menu.remove());
-    document.querySelectorAll('tr.has-menu').forEach((tr) => tr.classList.remove('has-menu'));
+    $('sheet').hidden = true;
+    clear($('sheet-actions'));
 }
 
-document.addEventListener('click', (event) => {
-    if (!event.target.closest('.row-actions')) closeMenus();
+/*
+    Open the row's actions, centred.
+
+    -------------------------------------------------------------------------------------------
+    WHY THIS IS A DIALOG AND NOT A DROPDOWN
+    -------------------------------------------------------------------------------------------
+
+    It was a dropdown until 1.0.4: absolutely positioned inside the row, anchored to the right
+    edge of the actions column. It covered the table header and three rows, it had to flip
+    upwards on the lower half of the page because the table clips its overflow, and it never
+    said which vehicle it was about.
+
+    Ten actions is not a dropdown's worth of content. Centred, it cannot be clipped, cannot
+    cover the table, cannot flip, and names the vehicle at the top - which matters most for the
+    three actions at the bottom of it, because Impound and Delete are not things to run on the
+    wrong car.
+*/
+function openMenu(row, actions) {
+    const holder = $('sheet-actions');
+    clear(holder);
+
+    $('sheet-title').textContent = t('panel.col_actions');
+    $('sheet-sub').textContent = [row.plate, row.model].filter(Boolean).join(' \u00b7 ');
+
+    actions.forEach((action) => holder.appendChild(actionButton(action, row)));
+
+    $('sheet').hidden = false;
+}
+
+$('sheet-cancel').addEventListener('click', closeMenus);
+
+// Clicking the scrim, but not the box on it.
+$('sheet').addEventListener('click', (event) => {
+    if (event.target === $('sheet')) closeMenus();
 });
 
 /*
@@ -363,41 +405,6 @@ function actionButton(action, row) {
     return button;
 }
 
-/*
-    Open the overflow menu on whichever side of the button it fits.
-
-    THE MENU USED TO ONLY EVER OPEN DOWNWARDS, and `#table-wrap` clips its overflow. On the
-    last row of a full page that put 239 measured pixels of the menu below the visible area:
-    To garage, Impound and Delete were rendered and unreachable.
-
-    Measured rather than guessed from a row index, because how many rows fit depends on the
-    panel height, which depends on the player's resolution.
-*/
-function placeMenu(menu, anchor) {
-    const wrap = anchor.closest('#table-wrap') || anchor.closest('.view');
-    if (!wrap) return;
-
-    const bounds = wrap.getBoundingClientRect();
-    const button = anchor.getBoundingClientRect();
-
-    // 3px is the gap in the stylesheet, 8px is a margin so the menu never sits flush against
-    // the edge of the table and look clipped when it is not.
-    const below = bounds.bottom - button.bottom - 3 - 8;
-    const above = button.top - bounds.top - 3 - 8;
-
-    const height = menu.scrollHeight;
-
-    // Downwards while it fits. Flipping a menu that had room is more disorienting than a
-    // menu that opens the way it always does.
-    if (height > below && above > below) {
-        menu.classList.add('is-up');
-        menu.style.maxHeight = Math.max(96, Math.floor(above)) + 'px';
-    } else {
-        menu.classList.remove('is-up');
-        menu.style.maxHeight = Math.max(96, Math.floor(below)) + 'px';
-    }
-}
-
 function actionsCell(row) {
     const cell = el('td', 'col-actions');
     const wrap = el('div', 'row-actions');
@@ -418,22 +425,7 @@ function actionsCell(row) {
 
         more.addEventListener('click', (event) => {
             event.stopPropagation();
-
-            // Toggling: a second click on the same button closes it rather than rebuilding
-            // an identical menu underneath the first.
-            const alreadyOpen = wrap.querySelector('.act-menu');
-            closeMenus();
-            if (alreadyOpen) return;
-
-            const menu = el('div', 'act-menu');
-            overflow.forEach((action) => menu.appendChild(makeButton(action)));
-            wrap.appendChild(menu);
-
-            const tr = cell.closest('tr');
-            if (tr) tr.classList.add('has-menu');
-
-            // After it is in the document: the decision needs its measured height.
-            placeMenu(menu, more);
+            openMenu(row, overflow);
         });
 
         wrap.appendChild(more);
@@ -837,6 +829,8 @@ function renderDetail(detail) {
     line(ident, 'ID', row.id);
     line(ident, 'Plate', row.plate);
     line(ident, t('panel.col_owner'), row.owner);
+    // Only when it adds something. When nothing could resolve a name, `owner` already IS the id.
+    if (row.ownerId && row.ownerId !== row.owner) line(ident, 'Character', row.ownerId);
     line(ident, 'Type', row.ownerType);
     line(ident, t('panel.detail_source'), detail.source);
     if (detail.netId) line(ident, t('panel.detail_netid'), detail.netId);
@@ -1047,15 +1041,17 @@ document.addEventListener('keydown', (event) => {
 
     if (event.key === 'Escape') {
         if (!$('modal').hidden) { closeModal(null); return; }
+        if (!$('sheet').hidden) { closeMenus(); return; }
         if (!$('detail').hidden) { closeDetail(); return; }
         post('close', {});
         return;
     }
 
-    // Everything below is a bare key, so it must not fire while somebody is typing.
+    // Everything below is a bare key, so it must not fire while somebody is typing, or while
+    // a dialog is up and owns the keyboard.
     const typing = document.activeElement
         && ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName);
-    if (typing || !$('modal').hidden) return;
+    if (typing || !$('modal').hidden || !$('sheet').hidden) return;
 
     if (event.key === '/') {
         event.preventDefault();
@@ -1089,6 +1085,7 @@ window.addEventListener('message', (event) => {
             state.selected.clear();
             state.detailId = null;
             $('detail').hidden = true;
+            $('sheet').hidden = true;
 
             applyStrings();
             setTab('vehicles');
@@ -1114,6 +1111,7 @@ window.addEventListener('message', (event) => {
             state.open = false;
             $('root').hidden = true;
             $('modal').hidden = true;
+            $('sheet').hidden = true;
             $('detail').hidden = true;
             // Cleared as well as hidden: it decides how many actions sit on a row, and a
             // stale id would give the next open a one-action table until the first render.

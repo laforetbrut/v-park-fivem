@@ -122,6 +122,13 @@ Everything below is detected at runtime and optional. **Nothing is required exce
 it, and a persistence resource that quietly keeps a per-client fiction is worse than one that
 refuses to start. `Config.General.requireOneSync = false` if you know exactly why.
 
+Vehicles are created with **`CREATE_VEHICLE_SERVER_SETTER`**, which registers the entity with
+the server immediately and supports every vehicle type. `CreateVehicle` is an RPC: it returns a
+handle before the entity exists, and everything you then do to that handle fails for a frame or
+two. On a build without the setter native the RPC path is used and waited on
+(`Config.Streaming.readyTimeout`), which works and is simply not as good as not having the race
+at all.
+
 > **On a txAdmin server, OneSync is set in the txAdmin settings page, not in `server.cfg`.**
 > txAdmin's config validator comments the line out on every start and leaves a note saying so,
 > which means the obvious place to put it is the one place it does not work. If v-park says
@@ -248,6 +255,13 @@ and paints nothing while it is closed - a player who never runs the command neve
   network id, and the four timestamps that decide when the vehicle expires. It names the
   vehicle it is showing, marks that vehicle's row, carries the row's actions so reading and
   acting are the same place, and stays current through the auto-refresh.
+- **The rest of a row's actions open as a centred dialog** that names the vehicle, rather than
+  as a dropdown hanging off the right of the table.
+- **Owners read as people.** The roleplay name is resolved from the framework's own player
+  table - `players.charinfo` on qb-core, `users` on ESX, `characters` on ox_core - so a vehicle
+  whose owner has never been online while v-park was running still shows a name rather than a
+  citizenid. One query per page, cached, and the character id stays on the second line where it
+  is still searchable.
 - **Keyboard**: `/` search, `R` refresh, `A` select page, arrows to page, `ESC` to back out one
   level at a time.
 - **Trash tab**: everything removed in the last week, with who removed it and why, and a
@@ -485,14 +499,18 @@ webhooks off, after which the next real error goes unread for a fortnight.
 
 ## Known limits, stated plainly
 
-- **What has actually been run, and what has not.** The server half has been exercised on a
-  real qb-core server with oxmysql and MariaDB 11.4: **78 automated checks, zero failures, zero
-  SQL errors and nothing raised in the boot log**, covering boot, schema creation, detection,
-  every console command, the loader, the spatial grid, ownership, the lifecycle maths, the save
-  pipeline, the trash, the audit log, the reliability paths added in 1.0.2 and the full
-  migration cycle including backup and rollback. Several real defects have come out of it,
-  including one - console commands never being audited - that had survived two releases because
-  the pcall that caught it logged a single line nobody read.
+- **What has actually been run, and what has not.** The server half is exercised on a real
+  qb-core server with oxmysql and MariaDB 11.4 before every release: **87 automated checks**
+  covering boot, schema creation and upgrade, detection, every console command, the loader, the
+  spatial grid, ownership, the lifecycle maths, the save pipeline, the trash, the audit log and
+  the full migration cycle including backup and rollback. Several real defects have come out of
+  it, including one - console commands never being audited - that had survived two releases
+  because the pcall that caught it logged a single line nobody read.
+
+  `tools/check.py` runs fifteen static groups over the Lua and the stylesheets, including a real
+  Lua 5.4 parse of every file, a check that the theme file sets no layout property, and a check
+  that the database column list and the value list agree position by position - which is a bug
+  that has shipped twice and writes every value after the mismatch into the wrong column.
 
   **The client half has not been driven by a human yet.** Placement, deformation, property
   capture and apply, and the admin panel all need a game client, and the automated pass cannot
@@ -502,6 +520,14 @@ webhooks off, after which the next real error goes unread for a fortnight.
 - **Only qb-core has been run at all.** qbx_core, ESX and ox_core are implemented behind the
   same adapter interface and statically verified to implement every method the bridge calls,
   but no server has run them.
+- **The vehicle type is guessed for rows written before 1.0.4.** `CREATE_VEHICLE_SERVER_SETTER`
+  needs a type string - `automobile`, `bike`, `boat`, `heli` and so on - which is not the
+  vehicle class and is not derivable from it for every model. It is captured from a client and
+  stored, but a row that predates the column, or one brought in by the migration, has only the
+  class to go on. A handful of models guess wrong - the amphibious Stromberg and Toreador are
+  class 6, several class 14 entries are submarines - and spawn as automobiles until somebody
+  drives one, at which point the real type is stored and it is right from then on.
+
 - **Deformation restore is approximate.** `SetVehicleDamage` is not the inverse of
   `GetVehicleDeformationAtPos`; putting a shape back is a search, and it reproduces damage that
   *reads* as the same, not the same vertices. `recaptureDelta` stops that compounding over

@@ -70,7 +70,21 @@ local function toRow(record, from)
         model = record.model_name,
         class = record.class,
         className = Classes.key(record.class),
-        owner = record.owner_name or record.owner,
+        --[[
+            The roleplay name, and the character id as well.
+
+            `owner_name` is only ever written when a player was online to be asked, so a row
+            whose owner came from the framework's owned-vehicles table, or from the migration,
+            carries a citizenid and nothing else - and the panel then showed a column of
+            `KLJ61534`, which is not something an operator can act on.
+
+            `Bridge.displayName` prefers the connected player's current name, falls back to
+            the one resolved from the framework's own player table, and falls back again to
+            whatever was stored. Both halves are sent: the name to read, the id to search for
+            and to quote in a ticket.
+        ]]
+        owner = Bridge.displayName(record.owner, record.owner_name or record.owner),
+        ownerId = record.owner,
         ownerType = record.owner_type,
         ownerOnline = record.owner ~= nil and Ownership.isOnline(record.owner) or false,
         job = record.job,
@@ -179,6 +193,9 @@ function Panel.query(src, query)
                 or (record.model_name or ''):lower():find(search, 1, true) ~= nil
                 or (record.owner_name or ''):lower():find(search, 1, true) ~= nil
                 or (record.owner or ''):lower():find(search, 1, true) ~= nil
+                -- A name resolved from the framework is searchable too, or an operator can
+                -- see "Jean Dupont" in the list and fail to find it by typing it.
+                or (Bridge.cachedName(record.owner) or ''):lower():find(search, 1, true) ~= nil
                 or record.id:lower():find(search, 1, true) ~= nil
         end
 
@@ -214,6 +231,24 @@ function Panel.query(src, query)
     local rows = {}
     local first = (page - 1) * pageSize + 1
     local last = math.min(first + pageSize - 1, total)
+
+    --[[
+        Resolve every roleplay name on this page in ONE query, before building the rows.
+
+        Only the ids that are not cached are asked for, so the second visit to a page queries
+        nothing at all. It is at most one query per page view and usually none; the alternative
+        - a lookup inside `toRow` - would be one per row per refresh.
+    ]]
+    local wanted, count = {}, 0
+    for i = first, last do
+        local owner = matched[i] and matched[i].owner
+        if type(owner) == 'string' then
+            count = count + 1
+            wanted[count] = owner
+        end
+    end
+
+    pcall(Bridge.resolveNames, wanted)
 
     for i = first, last do
         rows[#rows + 1] = toRow(matched[i], from)

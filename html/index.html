@@ -203,6 +203,31 @@
     </main>
 
     <!--
+        The row's action sheet, CENTRED.
+
+        It was a dropdown anchored to the right edge of the actions column until 1.0.4, and it
+        was reported as looking bad and being in the wrong place - correctly. A ten-item dark
+        panel hanging off the right of a light table covered the header and three rows, had to
+        flip upwards on the lower half of the page to avoid being clipped, and never made it
+        obvious which row it belonged to.
+
+        Centred, it cannot be clipped, cannot cover anything that matters, matches every other
+        dialog in this panel, and says the vehicle's name at the top.
+    -->
+    <div id="sheet" hidden>
+        <div class="sheet-box">
+            <header class="sheet-head">
+                <h2 id="sheet-title">Actions</h2>
+                <p id="sheet-sub"></p>
+            </header>
+            <div id="sheet-actions"></div>
+            <div class="sheet-foot">
+                <button id="sheet-cancel" class="btn" type="button">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!--
         One modal, reconfigured per use. Three separate modals would be three places to forget
         to release the keyboard, and the keyboard is what the game takes back when this closes.
     -->

@@ -158,6 +158,9 @@ function Store.fromRow(row)
         model = tonumber(row.model) or 0,
         model_name = row.model_name,
         class = tonumber(row.class) or 0,
+        -- Empty string reads as "not captured yet", the same as NULL. See
+        -- `Classes.setterType`.
+        vehicle_type = (row.vehicle_type ~= '' and row.vehicle_type) or nil,
         owner = row.owner,
         owner_type = row.owner_type or 'unowned',
         owner_name = row.owner_name,
@@ -208,7 +211,7 @@ end
     happened when this was got wrong.
 ]]
 Store.columns = {
-    'id', 'plate', 'model', 'model_name', 'class',
+    'id', 'plate', 'model', 'model_name', 'class', 'vehicle_type',
     'owner', 'owner_type', 'owner_name', 'job',
     'pos_x', 'pos_y', 'pos_z', 'rot_x', 'rot_y', 'rot_z',
     'cell', 'bucket', 'interior', 'room',
@@ -226,6 +229,7 @@ function Store.toValues(record)
         record.model,
         record.model_name,
         record.class,
+        record.vehicle_type,
         record.owner,
         record.owner_type,
         record.owner_name,
@@ -266,6 +270,11 @@ function Store.hashOf(record)
         m = record.room,
         o = record.owner,
         t = record.owner_type,
+        -- In the hash, or the backfill in `Persist.applySnapshot` would update the record in
+        -- memory and never mark it dirty, so the column would be re-guessed from the class on
+        -- every restart forever. Adding it also means the first boot after upgrading writes
+        -- every row once, which is how the column gets filled in at all.
+        vt = record.vehicle_type,
         j = record.job,
         h = { record.body_health, record.engine_health },
         f = record.fuel,

@@ -151,6 +151,23 @@ function Persist.adopt(src, payload, explicit)
         return Store.get(existingId), nil, true
     end
 
+    --[[
+        AN ENTITY WE CREATED IS NEVER A NEW VEHICLE.
+
+        A vehicle of ours that has not been dressed yet carries no `vpark:id` statebag, so a
+        player who gets into one during that window looks to the client exactly like somebody
+        getting into an ambient car. Adopting it writes a second row for a vehicle that already
+        has one, under whatever plate the model happened to spawn with - and then both rows
+        stream, and there are two cars.
+
+        Cheap, exact, and it does not depend on the statebag having been set.
+    ]]
+    if entity and Spawn.owns and Spawn.owns(entity) then
+        Park.debug('refusing to adopt entity %d: it is already ours as %s',
+            entity, tostring(Spawn.owns(entity)))
+        return nil, 'refuse.already_ours'
+    end
+
     local plate = Park.plate(payload.plate)
     local existing = plate and Store.byPlate(plate)
     if existing then
@@ -240,6 +257,9 @@ function Persist.adopt(src, payload, explicit)
         model = payload.model,
         model_name = payload.modelName,
         class = tonumber(payload.class) or 0,
+        -- Only ever a string the setter native accepts; see `Classes.setterType`.
+        vehicle_type = (type(payload.vehicleType) == 'string'
+            and Classes.validSetterTypes[payload.vehicleType]) and payload.vehicleType or nil,
         owner = owner,
         owner_type = ownerType,
         owner_name = ownerName,
@@ -386,6 +406,20 @@ function Persist.applySnapshot(id, snapshot)
 
     if type(snapshot.interior) == 'number' then patch.interior = snapshot.interior end
     if type(snapshot.room) == 'number' then patch.room = snapshot.room end
+
+    --[[
+        Fill in the setter type for a row that predates it.
+
+        Written ONCE, when it is missing, and never overwritten: a row that already carries a
+        type has one that a client read off the real entity, and there is nothing a later
+        capture could improve. This is how rows written before 1.0.4 and rows brought in by the
+        Advanced Parking migration stop relying on the class guess - the first time anybody
+        drives one, it is corrected for good.
+    ]]
+    if not record.vehicle_type and type(snapshot.vehicleType) == 'string'
+        and Classes.validSetterTypes[snapshot.vehicleType] then
+        patch.vehicle_type = snapshot.vehicleType
+    end
 
     if type(snapshot.properties) == 'table' then
         local properties = Schema.filter(snapshot.properties)

@@ -7,6 +7,142 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.4] - 2026-09-08
+
+**The vehicles multiplied because the wrong native was creating them.** 1.0.1, 1.0.2 and 1.0.3
+each fixed something real downstream of that and none of them found it.
+
+### The cause
+
+Server-side `CreateVehicle` is an **RPC**. It returns a handle immediately, but the entity is
+not created until a client has been asked to make it and has answered. Until that round trip
+finishes the handle refers to nothing, and every native against it fails:
+
+```
+script error in native 000000009e35dab6: Tried to access invalid entity: 135949
+script error in native 00000000635e5289: Tried to access invalid entity: 135949
+[v-park] WARN: 0TL1R3201WDS5 was created but could not be configured - removing it
+script error in native 00000000faa3d236: Tried to access invalid entity: 135949
+```
+
+That third line is the delete failing for the same reason the configuration did. So each
+attempt left an entity in the world - **undressed, with a random plate, and carrying no
+`vpark:id` statebag, because setting it was the step that failed.** The reconciliation sweep
+looked only at that statebag, so it could not see a single one of them.
+
+They piled up on the vehicle's saved coordinates. Teleporting to your car put you among a stack
+of unmarked copies of it, and getting into one gave you a different colour, a different plate
+and no keys - which is exactly how it was reported.
+
+### The fix
+
+- **Vehicles are created with `CREATE_VEHICLE_SERVER_SETTER`.** The CFX documentation is
+  explicit that server setter natives "immediately and guaranteed register an entity with the
+  server". There is no window, so there is nothing to race. It also supports every vehicle type
+  rather than automobiles alone, which is a second bug fixed by the same line: a boat or a
+  helicopter created through the RPC path is exactly the kind of vehicle that never became
+  real.
+
+- **Where the setter native is unavailable, the RPC path waits for the entity** instead of
+  assuming it is there - `while not DoesEntityExist(vehicle)`, with a timeout. That is what
+  1.0.1 should have concluded from `DoesEntityExist` answering false, rather than concluding
+  the check was worthless.
+
+- **Every handle is written down before anything else touches it.** A new `ours` index, keyed
+  by entity handle, written the instant the native returns. The reconciliation sweep asks it
+  first and the statebag second, so an entity that failed before it could be marked is still
+  findable - which is precisely the entity the bug was producing.
+
+- **A delete that does not take is retried.** `DoesEntityExist` answers false for an entity
+  that is not ready yet as well as for one that is gone, so a failed delete looked like a
+  successful one. A condemned handle now stays condemned until `GetAllVehicles` stops listing
+  it, which is the only source of truth that does not lie in that state.
+
+- **An entity we created can never be adopted as a new vehicle.** A player who got into one
+  before it was dressed looked, to the client, exactly like somebody getting into an ambient
+  car - so a second row was written for a vehicle that already had one, under whatever plate
+  the model spawned with. Then both rows streamed.
+
+- **The retry backoff escalates and stops.** 10s, 20s, 40s, 80s, then it says so once and gives
+  up. A flat ten seconds is an infinite loop with a delay in it when the cause is deterministic.
+
+- **A ceiling on how many vehicles can be waiting to be dressed at once.** If something is
+  stopping entities from becoming ready, creating another six a second makes it worse.
+
+### The admin panel
+
+- **Dialogs appeared in a squashed strip on the right instead of centred.** `sandy.css` set
+  `position: relative` on `#modal`, and the theme file loads after the stylesheet that made it
+  `position: absolute`. The dialog stopped being an overlay and became a flex item beside the
+  panel. Measured at 1280x720: the panel went from 1178 pixels wide at x=51 to 1061 at x=0, and
+  the dialog was 175 pixels wide at x=1083. Refuel, rename, set owner, choose a garage and
+  confirm a delete were all affected, **from 1.0.0 to 1.0.3**.
+
+  `tools/check.py` gained a fourteenth group that fails the build if the theme file sets a
+  layout property on anything but its own decorative pseudo-elements.
+
+- **The row's overflow actions are a centred dialog, not a dropdown.** The dropdown hung off
+  the right of the actions column, covered the table header and three rows, had to flip
+  upwards on the lower half of the page, and never said which vehicle it was about. Ten actions
+  is not a dropdown's worth of content. It now names the vehicle, cannot be clipped and cannot
+  cover the table.
+
+- **The panel resolves roleplay names.** On qb-core an owner who has never been online while
+  v-park was running showed as `KLJ61534`, because `owner_name` is only written when there is
+  a player to ask. The panel now resolves the name out of the framework's own player table -
+  `players.charinfo` on qb-core, `users` on ESX, `characters` on ox_core - one query per page,
+  cached, and the character id is kept on the second line where it is still searchable.
+
+### Schema
+
+Version 2 adds `vehicle_type` to `v_park_vehicles`, which is what the setter native needs and
+is **not** the vehicle class. It is captured from a client and guessed from the class until
+then, so nothing has to be backfilled and existing rows keep working.
+
+---
+
+## [1.0.4] - 2026-09-08 (français)
+
+**Les véhicules se multipliaient parce que le mauvais natif les créait.** Les 1.0.1, 1.0.2 et
+1.0.3 ont chacune corrigé quelque chose de réel en aval, et aucune n'a trouvé la cause.
+
+### La cause
+
+`CreateVehicle` côté serveur est un **RPC**. Il renvoie un handle immédiatement, mais l'entité
+n'est créée qu'une fois qu'un client a été sollicité et a répondu. Pendant cet aller-retour, le
+handle ne désigne rien et tous les natifs échouent - y compris `DeleteEntity`. Chaque tentative
+laissait donc dans le monde une copie **non habillée, avec une plaque aléatoire, et sans
+statebag `vpark:id`** puisque c'est précisément l'étape qui échouait. La passe de
+réconciliation ne regardait que ce statebag : elle n'en voyait aucune.
+
+Elles s'empilaient sur les coordonnées sauvegardées du véhicule. Se téléporter sur sa voiture,
+c'était atterrir au milieu de ces copies, et monter dans l'une d'elles donnait une autre
+couleur, une autre plaque et aucune clé. Exactement ce qui a été signalé.
+
+### La correction
+
+- **Les véhicules sont créés avec `CREATE_VEHICLE_SERVER_SETTER`**, qui enregistre l'entité
+  immédiatement et de façon garantie. Plus de fenêtre, donc plus de course. Il gère aussi tous
+  les types de véhicules et pas seulement les automobiles.
+- **Sans ce natif, le chemin RPC attend l'entité** au lieu de la supposer présente.
+- **Chaque handle est noté avant que quoi que ce soit d'autre le touche**, donc une entité qui
+  échoue avant d'être marquée reste trouvable.
+- **Une suppression qui n'aboutit pas est réessayée** jusqu'à ce que `GetAllVehicles` confirme.
+- **Une entité que nous avons créée ne peut jamais être adoptée** comme un nouveau véhicule.
+- **Le délai de réessai augmente puis s'arrête** : 10s, 20s, 40s, 80s.
+
+### Le panneau admin
+
+- **Les boîtes de dialogue apparaissaient écrasées à droite au lieu d'être centrées.** Le
+  fichier de thème imposait `position: relative` sur `#modal` et écrasait le `position:
+  absolute` de la feuille de structure. Le dialogue devenait un élément flex à côté du panneau.
+  Vrai **depuis la 1.0.0**.
+- **Les actions d'une ligne sont un dialogue centré**, plus un menu déroulant collé à droite.
+- **Le panneau résout les noms roleplay** depuis la table du framework (`players.charinfo` sur
+  qb-core), l'identifiant restant affiché en seconde ligne.
+
+---
+
 ## [1.0.3] - 2026-09-08
 
 The admin panel. Two things appeared on the right-hand side of it and both were in the wrong
