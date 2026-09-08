@@ -70,8 +70,28 @@ local function register(key, help, handler)
     local entry = commandConfig(key)
     if not entry then return end
 
-    local restricted = entry.permission == 'admin' or entry.permission == 'console'
+    --[[
+        REGISTERED UNRESTRICTED, AND GATED IN THE HANDLER. Both halves matter.
 
+        `RegisterCommand`'s third argument creates an ACE object called `command.<name>` and
+        refuses the command to any principal that has not been granted it. That sounds like
+        exactly what an admin command wants, and it has one consequence that makes it wrong
+        here: THE SERVER CONSOLE IS ALSO A PRINCIPAL, and it does not hold
+        `command.vparkstats` either.
+
+        Measured on a stock qb-core server: `vparkinfo` (unrestricted) ran from the console,
+        and `vparkstats`, `vparkzones` and `vparkadmin` all answered `Access denied for
+        command`. Which is precisely backwards - the console is where an operator needs the
+        diagnostic commands most, and it is the one place they could not run them.
+
+        So the flag is off and `Bridge.isAdmin` does the work. It returns true for source 0,
+        which is the console, and checks ACE first for everybody else. Nothing is loosened:
+        the handler below refuses before it reaches `handler`, on every call.
+
+        The one thing the flag also did was hide the command from the chat suggestion list for
+        players who cannot use it - and it did not really do that either, because
+        `chat:addSuggestion` below is sent to -1 and every client gets the list regardless.
+    ]]
     RegisterCommand(entry.name, function(src, args, raw)
         src = tonumber(src) or 0
 
@@ -101,7 +121,7 @@ local function register(key, help, handler)
             Park.error('/%s raised: %s', entry.name, tostring(err))
             reply(src, L('error.command_failed'))
         end
-    end, restricted)
+    end, false)
 
     -- Chat suggestions, so a player typing `/vpark` sees what the arguments are.
     if help then

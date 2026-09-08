@@ -52,6 +52,11 @@ this resource or in a sibling one. None of them are hypothetical.
 
   10. RESERVED        No bare table key is a Lua reserved word. See check 1: this is the
                       generalisation of the bug it caught.
+
+  11. PARAM NILS      Nothing reads `Store.toValues` with `ipairs` or `pairs`. It is a
+                      positional list that contains nils, and `ipairs` stops at the first one
+                      while `#` over a hole is undefined. Getting this wrong scrambled a whole
+                      insert batch and lost every row in it, with one line of console output.
 """
 
 import io
@@ -489,6 +494,41 @@ def check_schema_gates():
 
 
 # ==============================================================================================
+# 11. Nils in a parameter list
+# ==============================================================================================
+
+def check_parameter_nils():
+    """
+    `Store.toValues` returns a positional list that CONTAINS NILS - most vehicles leave
+    `owner_name`, `job`, `statebags`, `trailer_id` and `last_garage` empty.
+
+    Reading it with `ipairs` stops at the first hole. Appending it into another table with
+    `t[#t + 1] = v` is worse: `#` over a table with a hole is undefined, so values land at
+    arbitrary indexes and the parameter list is silently scrambled.
+
+    That actually happened. MariaDB answered `Incorrect integer value: 'MIG00001' for column
+    class` because a plate had landed in the class column, and every row in that batch was lost
+    with one line of console output. See ERROR_LOG.md.
+    """
+    global checks_run
+    checks_run += 1
+
+    for path in lua_files():
+        source = strip_comments(read(path))
+
+        for number, line in enumerate(source.splitlines(), 1):
+            if re.search(r"ipairs\s*\(\s*Store\.toValues", line):
+                fail('param-nils',
+                     f'{relative(path)}:{number} iterates Store.toValues with ipairs. '
+                     'It contains nils; read it by index from 1 to #Store.columns.')
+
+            if re.search(r"pairs\s*\(\s*Store\.toValues", line):
+                fail('param-nils',
+                     f'{relative(path)}:{number} iterates Store.toValues with pairs, '
+                     'which does not preserve column order.')
+
+
+# ==============================================================================================
 # 10. Reserved words as bare keys
 # ==============================================================================================
 
@@ -528,6 +568,7 @@ def main():
     check_manifest()
     check_schema_gates()
     check_reserved_keys()
+    check_parameter_nils()
 
     print(f'v-park: {checks_run} check groups run over {len(lua_files())} Lua files')
 

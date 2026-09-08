@@ -333,8 +333,18 @@ function Migrate.convert(row, map, now)
         rental_until = 0,
         last_garage = nil,
         source = 'migrated',
+
+        -- `created_at` and `touched_at` carry the SOURCE timestamps, because they are what
+        -- the expiry sweep measures against and a migrated vehicle really is as old as the
+        -- table says.
+        --
+        -- `updated_at` carries NOW, because the row was written now - and because it is what
+        -- `rollback` finds its own work by. An earlier version stored the source timestamp
+        -- here too and filtered the rollback on `created_at >= migrated_at`, which never
+        -- matched anything: every migrated row's created_at is older than the migration by
+        -- definition. The rollback ran, reported success, and removed nothing.
         created_at = created,
-        updated_at = updated,
+        updated_at = now,
         touched_at = updated,
         -- Migrated rows have no usable "last driven" information: the source table does not
         -- record it. Seeding it to the migration time rather than to zero means the Section 9c
@@ -648,8 +658,19 @@ function Migrate.rollback(report)
 
     local removed = 0
 
+    --[[
+        `updated_at`, not `created_at`.
+
+        A migrated row's `created_at` is the source table's own creation time, which is by
+        definition older than the migration that imported it. Filtering on it matched nothing,
+        every time, and the rollback reported success having removed zero rows.
+
+        `updated_at` is the moment we wrote it. A vehicle that has been saved since the
+        migration has a later one, which still satisfies the comparison - correctly, because it
+        is still a migrated row and still ours to remove.
+    ]]
     for id, record in pairs(Store.all()) do
-        if record.source == 'migrated' and (record.created_at or 0) >= migratedAt then
+        if record.source == 'migrated' and (record.updated_at or 0) >= migratedAt then
             Spawn.despawn(id, 'migration rollback')
             Store.remove(id)
             removed = removed + 1
@@ -657,7 +678,7 @@ function Migrate.rollback(report)
     end
 
     Database.execute(
-        ('DELETE FROM %s WHERE `source` = ? AND `created_at` >= ?'):format(Database.table('vehicles')),
+        ('DELETE FROM %s WHERE `source` = ? AND `updated_at` >= ?'):format(Database.table('vehicles')),
         { 'migrated', migratedAt }
     )
 
@@ -726,6 +747,6 @@ do
                     })
                 end
             end)
-        end, true)
+        end, false)   -- unrestricted, gated above. See the note in server/commands.lua.
     end
 end

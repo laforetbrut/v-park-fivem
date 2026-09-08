@@ -451,9 +451,20 @@ webhooks off, after which the next real error goes unread for a fortnight.
 
 ## Known limits, stated plainly
 
-- **Only qb-core has been run in game.** qbx_core, ESX and ox_core are implemented behind the
+- **What has actually been run, and what has not.** The server half has been exercised on a
+  real qb-core server with oxmysql: 64 automated checks covering boot, schema creation,
+  detection, every console command, the loader, the spatial grid, ownership, the lifecycle
+  maths, the save pipeline, the trash, the audit log and the full migration cycle. Three real
+  defects came out of that and are fixed.
+
+  **The client half has not been driven by a human yet.** Placement, deformation, property
+  capture and apply, and the admin panel all need a game client, and the automated pass cannot
+  provide one. They are written carefully and reviewed, and they have not been played.
+  `test-procedures/` in the repository has the procedure; reports are very welcome.
+
+- **Only qb-core has been run at all.** qbx_core, ESX and ox_core are implemented behind the
   same adapter interface and statically verified to implement every method the bridge calls,
-  but they have not been tested on a live server. Reports welcome.
+  but no server has run them.
 - **Deformation restore is approximate.** `SetVehicleDamage` is not the inverse of
   `GetVehicleDeformationAtPos`; putting a shape back is a search, and it reproduces damage that
   *reads* as the same, not the same vertices. `recaptureDelta` stops that compounding over
@@ -595,8 +606,19 @@ La liste complète est dans la section anglaise ci-dessus.
 
 ## Limites connues
 
-- **Seul qb-core a été testé en jeu.** ESX, qbx_core et ox_core passent par le même adaptateur
-  et sont vérifiés statiquement, mais n'ont pas tourné sur un serveur en production.
+- **Ce qui a réellement tourné, et ce qui n'a pas tourné.** La moitié serveur a été exercée sur
+  un vrai serveur qb-core avec oxmysql : 64 vérifications automatisées couvrant le démarrage, la
+  création du schéma, la détection, toutes les commandes console, le chargement, la grille
+  spatiale, la propriété, le cycle de vie, la sauvegarde, la corbeille, le journal d'audit et le
+  cycle complet de migration. Trois vrais défauts en sont sortis et sont corrigés.
+
+  **La moitié client n'a pas encore été jouée par un humain.** Le placement, les déformations,
+  la capture et l'application des propriétés et le panneau admin nécessitent tous un client de
+  jeu. Ils sont écrits avec soin et relus, ils n'ont pas été joués. La procédure est dans
+  `test-procedures/`.
+
+- **Seul qb-core a tourné.** ESX, qbx_core et ox_core passent par le même adaptateur et sont
+  vérifiés statiquement, mais aucun serveur ne les a fait tourner.
 - **La restauration des déformations est approximative.** Elle reproduit des dégâts qui *se
   lisent* comme les mêmes, pas les mêmes sommets.
 - **Une place bloquée sans emplacement libre à proximité finit en intersection.** Avec le

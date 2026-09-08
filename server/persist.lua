@@ -484,10 +484,43 @@ end
 -- The flush
 -- ---------------------------------------------------------------------------------------
 
-local function upsertStatement(rows)
+--[[
+    Build the upsert for a batch, and collect its parameters.
+
+    Returns `sql, values`.
+
+    -------------------------------------------------------------------------------------------
+    WHY A NIL VALUE BECOMES A LITERAL `NULL` IN THE SQL RATHER THAN A `?` AND A NIL PARAMETER
+    -------------------------------------------------------------------------------------------
+
+    Most of a vehicle's columns are nullable and most vehicles leave several of them nil:
+    `owner_name`, `job`, `statebags`, `trailer_id`, `last_garage`, `model_name` on a server that
+    could not resolve one.
+
+    An earlier version appended every value to one flat table with `values[#values + 1] = v`.
+    That is broken the moment any `v` is nil, because `#` on a table with a hole is UNDEFINED -
+    the length operator may return the index before the hole, after it, or anything between.
+    Measured on a real insert: two vehicles produced six correct values followed by a hundred
+    and twenty-eight nulls, in the wrong order, and MariaDB answered
+
+        Incorrect integer value: 'MIG00001' for column `v_park_vehicles`.`class`
+
+    because the plate had landed in the class column. Every row in that batch was lost, silently
+    apart from that one line, and it would have happened on almost every batch on a live server.
+
+    Writing `NULL` into the statement instead means the parameter list is only ever appended to
+    with a non-nil value, so it is dense by construction and the length operator is meaningful
+    again. `NULL` is a keyword, not data - nothing operator-supplied or player-supplied reaches
+    the statement text.
+
+    RULES.md already said "never a nil in an array literal". This is the same rule, one level
+    down, and it is now enforced by construction rather than by remembering.
+]]
+local function upsertBatch(batch)
     local columns = Store.columns
+    local columnCount = #columns
+
     local quoted = {}
-    local placeholders = {}
     local updates = {}
 
     for _, column in ipairs(columns) do
@@ -500,17 +533,37 @@ local function upsertStatement(rows)
         end
     end
 
-    local one = '(' .. string.rep('?', #columns, ', ') .. ')'
-    for _ = 1, rows do
-        placeholders[#placeholders + 1] = one
+    local rows = {}
+    local values = {}
+    local cursor = 0
+
+    for index = 1, #batch do
+        local row = Store.toValues(batch[index])
+        local parts = {}
+
+        for column = 1, columnCount do
+            local value = row[column]
+
+            if value == nil then
+                parts[column] = 'NULL'
+            else
+                parts[column] = '?'
+                cursor = cursor + 1
+                values[cursor] = value
+            end
+        end
+
+        rows[index] = '(' .. table.concat(parts, ', ') .. ')'
     end
 
-    return ('INSERT INTO %s (%s) VALUES %s ON DUPLICATE KEY UPDATE %s'):format(
+    local sql = ('INSERT INTO %s (%s) VALUES %s ON DUPLICATE KEY UPDATE %s'):format(
         Database.table('vehicles'),
         table.concat(quoted, ', '),
-        table.concat(placeholders, ', '),
+        table.concat(rows, ', '),
         table.concat(updates, ', ')
     )
+
+    return sql, values
 end
 
 --[[
@@ -550,14 +603,9 @@ function Persist.flushNow()
     local function fireBatch()
         if #batch == 0 then return end
 
-        local values = {}
-        for _, record in ipairs(batch) do
-            for _, value in ipairs(Store.toValues(record)) do
-                values[#values + 1] = value
-            end
-        end
+        local sql, values = upsertBatch(batch)
 
-        if Database.fire(upsertStatement(#batch), values) then
+        if Database.fire(sql, values) then
             written = written + #batch
         end
 
@@ -603,14 +651,8 @@ function Persist.flush(force)
     local function writeBatch()
         if #batch == 0 then return end
 
-        local values = {}
-        for _, record in ipairs(batch) do
-            for _, value in ipairs(Store.toValues(record)) do
-                values[#values + 1] = value
-            end
-        end
-
-        local ok = Database.execute(upsertStatement(#batch), values) ~= nil
+        local sql, values = upsertBatch(batch)
+        local ok = Database.execute(sql, values) ~= nil
 
         if ok then
             for _, id in ipairs(ids) do Store.clearDirty(id) end

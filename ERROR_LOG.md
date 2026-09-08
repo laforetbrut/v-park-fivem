@@ -8,6 +8,101 @@ out of it.
 
 ---
 
+## [2026-09-09 01:20] — A nil in the parameter list scrambled every insert batch
+
+**Context:** First real server run. Four rows written, the migration importing two more.
+
+**Error:** MariaDB, via oxmysql:
+
+    Incorrect integer value: 'MIG00001' for column `v_park_vehicles`.`class` at row 1
+
+with a parameter list that read `["0TL0SYH04JZU9","MIG00003",12345,"0TL0SYH03Y4JO","MIG00001",
+970598228,null,null,null, ...]` - two vehicles' worth of ids, plates and models interleaved,
+followed by a hundred and twenty-eight nulls.
+
+**Root cause:** `Persist.flush` built the parameter list with
+
+    for _, value in ipairs(Store.toValues(record)) do values[#values + 1] = value end
+
+and `Store.toValues` legitimately contains nils: most vehicles leave `owner_name`, `job`,
+`statebags`, `trailer_id` and `last_garage` empty, and a migrated row also has no `model_name`
+because `GetDisplayNameFromVehicleModel` does not exist server-side.
+
+Two separate failures from that one line. `ipairs` stops at the first hole, so only the values
+before it were ever read. And `#values` over a table that already has a hole is UNDEFINED, so
+each subsequent write landed at an arbitrary index - which is why the plate ended up in the
+class column.
+
+**The scale of it:** this would have hit almost every batch on a live server, because almost
+every vehicle has at least one nil column. Persistence would have appeared to work - vehicles
+adopted, `/vparkscan` listing them - and then quietly lost the lot at the first flush, with one
+line of console output.
+
+**Fix:** `upsertBatch` in `server/persist.lua` now writes a literal `NULL` into the statement
+where a value is nil, and only ever appends non-nil values to the parameter list. The list is
+dense by construction and the length operator is meaningful again. `NULL` is a keyword, not
+data; nothing operator-supplied or player-supplied reaches the statement text.
+
+**Prevention:** `tools/check.py` check 11 fails on any `ipairs` or `pairs` over
+`Store.toValues`. RULES.md already said "never a nil in an array literal" - this was the same
+rule one level down, and it is now enforced by construction rather than by remembering.
+
+---
+
+## [2026-09-09 00:50] — Admin commands were refused from the server console
+
+**Context:** First server run, reading the console.
+
+**Error:** `Access denied for command vparkstats`, and the same for `vparkzones` and
+`vparkadmin`. `vparkinfo` worked.
+
+**Root cause:** `RegisterCommand`'s third argument creates an ACE object called
+`command.<name>` and refuses the command to any principal that has not been granted it. THE
+SERVER CONSOLE IS ALSO A PRINCIPAL, and it does not hold `command.vparkstats` either.
+
+So every command marked `permission = 'admin'` was registered restricted and became unusable
+from the console - which is exactly backwards. `server/commands.lua` carries a comment saying
+that a server owner debugging a broken framework needs these commands from the console, and the
+code did the opposite.
+
+**Fix:** registered unrestricted, gated in the handler by `Bridge.isAdmin`, which returns true
+for source 0 and checks ACE first for everybody else. Nothing was loosened: the handler already
+refused before reaching the command body, on every call.
+
+The flag's other job - hiding the command from the chat suggestion list - it was not doing
+either, because `chat:addSuggestion` is sent to -1 and every client gets the list regardless.
+
+**Prevention:** `restricted` on `RegisterCommand` is for commands the console genuinely should
+not run, which is none of ours.
+
+---
+
+## [2026-09-09 01:05] — The migration rollback could never find its own rows
+
+**Context:** The smoke test's migration case. `run force` imported two rows; `rollback` reported
+success and removed none.
+
+**Error:** `rolled back 0 migrated vehicle(s)`, with two `source = 'migrated'` rows still in the
+table.
+
+**Root cause:** `Migrate.rollback` filtered on `source = 'migrated' AND created_at >=
+migrated_at`, and a migrated row's `created_at` is the SOURCE table's creation time - which is
+older than the migration that imported it, by definition. The comparison could never be true.
+
+**Fix:** `Migrate.convert` now stores `now` in `updated_at` - the row genuinely was written now
+- while `created_at` and `touched_at` keep the source timestamps, which is what the expiry sweep
+should measure against. The rollback filters on `updated_at` instead.
+
+**Prevention:** a timestamp copied from somebody else's table is evidence about their data, not
+about ours. Anything that needs to know when WE wrote a row needs a column we set.
+
+Found in the same case, and worth knowing: after the broken rollback left rows behind, the next
+migration reported them as duplicates and imported nothing. That part was correct - the
+duplicate check by plate and position did exactly its job - and it made the fixture dirty in a
+way that looked like a second bug.
+
+---
+
 ## [2026-09-08 23:40] — An unanswered restore leaked an entity, and enough of them froze streaming
 
 **Context:** Reading `server/spawn.lua` back before the first in-game test.

@@ -174,6 +174,15 @@ end
     Fixed because the batch writer builds one statement with N sets of placeholders, and every
     row must contribute its values in the same order. A table iteration would not guarantee
     that; a list does.
+
+    THIS LIST CONTAINS NILS, AND THAT IS NOT A DEFECT. Most vehicles leave `owner_name`, `job`,
+    `statebags`, `trailer_id` and `last_garage` empty, and a nil is how a NULL column is
+    expressed here.
+
+    So it must be read BY INDEX, from 1 to `#Store.columns`, and never with `ipairs` or `#`.
+    `ipairs` stops at the first hole and `#` is undefined over one. `upsertBatch` in
+    server/persist.lua is the only caller and its header carries the full account of what
+    happened when this was got wrong.
 ]]
 Store.columns = {
     'id', 'plate', 'model', 'model_name', 'class',
