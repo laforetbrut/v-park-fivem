@@ -137,11 +137,12 @@ local function onEnter(vehicle)
     -- Getting in cancels a pending settle: the car is not parked, it is being driven.
     settling[vehicle] = nil
 
-    local record, id = Stream.byEntity(vehicle)
+    local id, record = vparkId(vehicle)
 
-    if record then
-        -- Driven, so its position becomes worth recording. See `Stream.snapshot`.
-        record.driven = true
+    if id then
+        -- Driven, so its position becomes worth recording. See `Stream.snapshot`. Only on the
+        -- client that tracks it; the others have nothing to mark and do not capture it.
+        if record then record.driven = true end
 
         -- `true`: somebody got IN it. See `Config.Cleanup` for why that is a different fact
         -- from the vehicle merely having been interacted with.
@@ -202,6 +203,43 @@ local function onEnter(vehicle)
     end
 end
 
+--[[
+    Is this vehicle one v-park keeps, and what is its id?
+
+    -------------------------------------------------------------------------------------------
+    THE STATEBAG, NOT THE TRACKED TABLE. THIS DISTINCTION COST A RELEASE.
+    -------------------------------------------------------------------------------------------
+
+    `Stream.byEntity` answers from `tracked`, which is populated by the `vpark:client:restore`
+    handler - and that instruction is sent to ONE client, the one the server nominated to dress
+    and place the vehicle. Every other client has an empty `tracked` for it.
+
+    So a player who gets into a vehicle that was restored for somebody else - which is most
+    vehicles, on a server with more than one player, and any vehicle at all after the nominated
+    client has driven off - was invisible to every check written against `tracked`. Getting out
+    of it reported nothing, and the parked position was never sent.
+
+    That is what "almost, but one of them still went back to an old place" was: the fix worked
+    when the player happened to be the placer and did nothing when they were not.
+
+    `vpark:id` is a REPLICATED statebag. Every client in scope has it, and a player who has just
+    spent time sitting in the vehicle has certainly had it for a while. It is the right question
+    to ask here.
+]]
+local function vparkId(vehicle)
+    if not vehicle or vehicle == 0 or not DoesEntityExist(vehicle) then return nil end
+
+    -- The tracked table first: it is a table lookup, and on the nominated client it is already
+    -- the answer.
+    local record, id = Stream.byEntity(vehicle)
+    if id then return id, record end
+
+    local ok, bagId = pcall(function() return Entity(vehicle).state['vpark:id'] end)
+    if ok and type(bagId) == 'string' then return bagId, nil end
+
+    return nil, nil
+end
+
 local function onExit(vehicle)
     current.entity = nil
     current.netId = nil
@@ -233,9 +271,9 @@ local function onExit(vehicle)
         up, and this is the instant it stops changing. One small message, once, per vehicle
         parked.
     ]]
-    local tracked, trackedId = Stream.byEntity(vehicle)
+    local trackedId, tracked = vparkId(vehicle)
 
-    if tracked and trackedId and DoesEntityExist(vehicle) then
+    if trackedId then
         local position = GetEntityCoords(vehicle)
         local rotation = GetEntityRotation(vehicle, 2)
 
@@ -259,9 +297,23 @@ local function onExit(vehicle)
                 reporting a position that physics was still free to change.
 
                 The pose above is the answer. Everything after it is drift.
+
+                Only on the client that tracks it - the others have no record to clear, and no
+                snapshot to suppress either, because the server only ever asks the nearest
+                client and that request names the vehicles it may answer about.
             ]]
-            tracked.driven = false
+            if tracked then tracked.driven = false end
         end
+
+        --[[
+            And nothing below applies to it.
+
+            What follows is the ADOPTION path: the settle timer that decides whether a vehicle
+            v-park does not know about is worth keeping. This one it already keeps, so running
+            that would end in an offer the server refuses as "already ours" - harmless, and
+            still a message per parked vehicle for no reason.
+        ]]
+        return
     end
 
     if not worthReporting(vehicle) then return end

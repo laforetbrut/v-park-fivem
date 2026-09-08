@@ -7,6 +7,63 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.16] - 2026-09-09
+
+**Getting out of a vehicle only saved its position on one client in the server.**
+
+1.0.14 made the client report a vehicle's pose the instant the driver gets out, and asked
+`Stream.byEntity` whether the vehicle was one v-park keeps. That table is populated by the
+`vpark:client:restore` handler - and **that instruction is sent to exactly one client**, the one
+the server nominated to dress and place the vehicle. Every other client's copy is empty for it.
+
+So a player getting into a vehicle that was restored for somebody else - which is most vehicles
+on a server with more than one player, and any vehicle at all once the nominated client has
+driven off - was invisible to the check. Getting out of it reported nothing, and the parked
+position was never sent. It worked when the player happened to be the placer and did nothing
+when they were not, which is "almost, but one of them still went back to an old place".
+
+### Fixed
+
+- **The vehicle's own statebag is the question now.** `vpark:id` is replicated: every client in
+  scope has it, and a player who has just spent time sitting in the vehicle has certainly had it
+  for a while. The tracked table is still asked first, because on the nominated client it is a
+  table lookup and already the answer.
+
+  Both the parked report and the "somebody got in" message go through it, so they now fire for
+  every player in every vehicle v-park keeps.
+
+- **A vehicle that is already ours skips the adoption path on exit.** It used to fall through to
+  the settle timer, which ends in an offer the server refuses as already ours - harmless, and a
+  message per parked vehicle for no reason.
+
+---
+
+## [1.0.16] - 2026-09-09 (français)
+
+**Sortir d'un véhicule n'enregistrait sa position que sur un seul client du serveur.**
+
+La 1.0.14 fait rapporter la pose par le client dès que le conducteur sort, et demandait à
+`Stream.byEntity` si le véhicule était suivi par v-park. Or cette table est remplie par le
+handler `vpark:client:restore` - et **cette instruction n'est envoyée qu'à un seul client**,
+celui que le serveur a désigné pour habiller et placer le véhicule. Chez tous les autres, elle
+est vide pour ce véhicule.
+
+Un joueur qui monte dans un véhicule restauré pour quelqu'un d'autre - c'est-à-dire la plupart
+des véhicules dès qu'il y a plus d'un joueur, et n'importe lequel une fois que le client désigné
+est parti - était donc invisible pour ce test. Sortir n'envoyait rien. Ça marchait quand le
+joueur se trouvait être le placeur, et ne faisait rien sinon : « presque, mais il y en a encore
+un qui est revenu à un ancien endroit ».
+
+### Corrigé
+
+- **C'est le statebag du véhicule qui répond maintenant.** `vpark:id` est répliqué : tous les
+  clients à portée l'ont, et un joueur qui vient de passer du temps assis dedans l'a
+  certainement depuis longtemps. La table locale reste consultée en premier, parce que sur le
+  client désigné c'est une simple lecture de table et déjà la réponse.
+- **Un véhicule déjà à nous saute le chemin d'adoption à la sortie.**
+
+---
+
 ## [1.0.15] - 2026-09-09
 
 **The parked position was being written correctly and then overwritten with the old one seconds

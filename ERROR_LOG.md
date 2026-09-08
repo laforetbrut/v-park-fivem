@@ -8,6 +8,44 @@ out of it.
 
 ---
 
+## [2026-09-09 18:05] — A per-client table used to answer a server-wide question
+
+**Context:** Reported after 1.0.15: "almost, there is still one vehicle that went back to an old
+place - as soon as I get out of the vehicle it should be saved".
+
+**Error:** None.
+
+**Root cause:** the parked report added in 1.0.14 was guarded by `Stream.byEntity`, which
+answers from the client's `tracked` table. `tracked` is populated by the `vpark:client:restore`
+handler, and that instruction is sent by `sendRestore` to ONE client - the one the server
+nominated to dress and place the vehicle.
+
+Every other client has nothing in `tracked` for that vehicle. So a player getting into a vehicle
+that was restored for somebody else - most vehicles on a server with more than one player, and
+any vehicle at all after the nominated client has driven away - failed the check silently, and
+getting out sent nothing.
+
+The behaviour was therefore "saves correctly if you happen to be the client that placed it",
+which on a single-player test is most of the time and in general is not.
+
+**Fix:** ask the vehicle instead. `vpark:id` is a replicated statebag: every client in scope has
+it, and a player who has been sitting in the vehicle has had it for a long time. `tracked` is
+still consulted first because on the nominated client it is a table lookup and already correct.
+
+**Prevention:**
+
+> **A per-client cache cannot answer a question about the world.**
+>
+> `tracked` is this client's view of what it was asked to restore. It was reached for as though
+> it meant "vehicles v-park keeps", and those two are the same set only on one machine. The name
+> did not help, and neither did testing alone - with one player, that machine is always the
+> nominated one.
+>
+> The replicated statebag exists precisely because it is the copy every client has. When a check
+> needs to be true on all of them, that is the thing to read.
+
+---
+
 ## [2026-09-09 16:20] — The correct position, then the old one on top of it
 
 **Context:** Reported immediately after 1.0.14: "I get out of the vehicle, I leave, I come back
