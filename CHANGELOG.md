@@ -7,6 +7,80 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.21] - 2026-09-09
+
+**Rien n'était conservé du tout, et c'est la vérification de proximité de la 1.0.19 qui en était
+la cause entière.**
+
+Le panneau admin affichait `0 KEPT`. Pas seulement le véhicule acheté : rien.
+
+### Fixed
+
+- **The 1.0.19 proximity check refused every adoption, not just purchases.** 1.0.20 identified it as
+  the reason a bought vehicle was not kept and removed it, but understated what it had been doing.
+
+  `Persist.adopt` is reached by two paths, and the one that matters most is the settle timer: a
+  player parks, walks away, and forty-five seconds later the client offers the vehicle. **By
+  definition the player has walked away** - `Config.Persistence.settleSeconds` is 45, so they are a
+  hundred metres off - and the check refused anything offered from more than fifteen metres. So the
+  ordinary way a vehicle becomes persistent was refused every single time, with no log line, and the
+  store stayed empty.
+
+- **A disagreement about where a vehicle is now corrects the value instead of refusing the
+  vehicle.** The other half of the same check survived 1.0.20: the position in the message had to be
+  within ten metres of where the server reads the entity, or the offer was refused.
+
+  Refusing was wrong for the same reason twice, and it is worth stating plainly: **a refusal loses a
+  vehicle and every other outcome does not.** The server's reading can be stale - it is maintained
+  by the entity's network owner, and for a vehicle another resource created with the setter native
+  it can sit at the spawn point indefinitely - so a disagreement is at least as likely to mean "the
+  server is behind" as "the client is lying", and one of those two readings is not worth a car.
+
+  The unforgeable value still wins, so the exploit it exists for is stopped just as dead. But the
+  vehicle is kept either way, and if the server's reading was the stale one, the first capture after
+  somebody drives the car corrects it - a self-healing wrong answer rather than a missing car.
+
+112 automated checks on a real qb-core server with oxmysql and MariaDB 11.4, and 19 static check
+groups over 32 Lua files.
+
+---
+
+## [1.0.21] - 2026-09-09 (français)
+
+**Rien n'était conservé du tout, et la vérification de proximité de la 1.0.19 en était la cause
+entière.**
+
+### Corrigé
+
+- **La vérification de la 1.0.19 refusait toutes les adoptions, pas seulement les achats.** La
+  1.0.20 l'avait identifiée comme la raison pour laquelle un véhicule acheté n'était pas
+  conservé et l'avait retirée, mais en sous-estimant ce qu'elle faisait.
+
+  `Persist.adopt` est atteint par deux chemins, et le plus important est le minuteur de repos : un
+  joueur se gare, s'éloigne, et quarante-cinq secondes plus tard le client propose le véhicule.
+  **Par définition le joueur s'est éloigné** - `settleSeconds` vaut 45, il est à cent mètres -
+  et la vérification refusait tout ce qui était proposé à plus de quinze mètres. La façon
+  ordinaire dont un véhicule devient persistant était donc refusée à chaque fois, sans une seule
+  ligne de log, et le registre restait vide.
+
+- **Un désaccord sur la position corrige la valeur au lieu de refuser le véhicule.** L'autre
+  moitié de la même vérification avait survécu à la 1.0.20.
+
+  Refuser était mauvais pour la même raison deux fois, et ça vaut la peine de le dire clairement :
+  **un refus perd un véhicule, et aucune autre issue ne le fait.** La lecture du serveur peut être
+  périmée, donc un désaccord veut au moins autant dire &laquo;&nbsp;le serveur est en
+  retard&nbsp;&raquo; que &laquo;&nbsp;le client ment&nbsp;&raquo;, et une de ces deux lectures ne
+  vaut pas une voiture.
+
+  La valeur infalsifiable gagne toujours, donc l'exploit reste bloqué. Mais le véhicule est
+  conservé dans les deux cas, et si c'est la lecture serveur qui était périmée, la première
+  capture après que quelqu'un a conduit la voiture la corrige.
+
+112 vérifications automatisées sur un vrai serveur qb-core avec oxmysql et MariaDB 11.4, et 19
+groupes de vérifications statiques sur 32 fichiers Lua.
+
+---
+
 ## [1.0.20] - 2026-09-09
 
 **A vehicle bought from a dealership was not kept, because of a check 1.0.19 added yesterday. And

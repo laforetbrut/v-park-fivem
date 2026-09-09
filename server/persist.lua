@@ -277,14 +277,33 @@ function Persist.adopt(src, payload, explicit)
     local claimed = Park.toVec(payload.position)
     local actually = Spawn.entityPosition and Spawn.entityPosition(entity) or nil
 
+    local trusted = claimed
+
     if claimed and actually then
         local dx = claimed.x - actually.x
         local dy = claimed.y - actually.y
         local dz = claimed.z - actually.z
 
+        --[[
+            DISAGREEMENT CORRECTS THE VALUE. IT DOES NOT REFUSE THE VEHICLE.
+
+            1.0.19 and 1.0.20 both refused here, and refusing was wrong for the same reason twice:
+            A REFUSAL LOSES A VEHICLE, AND EVERY OTHER OUTCOME DOES NOT. The server's reading can
+            be stale - it is maintained by the entity's network owner, and for a vehicle another
+            resource created with the setter native it can sit at the spawn point indefinitely -
+            so a disagreement is at least as likely to mean `the server is behind` as `the client
+            is lying`, and one of those two readings is not worth a car.
+
+            So the unforgeable value wins and the vehicle is kept either way. The exploit this
+            exists for - registering a vehicle at coordinates of the sender's choosing - is
+            stopped just as dead by ignoring the claim as by refusing the offer. And if the server
+            reading was the stale one, the first capture after somebody drives the car corrects it,
+            which is a self-healing wrong answer rather than a missing car.
+        ]]
         if (dx * dx + dy * dy + dz * dz) > (10.0 * 10.0) then
-            return nil, 'refuse.position_mismatch',
-                ('%.0f m from the vehicle'):format(math.sqrt(dx * dx + dy * dy + dz * dz))
+            Park.debug('%s was offered %.0f m from where the server reads it - using the server',
+                tostring(payload.plate), math.sqrt(dx * dx + dy * dy + dz * dz))
+            trusted = actually
         end
     end
 
@@ -306,7 +325,8 @@ function Persist.adopt(src, payload, explicit)
 
     local owner, ownerType, ownerName, job = Ownership.resolve(plate, src, explicit)
 
-    local position = Park.toVec(payload.position)
+    -- `trusted`, not the payload: see the note above about which reading wins when they disagree.
+    local position = trusted
     if not position then return nil, 'refuse.unknown' end
 
     local properties = payload.properties or {}

@@ -8,6 +8,35 @@ out of it.
 
 ---
 
+## [2026-09-09 04:40] - A proximity check emptied the entire store
+
+**Context:** the user reported that a bought vehicle did not appear in the admin panel, and the
+screenshot showed `0 KEPT` - nothing at all was being persisted, on a server that had been tested
+for days.
+
+**Error:** the proximity check 1.0.19 added to `Persist.adopt` required the offering player to be
+within fifteen metres of the vehicle. `Persist.adopt` is reached by two paths, and the dominant one
+is the settle timer: the client offers a vehicle `Config.Persistence.settleSeconds` after the player
+gets out and walks away - 45 seconds by default, so a hundred metres. Every settle-path adoption was
+refused. 1.0.20 removed the check as the cause of the purchase failure without noticing it had also
+been refusing the ordinary path, because there was no log line for a refusal at the time.
+
+**Root cause:** the check was written while thinking about one caller. `adopt` was read as "a player
+offers the vehicle they are in", which is the on-entry path, and the settle path - a player offering
+the vehicle they have just walked away from - contradicts the check by construction. Adding a rule
+to a function without enumerating its callers.
+
+**Fix:** the ped is gone (1.0.20) and the remaining position check now corrects the value rather than
+refusing the offer. A refusal loses a vehicle; substituting the unforgeable reading does not, and
+stops the same exploit.
+
+**Prevention:** before adding a refusal to a shared function, list every caller and ask what each one
+looks like at the moment it calls. And weigh the failure modes rather than the threat alone: in a
+persistence resource a false refusal is permanent data loss, so a check that can produce one needs a
+much higher bar than a check that can only correct a value.
+
+---
+
 ## [2026-09-09 03:55] - A security check refused a legitimate purchase
 
 **Context:** the user reported that buying a vehicle from a dealership did not make it persistent,
