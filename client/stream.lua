@@ -387,6 +387,7 @@ RegisterNetEvent('vpark:client:forget', function(id)
 
     if record.netId then byNet[record.netId] = nil end
     tracked[id] = nil
+    unverified[id] = nil
     trackedCount = trackedCount - 1
 end)
 
@@ -484,6 +485,7 @@ CreateThread(function()
 
                     if record.netId then byNet[record.netId] = nil end
                     tracked[id] = nil
+                    unverified[id] = nil
                     trackedCount = trackedCount - 1
                 else
                     local distance = #(GetEntityCoords(record.entity) - playerPosition)

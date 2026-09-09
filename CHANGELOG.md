@@ -41,11 +41,14 @@ where the neons were demonstrably being lost. That silence was the finding.
   vehicle - at which point whatever they do to it is deliberate, so turning your own neons off still
   works.
 
-### Not tested this release
+### Tested
 
-The 113-check integration suite did **not** run for 1.0.29. The test server was in use and shares
-its database, so running it would have written and deleted rows underneath a live session. The
-twenty static groups pass. Said here rather than implied.
+The 113-check integration suite ran clean once the test server was free: 113 passed, zero failed,
+nothing raised in the boot log. The release notes originally said the suite had not run, because at
+publication time it had not - the server was in use and shares its database.
+
+Also in this release: `unverified` is cleared when a vehicle stops being tracked, so the doubt does
+not outlive the vehicle it was about.
 
 ---
 
@@ -80,10 +83,14 @@ sur un serveur où les néons se perdaient manifestement. Ce silence était la t
   dans le véhicule - à partir de là ce qui est fait est délibéré, donc éteindre ses propres
   néons fonctionne toujours.
 
-### Non testé cette version
+### Testé
 
-La suite d'intégration de 113 vérifications **n'a pas tourné** pour la 1.0.29 : le serveur de
-test était utilisé et partage sa base de données. Les vingt groupes statiques passent.
+La suite d'intégration de 113 vérifications a tourné propre dès que le serveur de test a
+été libre : 113 passées, zéro échec. Les notes disaient d'abord qu'elle n'avait pas tourné,
+parce qu'au moment de publier c'était le cas.
+
+Aussi dans cette version : `unverified` est vidé quand un véhicule cesse d'être suivi, pour que le
+doute ne survive pas au véhicule qu'il concernait.
 
 ---
 
