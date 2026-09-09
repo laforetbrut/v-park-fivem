@@ -7,6 +7,74 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.30] - 2026-09-10
+
+**The warning nobody could see was written on the wrong side of the network, and the guard on the
+stored value was lifted by the act of checking it.**
+
+### Fixed
+
+- **The neon diagnostic reaches the server console.** 1.0.27 added it, 1.0.29 made it reachable, and
+  both wrote it with `Park.warn` from `client/stream.lua` - **a client script**. A client-side print
+  goes to that player's own F8 console and never to the server log, which is where it was being
+  looked for. Twice.
+
+  The client sends what it found and the server logs it now: what was asked for, what the game
+  reported afterwards, whether that client held network control, and who the engine says owns the
+  entity. And the level was checked rather than assumed - `warn` is 2 against a threshold of 3, so
+  it prints on a stock server.
+
+- **The guard on the stored value is no longer lifted by getting into the vehicle.** 1.0.29 cleared
+  it on entry, reasoning that whatever a person does to a vehicle they are sitting in is deliberate.
+  That is true of somebody who changes something and false of the far more common one who gets in
+  **to look** - which is exactly what a tester does. So the capture was handed permission to write
+  the dark vehicle over the stored value at the precise moment somebody was checking whether it had
+  survived.
+
+  It now lifts only when the restoring client confirms the neons actually held. Turning your own
+  neons off still works: that happens after a successful restore, and a successful restore clears
+  the guard.
+
+- **`/vparkprops` says when the server is guarding a vehicle's neons**, so the state of that
+  protection is visible rather than inferred.
+
+113 automated checks on a real qb-core server with oxmysql and MariaDB 11.4, and 20 static check
+groups over 32 Lua files.
+
+---
+
+## [1.0.30] - 2026-09-10 (français)
+
+**L'avertissement que personne ne voyait était écrit du mauvais côté du réseau, et la protection
+de la valeur enregistrée était levée par le fait même de la vérifier.**
+
+### Corrigé
+
+- **Le diagnostic des néons arrive dans la console serveur.** La 1.0.27 l'a ajouté, la 1.0.29 l'a
+  rendu atteignable, et les deux l'écrivaient avec `Park.warn` depuis `client/stream.lua` - **un
+  script client**. Un print côté client va dans la console F8 du joueur et jamais dans le log
+  serveur, où il était cherché. Deux fois.
+
+  Le client envoie ce qu'il a constaté et le serveur l'écrit : ce qui était demandé, ce que le
+  jeu répond, si ce client avait le contrôle réseau, et qui possède l'entité. Et le niveau a
+  été vérifié plutôt que supposé.
+
+- **La protection de la valeur enregistrée n'est plus levée en montant dans le véhicule.** La
+  1.0.29 la levait à l'entrée, en partant du principe que ce qu'on fait assis dedans est
+  délibéré. C'est vrai de celui qui change quelque chose et faux du bien plus fréquent qui monte
+  **pour regarder** - c'est-à-dire exactement ce que fait un testeur. La capture recevait donc le
+  droit d'écrire le véhicule éteint par-dessus la valeur enregistrée au moment précis où
+  quelqu'un vérifiait s'il avait survécu.
+
+  Elle ne se lève plus que quand le client qui restaure confirme que les néons ont tenu.
+
+- **`/vparkprops` indique quand le serveur protège les néons d'un véhicule.**
+
+113 vérifications automatisées sur un vrai serveur qb-core avec oxmysql et MariaDB 11.4, et 20
+groupes de vérifications statiques sur 32 fichiers Lua.
+
+---
+
 ## [1.0.29] - 2026-09-09
 
 **Two mistakes of mine, found by reading my own instrument's silence.**

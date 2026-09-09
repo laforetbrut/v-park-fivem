@@ -1835,6 +1835,37 @@ end)
     Proven the same way as every other client message: the vehicle must be one we hold and the
     sender must be next to it.
 ]]
+--[[
+    A client saying it could not make a vehicle's neons hold.
+
+    Logged at WARN so it appears on a server running at the default level, and with everything that
+    decides the answer: what was asked for, what the game reported afterwards, whether that client
+    had network control, and who the engine thinks owns the entity.
+
+    This is the line that three releases of this bug have been missing, and the reason it was
+    missing twice is that it was written on the client and looked for on the server.
+]]
+RegisterNetEvent('vpark:server:neonFailed', function(id, detail)
+    local src = source
+
+    if type(id) ~= 'string' or type(detail) ~= 'table' then return end
+
+    local entry = Store.live(id)
+    if not entry then return end
+    if Spawn.playerIsNear and Spawn.playerIsNear(src, entry.entity, 60.0) == false then return end
+
+    local function list(values)
+        if type(values) ~= 'table' then return '?' end
+        local out = {}
+        for _, value in ipairs(values) do out[#out + 1] = tostring(value) end
+        return table.concat(out, ',')
+    end
+
+    Park.warn('%s: neons would not hold on client %d - wanted %s, got %s, control %s, owner %s, '
+        .. 'entity %s', id, src, list(detail.wanted), list(detail.got),
+        tostring(detail.control), tostring(detail.owner), tostring(detail.exists))
+end)
+
 RegisterNetEvent('vpark:server:verified', function(id, group)
     local src = source
 
@@ -1886,8 +1917,20 @@ RegisterNetEvent('vpark:server:touched', function(id, used)
         -- once every client has lost scope and there is no distance to measure.
         entry.occupant = src
 
-        -- Somebody is in it, so whatever the neons do from here is their doing and worth saving.
-        entry.unverifiedNeons = nil
+        --[[
+            THE NEON GUARD IS NOT LIFTED BY SOMEBODY SITTING DOWN.
+
+            It was, on the reasoning that whatever a person does to a vehicle they are in is
+            deliberate. That is true of a person who changes something and false of the far more
+            common one who gets in TO LOOK - which is exactly what a tester does, and it handed the
+            capture permission to write the dark vehicle over the stored value at the one moment
+            somebody was checking whether it had survived.
+
+            The guard now lifts only when the client that placed the vehicle reports the neons
+            actually held. Until then the stored value stands, which is the whole point of it. A
+            player turning their own neons off still works: that happens after a successful restore,
+            and a successful restore clears the guard.
+        ]]
 
         entry.frozen = false
         entry.seen = true

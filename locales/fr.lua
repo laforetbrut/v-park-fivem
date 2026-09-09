@@ -148,6 +148,7 @@ Locale.register('fr', {
     -- ---------------------------------------------------------------------------------
     ['props.none']         = "tu n'es ni dans ni à côté d'un véhicule",
     ['props.nothing_stored'] = "  enregistré  rien : v-park ne conserve pas ce véhicule",
+    ['props.neons_guarded'] = "  protégé     la restauration n'a pas confirmé ces néons, aucune capture ne peut les modifier",
     ['props.header']       = "propriétés de %s [%s], id %s :",
     ['props.live_neons']   = "  en jeu      néons %s  couleur %s  moteur %s",
     ['props.stored_neons'] = "  enregistré  néons %s  couleur %s",

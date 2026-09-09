@@ -8,6 +8,39 @@ out of it.
 
 ---
 
+## [2026-09-10 01:20] - A warning written on the client and looked for on the server
+
+**Context:** the neon bug had survived seven releases. Three of them added or improved a diagnostic
+line that was supposed to say what was going wrong. The tester reported "rien dans la console" every
+time, and sent the full server boot log to prove it.
+
+**Error:** the line was written with `Park.warn` from `client/stream.lua`. That is a client script,
+so the print goes to that player's own F8 console and never appears in the server log - which is
+where it was being looked for, because that is where every other v-park line appears. Twice in a row,
+across two releases whose entire purpose was to produce that line.
+
+Separately, 1.0.29's guard on the stored value was cleared when somebody got into the vehicle, on the
+reasoning that whatever they do while sitting in it is deliberate. That is true of somebody changing
+something and false of somebody getting in TO LOOK - which is what a tester does. The guard was
+therefore lifted at exactly the moment it was needed, and the capture wrote the failed restore over
+the stored value while the tester was checking whether it had survived.
+
+**Root cause:** for the first, forgetting which side of the network a file runs on while writing
+something whose only purpose is to be read by the operator. For the second, reasoning about a
+motivation - "they are in it, so they meant it" - where the observable fact is only presence.
+
+**Fix:** the client sends the detail and the server logs it, with network control and entity owner
+included. The guard lifts only on a confirmed successful restore.
+
+**Prevention:** a diagnostic has a reader, and the first question about one is WHERE THAT READER WILL
+LOOK. A client-side log line is for a player debugging their own game; anything meant for the server
+operator has to be sent to the server. This project has now produced three unreadable instruments in
+a row - one at the wrong log level, two on the wrong machine - and each cost a full test round trip.
+Before writing another, check that the intended reader can actually see it, the way `warn` was
+checked against the configured threshold this time instead of assumed.
+
+---
+
 ## [2026-09-10 00:30] - A verification that could not fail, and a guard on the wrong machine
 
 **Context:** the neons had survived six releases. 1.0.27 added a warning for a neon that would not

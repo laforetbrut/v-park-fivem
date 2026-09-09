@@ -313,11 +313,36 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
                         pcall(Properties.applyNeons, entity, properties)
                     end
 
-                    Park.warn('neons on %s would not hold after four attempts: wanted %s, got %s, '
-                        .. 'control %s', tostring(id),
-                        tostring(properties.neonEnabled[1] == true),
-                        tostring(IsVehicleNeonLightEnabled(entity, 0)),
-                        tostring(NetworkHasControlOfEntity and NetworkHasControlOfEntity(entity)))
+                    --[[
+                        REPORTED TO THE SERVER, BECAUSE THIS IS A CLIENT.
+
+                        The two previous attempts at this warning wrote it with `Park.warn` from
+                        here, and were then looked for in the SERVER console - where a client-side
+                        print never appears. It goes to the player's own F8 console, which nobody
+                        was reading. Twice.
+
+                        So the client sends what it found and the server logs it, which is where
+                        the person diagnosing this is actually looking.
+                    ]]
+                    local got = {}
+                    for index = 0, 3 do
+                        got[index + 1] = IsVehicleNeonLightEnabled(entity, index) and 1 or 0
+                    end
+
+                    TriggerServerEvent('vpark:server:neonFailed', id, {
+                        wanted = (function()
+                            local out = {}
+                            for index = 1, 4 do
+                                out[index] = properties.neonEnabled[index] == true and 1 or 0
+                            end
+                            return out
+                        end)(),
+                        got = got,
+                        control = NetworkHasControlOfEntity
+                            and NetworkHasControlOfEntity(entity) or false,
+                        owner = NetworkGetEntityOwner and NetworkGetEntityOwner(entity) or -1,
+                        exists = DoesEntityExist(entity),
+                    })
                 end)
             end
         end

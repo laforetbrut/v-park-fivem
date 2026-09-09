@@ -656,6 +656,13 @@ RegisterNetEvent('vpark:server:props', function(token, live)
         end
 
         lines[#lines + 1] = L('props.stored_neons', list(enabled), list(stored.neonColor))
+
+        -- Whether the server is currently refusing to believe anybody about this vehicle's neons.
+        -- See `unverifiedNeons` in server/store.lua.
+        local live = Store.live(id)
+        if live and live.unverifiedNeons then
+            lines[#lines + 1] = L('props.neons_guarded')
+        end
         lines[#lines + 1] = L('props.stored_damage', list(stored.windows), list(stored.doors),
             tostring(stored.bodyHealth or '?'))
     else

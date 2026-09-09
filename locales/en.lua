@@ -152,6 +152,7 @@ Locale.register('en', {
     -- ---------------------------------------------------------------------------------
     ['props.none']         = 'you are not in or near a vehicle',
     ['props.nothing_stored'] = '  stored    nothing: v-park is not keeping this vehicle',
+    ['props.neons_guarded'] = '  guarded   the restore has not confirmed these neons, so no capture may change them',
     ['props.header']       = 'properties on %s [%s], id %s:',
     ['props.live_neons']   = '  live      neons %s  colour %s  engine %s',
     ['props.stored_neons'] = '  stored    neons %s  colour %s',
