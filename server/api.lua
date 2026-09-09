@@ -180,6 +180,24 @@ exports('GetStats', function()
     }
 end)
 
+--[[
+    Which property groups are being stored right now.
+
+    Resolved live rather than read off the config, because `Config.Save.fields` accepts `'auto'`
+    as well as a boolean: `neons` defaults to it, and it means "on where a resource that manages
+    neons is running". So the config says `'auto'` and this says what that came out as, which is
+    the answer an integration actually needs before it decides to handle a group itself.
+]]
+exports('GetSavedFields', function()
+    local out = {}
+
+    for _, group in ipairs(Schema.groups) do
+        out[group.key] = Schema.enabled(group.key) and true or false
+    end
+
+    return out
+end)
+
 exports('GetGarages', function()
     return Park.copy(Runtime.garages())
 end)

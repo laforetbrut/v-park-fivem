@@ -112,6 +112,33 @@ oldest is dropped and they are told which.
 
 ---
 
+### `Config.Save.fields.neons` and `Config.Save.neonManagers`
+
+`fields.neons` is the one field that does not default to a boolean. It defaults to `'auto'`, which
+means **off unless a resource that manages neon lights is running.**
+
+Neon state does not survive a vehicle being destroyed and re-created, and that is the game rather
+than this resource: losing it across a store-and-retrieve cycle is known FiveM behaviour, reported
+independently of v-park. Nine releases of v-park went into working around it, and what they produced
+was interference - a loop that switched a player's neons off two seconds after they fitted them, and
+a capture that wrote a failed restore over the value the player had chosen.
+
+So v-park defers. `neonManagers` lists the resources that own the neon lifecycle, and when one of
+them is running the group switches itself on, because that resource is doing the part v-park cannot.
+
+```lua
+Config.Save.fields.neons = 'auto'
+Config.Save.neonManagers = { 'jim-mechanic', 'jim_mechanic' }
+```
+
+Add your own mechanic or mod-shop script to the list. There is no cost to a name you do not run: an
+absent resource simply does not match.
+
+`true` and `false` still mean exactly what they say, and override the detection in both directions.
+
+Which way it resolved is printed at boot and in `/vparkinfo`, and available to other resources
+through the `GetSavedFields` export.
+
 ## Section 7: placement
 
 **Read the header in `config.lua`.** It states the four mechanisms that move a restored vehicle

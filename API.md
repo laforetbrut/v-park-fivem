@@ -131,6 +131,23 @@ local stats = exports['v-park']:GetStats()
 
 What `/vparkstats` prints, as a table. Useful for a monitoring dashboard.
 
+### `GetSavedFields()`
+
+```lua
+local fields = exports['v-park']:GetSavedFields()
+
+if not fields.neons then
+    -- v-park is not storing neons, so this resource should.
+end
+```
+
+Which property groups v-park is actually storing, as `{ [group] = true|false }`.
+
+Resolved live rather than read off the config, because `Config.Save.fields` accepts `'auto'` as
+well as a boolean. `neons` defaults to `'auto'`, which means "on where a resource that manages
+neons is running" - so the config says `'auto'` and this says what that came out as, which is the
+answer a mechanic or mod-shop resource needs before it decides to handle a group itself.
+
 ### `GetGarages()`
 
 ```lua

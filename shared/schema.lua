@@ -187,6 +187,25 @@ end
     exist is treated as ON, not off: a typo in the config should not silently stop storing
     modifications, and the check script catches the typo separately.
 ]]
+--[[
+    `'auto'` means "on where something else is handling this properly".
+
+    Only neons use it today. See the note on `Config.Save.fields.neons`: the state does not survive a
+    vehicle being re-created, that is the game rather than this resource, and v-park attempting it
+    anyway interfered with the mod shops that do it well. So it defers, and says so at boot.
+]]
+local function autoEnabled()
+    local managers = (Config and Config.Save and Config.Save.neonManagers) or {}
+
+    for _, resource in ipairs(managers) do
+        if Park.started(resource) then return true, resource end
+    end
+
+    return false
+end
+
+Schema.autoEnabled = autoEnabled
+
 function Schema.enabled(groupKey)
     derived()
 
@@ -196,6 +215,8 @@ function Schema.enabled(groupKey)
     local fields = Config and Config.Save and Config.Save.fields
     if type(fields) ~= 'table' then return true end
     if fields[gate] == nil then return true end
+
+    if fields[gate] == 'auto' then return (autoEnabled()) end
 
     return fields[gate] == true
 end

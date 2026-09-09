@@ -362,6 +362,12 @@ register('info', {
         lines[#lines + 1] = L('info.garages', state.garageResource, #Runtime.garages())
     end
 
+    if state.neons == false then
+        lines[#lines + 1] = L('info.neons_off')
+    elseif type(state.neons) == 'string' then
+        lines[#lines + 1] = L('info.neons_on', state.neons)
+    end
+
     local webhooks = Webhook.stats()
     lines[#lines + 1] = L('info.webhooks',
         webhooks.errors and 'yes' or 'no',
@@ -673,6 +679,44 @@ RegisterNetEvent('vpark:server:props', function(token, live)
         tostring(live.bodyHealth or '?'))
 
     replyMany(src, lines)
+end)
+
+--[[
+    Set the neons on the vehicle the caller is in and report what the game does with them.
+
+    The answer nine releases of neon fixes have been guessing at, established in one command. See the
+    note on `vpark:client:neontest` for why this exists rather than a tenth fix.
+]]
+RegisterNetEvent('vpark:server:neontest', function(report)
+    local src = source
+    if type(report) ~= 'table' then return end
+
+    if report.error then
+        Park.warn('neon test from %d: %s', src, tostring(report.error))
+        return
+    end
+
+    Park.warn('neon test on %s [%s] from %d', tostring(report.model), tostring(report.plate), src)
+    Park.warn('  before %s  frozen %s  engine %s  owner %s', tostring(report.before),
+        tostring(report.frozen), tostring(report.engine), tostring(report.owner))
+    Park.warn('  control before %s, after asking %s', tostring(report.controlBefore),
+        tostring(report.controlAfter))
+    Park.warn('  after setting: immediately %s, +1s %s, +3s %s  (still frozen %s)',
+        tostring(report.immediately), tostring(report.afterOneSecond),
+        tostring(report.afterThreeSeconds), tostring(report.stillFrozen))
+end)
+
+register('neontest', {
+    description = 'Force neons on the vehicle you are in and report what the game does with them',
+    params = {},
+}, function(src)
+    if src == 0 then
+        reply(src, L('error.in_game_only'))
+        return
+    end
+
+    reply(src, L('neontest.running'))
+    TriggerClientEvent('vpark:client:neontest', src)
 end)
 
 register('props', {

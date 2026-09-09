@@ -8,6 +8,45 @@ out of it.
 
 ---
 
+## [2026-09-09 05:10] - Nine releases spent persisting something the game does not keep
+
+**Context:** neon lights were the last property that would not survive a store-and-retrieve cycle.
+Releases 1.0.25 through 1.0.34 each identified a mechanism that could plausibly drop the value and
+fixed that mechanism.
+
+**Error:** the feature never worked. Worse, several of the attempts damaged things that did work: a
+hold loop that switched a player's neons off two seconds after they fitted them, and a capture that
+wrote a failed restore over the value the player had chosen.
+
+**Root cause:** two distinct mistakes, and the second one is the expensive one.
+
+The first was reasoning where measuring was available. Every release named a suspected mechanism,
+fixed it, and shipped. None of them established whether setting a neon on a v-park-restored vehicle
+was possible in the first place - which one command could have answered at any point, and which is
+now `/vparkneontest`.
+
+The second was not having a stopping rule. After the third failed attempt the evidence already said
+the loss was not in this resource - the community reports it independently of v-park - and the
+correct move was to stop. Instead each release added another mechanism, and the mechanisms had side
+effects on the parts that were working. Persisting a thing badly is worse than not persisting it,
+because the failure spreads outward.
+
+**Fix:** stop doing it. The field defaults to `'auto'`, which means off unless a resource that owns
+the neon lifecycle is running, in which case that resource is doing the part v-park cannot. Turning
+the field off stops the tick reading and holding neon state too, not merely stripping the column, and
+the resolved answer is printed at boot so it is a visible setting rather than a silent absence.
+
+**Prevention:** two rules.
+
+Before the second attempt at a persistence bug, build the instrument that measures whether the write
+is possible at all. Nine plausible fixes cost more than one measurement.
+
+And set a stopping rule before starting: if N attempts fail and the evidence points outside this
+codebase, the answer is to defer to whatever owns the thing, not to attempt N+1. Deferring is a
+feature. A field that is off and says so is better than one that is on and wrong.
+
+---
+
 ## [2026-09-10 04:20] - Presence is not intent, twice
 
 **Context:** the neon state had survived eight releases. Each one narrowed who is allowed to say the

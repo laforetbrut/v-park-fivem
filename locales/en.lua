@@ -142,6 +142,8 @@ Locale.register('en', {
     ['info.keys']          = 'keys: %s',
     ['info.mode']          = 'persistence mode: %s',
     ['info.counts']        = '%d kept, %d in the world, %d waiting to be written, %d grid cells',
+    ['info.neons_off']     = 'neons: not stored, no neon-capable resource found (Config.Save.fields.neons)',
+    ['info.neons_on']      = 'neons: stored, handled by %s',
     ['info.zones']         = '%d blocked zone(s)',
     ['info.memory_mode']   = 'IN MEMORY: nothing survives a server restart',
     ['info.garages']       = 'garages: %s (%d found)',
@@ -150,6 +152,7 @@ Locale.register('en', {
     -- ---------------------------------------------------------------------------------
     -- /vparkstats
     -- ---------------------------------------------------------------------------------
+    ['neontest.running']   = 'forcing neons on and watching for three seconds - the answer goes to the server console',
     ['props.none']         = 'you are not in or near a vehicle',
     ['props.nothing_stored'] = '  stored    nothing: v-park is not keeping this vehicle',
     ['props.neons_guarded'] = '  guarded   the restore has not confirmed these neons, so no capture may change them',

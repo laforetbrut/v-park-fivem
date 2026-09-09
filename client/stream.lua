@@ -417,6 +417,16 @@ CreateThread(function()
             local playerPosition = GetEntityCoords(PlayerPedId())
             nearestDistance = math.huge
 
+            --[[
+                Resolved once for the whole pass rather than per vehicle, because with
+                `Config.Save.fields.neons = 'auto'` this asks the game for a resource state.
+
+                Off by default. When it is off, v-park does not read, hold or report the neons
+                of anything - see the note on that config field for why nine releases of trying
+                ended in deferring to the mod shops that do it well.
+            ]]
+            local neonsEnabled = Schema.enabled('neons')
+
             for id, record in pairs(tracked) do
                 if not record.entity or not DoesEntityExist(record.entity) then
                     -- The entity went away without us being told. The server owns that fact,
@@ -439,54 +449,31 @@ CreateThread(function()
                     if distance < nearestDistance then nearestDistance = distance end
 
                     --[[
-                        SOMETHING ELSE CHANGED THIS VEHICLE.
+                        ================================================================================
+                        WHAT THIS TICK DOES FOR EVERY VEHICLE V-PARK IS HOLDING.
+                        ================================================================================
 
-                        A repair from txAdmin, a mechanic script, a collision handled by another
-                        resource: none of them tell v-park anything, and the capture sweep would
-                        not look at a frozen vehicle at all. Body health is one native call per
-                        tracked vehicle per tick and it moves for a repair and for damage alike.
+                        Three things, and they accumulated one release at a time - which is visible
+                        in the history and was worth tidying into one place.
 
-                        Reported the moment it moves, which is what makes "fix it and drive off"
-                        stick. Before this, the repair was noticed at the next sweep - up to thirty
-                        seconds later, and never at all if the vehicle despawned first.
+                        1. BODY HEALTH. A repair from txAdmin, a mechanic script or a collision
+                           handled elsewhere tells v-park nothing, and the capture sweep does not
+                           look at a frozen vehicle at all. One native call, and it moves for a
+                           repair and for damage alike, so the change is reported at once instead
+                           of up to thirty seconds later - or never, if the vehicle despawned.
+
+                        2. NEONS CHANGING WHILE SOMEBODY IS IN IT. A mod shop is the one place the
+                           value is deliberately altered and nothing else notices it. Only a state
+                           that is seen to MOVE counts: presence is not intent, and treating it as
+                           intent destroyed the stored value at the moment somebody checked it.
+
+                        3. NEONS DRIFTING WHILE NOBODY IS. The engine loses the state for several
+                           different reasons at several different moments - losing it across a
+                           store-and-retrieve cycle is known FiveM behaviour - so it is put back
+                           rather than diagnosed. Only when at least one light is meant to be ON,
+                           and never while somebody is sitting in the vehicle.
                     ]]
-                    --[[
-                        THE NEONS ARE HELD, NOT HOPED FOR.
-
-                        Checked every couple of seconds on a vehicle that is meant to have them lit,
-                        and put back when they have drifted. Four native reads, and only for
-                        vehicles whose stored state says the lights should be on.
-
-                        This is what the seven previous attempts were reaching for one mechanism at
-                        a time: the value goes out for several different reasons, at several
-                        different moments, and holding it is cheaper than identifying them.
-                    ]]
-                    --[[
-                        AND ONLY WHEN THERE IS SOMETHING TO HOLD, AND NOBODY IS HOLDING IT.
-
-                        1.0.31 held the neons at the stored value every two seconds. The stored
-                        value was all-off, so v-park switched the neons OFF two seconds after
-                        anybody fitted them - which made them impossible to install at all. Every
-                        visit to a mod shop was undone by this loop before the player left the bay.
-
-                        Two conditions, and both are obvious in hindsight. There is nothing to hold
-                        unless at least one light is meant to be ON: holding "off" is not restoring
-                        a state, it is overwriting whatever somebody is doing. And a vehicle with
-                        somebody in it is a vehicle whose neons that person owns, so nothing here
-                        touches it.
-                    ]]
-                    --[[
-                        SOMEBODY IS IN IT AND THE NEONS JUST CHANGED.
-
-                        A mod shop is the one place neons are deliberately altered, and nothing else
-                        in this resource notices it: no wake, no entry, no damage. So without this
-                        the change waits for the capture sweep, up to thirty seconds - and the whole
-                        point of the immediate-write path is that nothing waits.
-
-                        Only checked while a player is sitting in the vehicle, which is the only
-                        time the value can legitimately change.
-                    ]]
-                    if not IsVehicleSeatFree(record.entity, -1) then
+                    if neonsEnabled and not IsVehicleSeatFree(record.entity, -1) then
                         local now = 0
                         for index = 0, 3 do
                             if IsVehicleNeonLightEnabled(record.entity, index) then
@@ -532,6 +519,7 @@ CreateThread(function()
                     end
 
                     local wantsNeons = false
+                    if not neonsEnabled then record.neonsWanted = nil end
                     if record.neonsWanted then
                         for _, value in ipairs(record.neonsWanted) do
                             if value == true then wantsNeons = true break end
@@ -864,6 +852,79 @@ Stream.pushChange = pushChange
     `/vparkprops` prints these beside what the server has stored, so a property that does not
     survive is diagnosed in one reading instead of a release.
 ]]
+--[[
+    ================================================================================================
+    CAN THIS VEHICLE HAVE NEONS SET ON IT AT ALL, AND DO THEY STAY?
+    ================================================================================================
+
+    Nine releases have gone into neon persistence by reasoning about which mechanism drops the value
+    and fixing that one. Every fix was plausible, several were real bugs, and the feature still does
+    not work - which means the reasoning has been running ahead of the evidence for a long time.
+
+    So this stops reasoning. It writes the neons on the vehicle the player is in, with nothing else
+    involved, and reads the answer back three times: immediately, after a second, and after three.
+    Then it reports all of it to the server, with the conditions that could plausibly matter -
+    whether the entity is frozen, who owns it, whether this client has control, whether the mod kit
+    call succeeded.
+
+    That answers, in one command, a question nine releases have only been able to guess at: is
+    setting a neon on a vehicle v-park restored even possible, and if it is, when does it come
+    undone? Run it on a freshly restored vehicle and the answer is in the server log.
+
+    It changes the vehicle it is run on, deliberately - it is a test, not an inspection.
+]]
+RegisterNetEvent('vpark:client:neontest', function()
+    local ped = PlayerPedId()
+    local vehicle = GetVehiclePedIsIn(ped, false)
+    if not vehicle or vehicle == 0 then vehicle = GetVehiclePedIsIn(ped, true) end
+
+    if not vehicle or vehicle == 0 or not DoesEntityExist(vehicle) then
+        TriggerServerEvent('vpark:server:neontest', { error = 'no vehicle' })
+        return
+    end
+
+    local function read()
+        local out = {}
+        for index = 0, 3 do
+            out[index + 1] = IsVehicleNeonLightEnabled(vehicle, index) and 1 or 0
+        end
+        return table.concat(out, ',')
+    end
+
+    local report = {
+        before = read(),
+        frozen = IsEntityPositionFrozen and IsEntityPositionFrozen(vehicle) or 'unknown',
+        controlBefore = NetworkHasControlOfEntity and NetworkHasControlOfEntity(vehicle) or false,
+        owner = NetworkGetEntityOwner and NetworkGetEntityOwner(vehicle) or -1,
+        engine = IsVehicleEngineOn(vehicle),
+        model = GetDisplayNameFromVehicleModel(GetEntityModel(vehicle)),
+        plate = GetVehicleNumberPlateText(vehicle),
+    }
+
+    CreateThread(function()
+        -- Control first, then the mod kit, then the lights. The order the game wants.
+        if Placement and Placement.takeControl then Placement.takeControl(vehicle, 1000) end
+        report.controlAfter = NetworkHasControlOfEntity
+            and NetworkHasControlOfEntity(vehicle) or false
+
+        SetVehicleModKit(vehicle, 0)
+
+        for index = 0, 3 do SetVehicleNeonLightEnabled(vehicle, index, true) end
+        SetVehicleNeonLightsColour(vehicle, 255, 0, 255)
+
+        report.immediately = read()
+
+        Wait(1000)
+        report.afterOneSecond = read()
+
+        Wait(2000)
+        report.afterThreeSeconds = read()
+        report.stillFrozen = IsEntityPositionFrozen and IsEntityPositionFrozen(vehicle) or 'unknown'
+
+        TriggerServerEvent('vpark:server:neontest', report)
+    end)
+end)
+
 RegisterNetEvent('vpark:client:props', function(token)
     local ped = PlayerPedId()
     local vehicle = GetVehiclePedIsIn(ped, false)

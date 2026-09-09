@@ -37,7 +37,7 @@ what it found, and changes nothing until you say so.
 ## What it does
 
 - **Vehicles stay where they were left.** Across a resource restart, a server restart, and a
-  crash. Position, rotation, modifications, colours, damage, fuel, dirt, plate, extras, neons,
+  crash. Position, rotation, modifications, colours, damage, fuel, dirt, plate, extras,
   livery and lock state.
 - **A player's own car is kept from the moment they get in.** No command, no waiting. If the
   framework says it is theirs - **or they simply hold the keys** - it is kept, which matters
@@ -225,6 +225,7 @@ resource. Rename any of them in `Config.Commands`; set `enabled = false` to remo
 | `/vparkprobe [model]` | Run the placement probe where you stand, and print the result |
 | `/vparkwhere` | Report how far each restored vehicle near you is from where the database says it should be - per axis, plus heading, frozen, dressed and owner |
 | `/vparkdiag [id\|plate]` | What the SERVER thinks. With no argument, every vehicle in the world ordered by how far it drifted from its stored place; with one, the full record - stored pose, actual pose, drift, entity and net id, and the four flags that decide whether its position may be saved. Works from the console, unlike `/vparkwhere` |
+| `/vparkneontest` | Forces neons onto the vehicle you are in and reports, in the server console, what the game does with them over the next three seconds. A test, not an inspection: it changes the vehicle |
 | `/vparkprops` | What your client sees on the vehicle you are in, beside what is stored: neons, windows, doors, body health. The answer to "this modification does not survive" |
 | `/vparkwhy` | Why the last twenty-five vehicles were not kept: model, plate, who offered it, and the reason. Every refusal in the adoption path used to be silent |
 | `/vparkdebug` | Toggle debug logging and the on-screen overlay |

@@ -7,6 +7,108 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.34] - 2026-09-10
+
+**v-park stops persisting neon lights, and hands the job to the resources that do it well.**
+
+### Changed
+
+- **`Config.Save.fields.neons` is now `'auto'`, and `'auto'` means off unless a neon-capable
+  resource is running.** Nine releases went into making neon state survive a vehicle being stored
+  and taken out again. Each fix was plausible, several were real bugs worth fixing on their own, and
+  the feature still did not work.
+
+  It did not work because the state does not survive a vehicle being destroyed and re-created, and
+  that is the game rather than this resource: losing it across a store-and-retrieve cycle is known
+  FiveM behaviour, reported independently of v-park.
+
+  What those nine releases did produce was interference. A hold loop switched a player's neons off
+  two seconds after they fitted them. A capture wrote a failed restore over the value the player had
+  chosen. Persisting something badly is worse than not persisting it, because the failure reaches
+  into the parts that were working.
+
+  So v-park now defers. `Config.Save.neonManagers` lists the resources that own the neon lifecycle -
+  `jim-mechanic`, whose underglow controller is what fits and colours them in the first place - and
+  when one of those is running the group switches itself on, because that resource is doing the part
+  v-park cannot. Add your own mechanic script to the list; an absent name simply does not match.
+
+  `true` and `false` still mean exactly what they say. An operator who decided is not overruled.
+
+- **The tick no longer reads, holds or reports the neons of anything while the group is off.**
+  Turning a field off has to actually stop the work, not only strip the column - otherwise "off" is
+  a label rather than a setting.
+
+- **The resolved answer is printed at boot and in `/vparkinfo`.** "My neons are not being saved" is
+  a setting, and a setting nobody can see is a bug report.
+
+### Added
+
+- **`/vparkneontest`** forces neons onto the vehicle you are in and reports, in the server console,
+  what the game does with them over the next three seconds: the state immediately, after a second
+  and after three, alongside network control, the owner, whether the entity is frozen and whether
+  the engine is running. It changes the vehicle, deliberately - it is a test, not an inspection.
+
+  It exists because nine releases reasoned about which mechanism drops the value instead of measuring
+  it. Anybody who wants to reopen this should run that command first.
+
+122 automated checks passed on a real qb-core server with oxmysql and MariaDB 11.4 (zero
+failures, two skipped), and 20 static check groups over 32 Lua files.
+
+---
+
+## [1.0.34] - 2026-09-10 (français)
+
+**v-park arrête d'enregistrer les néons et confie le travail aux ressources qui le font bien.**
+
+### Modifié
+
+- **`Config.Save.fields.neons` vaut maintenant `'auto'`, et `'auto'` veut dire désactivé tant
+  qu'aucune ressource capable de gérer les néons ne tourne.** Neuf versions ont été consacrées à
+  faire survivre l'état des néons à un rangement puis une sortie de véhicule. Chaque correction
+  était plausible, plusieurs étaient de vrais bugs qui valaient d'être corrigés, et la
+  fonctionnalité ne marchait toujours pas.
+
+  Elle ne marchait pas parce que cet état ne survit pas à la destruction puis à la recréation d'un
+  véhicule, et ça relève du jeu et non de ce script : perdre les néons sur un cycle
+  rangement-sortie est un comportement connu de FiveM, rapporté indépendamment de v-park.
+
+  Ce que ces neuf versions ont produit, en revanche, ce sont des interférences. Une boucle
+  éteignait les néons du joueur deux secondes après qu'il les avait installés. Une capture écrivait
+  une restauration ratée par-dessus la valeur que le joueur avait choisie. Enregistrer mal quelque
+  chose est pire que de ne pas l'enregistrer, parce que l'échec vient toucher ce qui marchait.
+
+  v-park s'efface donc. `Config.Save.neonManagers` liste les ressources qui gèrent le cycle de vie
+  des néons - `jim-mechanic`, dont le contrôleur d'underglow est justement ce qui les installe et
+  les colore - et quand l'une d'elles tourne, le groupe s'active tout seul, parce que cette ressource
+  fait la partie que v-park ne sait pas faire. Ajoutez votre propre script de mécano à la liste ; un
+  nom absent ne coûte rien, il ne correspond simplement à rien.
+
+  `true` et `false` gardent exactement leur sens. Un opérateur qui a tranché n'est pas contredit.
+
+- **Le tick ne lit plus, ne maintient plus et ne rapporte plus les néons de quoi que ce soit tant
+  que le groupe est désactivé.** Désactiver un champ doit vraiment arrêter le travail, pas seulement
+  vider la colonne, sinon &laquo;&nbsp;désactivé&nbsp;&raquo; est une étiquette et pas un réglage.
+
+- **La réponse est affichée au démarrage et dans `/vparkinfo`.** &laquo;&nbsp;Mes néons ne sont pas
+  enregistrés&nbsp;&raquo; est un réglage, et un réglage que personne ne voit devient un rapport de
+  bug.
+
+### Ajouté
+
+- **`/vparkneontest`** force les néons sur le véhicule dans lequel vous êtes et rapporte, dans la
+  console serveur, ce que le jeu en fait sur les trois secondes qui suivent : l'état immédiatement,
+  après une seconde et après trois, avec le contrôle réseau, le propriétaire, si l'entité est gelée
+  et si le moteur tourne. La commande modifie le véhicule, volontairement : c'est un test, pas une
+  inspection.
+
+  Elle existe parce que neuf versions ont raisonné sur le mécanisme qui perd la valeur au lieu de la
+  mesurer. Quiconque veut rouvrir ce sujet devrait lancer cette commande d'abord.
+
+122 vérifications automatisées passées sur un vrai serveur qb-core avec oxmysql et MariaDB 11.4
+(zéro échec, deux ignorées), et 20 groupes de vérifications statiques sur 32 fichiers Lua.
+
+---
+
 ## [1.0.33] - 2026-09-10
 
 **The stored value was being destroyed at the precise moment somebody checked it.**
