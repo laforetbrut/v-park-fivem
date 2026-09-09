@@ -172,6 +172,59 @@ function Persist.adopt(src, payload, explicit)
         return nil, 'refuse.already_ours'
     end
 
+    --[[
+        THE PLAYER OFFERING A VEHICLE MUST BE STANDING NEXT TO IT.
+
+        Everything in `payload` comes from the client: the network id, the plate, and - the part
+        that matters - the POSITION. Nothing here read it off the entity, so a client could name a
+        real vehicle anywhere on the map and claim any position for it, and that claim became a row.
+
+        The offer is generated when a player gets into a vehicle or looks at one, so proving it
+        costs nothing and refuses nothing honest. Fifteen metres, which covers looking at a vehicle
+        from the far side of a road.
+
+        Skipped when there is no player to measure - the API and a rental script adopt with no
+        source, and their caller is server-side code that is trusted by definition.
+    ]]
+    local offerProven = true
+
+    if type(src) == 'number' and src > 0 and Spawn.playerIsNear then
+        if Spawn.playerIsNear(src, entity, 15.0) == false then
+            return nil, 'refuse.gone'
+        end
+
+        --[[
+            AND THE POSITION IN THE PAYLOAD MUST BE WHERE THE ENTITY ACTUALLY IS.
+
+            Proving the player is next to the vehicle is not the same as proving the payload
+            describes it. They are two values the client chose independently, and the position is
+            the one that becomes a row: without this, a player standing beside any adoptable
+            vehicle could register it as persisted AT COORDINATES OF THEIR CHOOSING, anywhere on
+            the map, permanently. Inside a wall, under the sea, in the sky.
+
+            The payload was generated from this very entity, so an honest offer is within
+            centimetres and this refuses nothing real. Ten metres allows for the vehicle rolling
+            between the client building the message and the server reading it.
+
+            Read on the server, from the entity, so neither side of the comparison is a value the
+            client supplied twice.
+        ]]
+        local claimed = Park.toVec(payload.position)
+        local actually = Spawn.entityPosition and Spawn.entityPosition(entity) or nil
+
+        if claimed and actually then
+            local dx = claimed.x - actually.x
+            local dy = claimed.y - actually.y
+            local dz = claimed.z - actually.z
+
+            if (dx * dx + dy * dy + dz * dz) > (10.0 * 10.0) then
+                Park.debug('%d offered a vehicle at a position %.0f m away from it - refused',
+                    src, math.sqrt(dx * dx + dy * dy + dz * dz))
+                return nil, 'refuse.unknown'
+            end
+        end
+    end
+
     local plate = Park.plate(payload.plate)
     local existing = plate and Store.byPlate(plate)
     if existing then
@@ -181,7 +234,10 @@ function Persist.adopt(src, payload, explicit)
         -- than adding a second is the only answer that cannot produce two of the car.
         Park.debug('plate %s is already persisted as %s - updating it instead of adding a row',
             plate, existing.id)
-        Persist.applySnapshot(existing.id, payload)
+        -- `offerProven`: the player was measured against the entity above, so this payload may
+        -- say where the vehicle is. Without it, a plate collision would be a way to move a car
+        -- that the driven rule in `applySnapshot` would otherwise refuse.
+        Persist.applySnapshot(existing.id, payload, offerProven)
         return existing
     end
 
@@ -388,7 +444,15 @@ end
     to, which it could do anyway by driving it - so the checks are about robustness rather
     than about trust.
 ]]
-function Persist.applySnapshot(id, snapshot)
+--[[
+    `proven` says the caller has already established that whoever supplied this snapshot is
+    entitled to say where the vehicle is. Only `Persist.adopt` passes it, and only after checking
+    that the player offering the vehicle is standing next to the entity they are offering.
+
+    Everything else leaves it out, and then the position is accepted ONLY for a vehicle the server
+    itself believes somebody has driven. See the note over the position below for why that matters.
+]]
+function Persist.applySnapshot(id, snapshot, proven)
     local record = Store.get(id)
     if not record or type(snapshot) ~= 'table' then return false end
 
@@ -406,7 +470,34 @@ function Persist.applySnapshot(id, snapshot)
 
     local patch = {}
 
-    local position = Park.toVec(snapshot.position)
+    --[[
+        ================================================================================================
+        A PARKED VEHICLE'S POSITION CANNOT BE CHANGED THROUGH A CAPTURE. NOT BY ANYBODY.
+        ================================================================================================
+
+        The client already works this way and says so in `Stream.snapshot`: position and rotation are
+        omitted entirely until somebody has sat in the vehicle, because every vehicle near a player
+        is woken, a woken vehicle is simulated, and a simulated vehicle on a camber rolls. The
+        stored position answers `where did somebody leave this`, and only a person driving it can
+        change that answer.
+
+        THAT RULE WAS ONLY EVER ENFORCED ON THE CLIENT, which means it was not enforced. The server
+        asks a client for snapshots of every vehicle near it and hands over the list of ids to
+        report on - so a modified client did not even need to know an id to relocate a stranger's
+        parked car to anywhere on the map. It is the hole 1.0.17 closed in the parked report,
+        reached through a different door, and a wider one: there, an id had to be known.
+
+        So the same rule, on the side that decides. A position is accepted when the server itself
+        believes the vehicle has been driven - and getting in has been proven since 1.0.17 - or when
+        the caller has proven the reporter's standing some other way.
+
+        This changes no honest behaviour whatsoever. It is the client's own documented rule, written
+        where a lie cannot get past it.
+    ]]
+    local live = Store.live(id)
+    local mayMove = proven == true or (live ~= nil and live.driven == true)
+
+    local position = mayMove and Park.toVec(snapshot.position) or nil
     if position and Park.isFinite(position.x) and Park.isFinite(position.y) and Park.isFinite(position.z) then
         -- A position at the origin is a vehicle whose coordinates were not readable, not a
         -- vehicle at the origin. Writing it would move a car to the middle of the ocean.
@@ -447,7 +538,8 @@ function Persist.applySnapshot(id, snapshot)
         settle out of again. Half a degree is well under what anybody can see and well over
         anything settling produces.
     ]]
-    local rotation = snapshot.rotation
+    -- The same gate. A rotation is a pose too, and a car spun in place is still a car moved.
+    local rotation = mayMove and snapshot.rotation or nil
     if type(rotation) == 'table' then
         local turned = math.abs(Park.angleDelta(tonumber(rotation.x) or record.rot_x, record.rot_x))
             + math.abs(Park.angleDelta(tonumber(rotation.y) or record.rot_y, record.rot_y))

@@ -7,6 +7,138 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.19] - 2026-09-09
+
+**An audit of all sixteen server-side net events, after 1.0.17 found two of them taking a vehicle
+id on trust.**
+
+1.0.17 closed a hole in the parked report by luck: it was found by rereading the file, not by
+looking for it. So this release went through every net event the server registers and asked the
+same question of each one - which of these values came from the client, and what has actually been
+proven. Three more of the same kind came out, one of them wider than the original.
+
+### Security
+
+- **The capture path could relocate any parked vehicle, and it did not even need an id.** The
+  server asks a client for snapshots of the vehicles near it and hands over the list of ids to
+  report on. The client answers with each vehicle's position, and nothing checked that position
+  against anything.
+
+  The client already works the right way and says so in `Stream.snapshot`: position and rotation
+  are omitted entirely until somebody has sat in the vehicle, because every vehicle near a player
+  is woken, a woken vehicle is simulated, and a simulated vehicle on a camber rolls. **That rule
+  was only ever enforced on the client, which means it was not enforced.** A modified client could
+  put a stranger's parked car anywhere on the map, and unlike the 1.0.17 hole it did not have to
+  know an id first - the server supplied them.
+
+  The same rule now applies on the side that decides: a position is accepted only for a vehicle
+  the server itself believes somebody has driven, and getting in has been proven since 1.0.17. No
+  honest behaviour changes at all; it is the client's own documented rule, written where a lie
+  cannot get past it.
+
+- **A vehicle could be adopted at coordinates of the sender's choosing.** `Persist.adopt` takes a
+  network id, a plate, a model and a position, all from the client, and nothing read any of them
+  off the entity. So a player standing next to any adoptable vehicle could register it as
+  persisted at any coordinates on the map, permanently - inside a wall, under the sea, in the sky.
+
+  Two proofs now, both read on the server: the offering player must be within fifteen metres of
+  the entity they are offering, and the position in the message must be within ten metres of where
+  that entity actually is. An honest offer is generated from that very entity and is within
+  centimetres, so nothing real is refused.
+
+- **Any client could stop a stuck vehicle from ever being collected.** `vpark:server:restored`
+  cleared the vehicle's `pending` flag **before** checking that the answer came from the client the
+  server had actually asked. That flag is how the twenty-second sweep finds a vehicle whose
+  nominated client never answered, so clearing it for an answer about to be discarded leaves the
+  vehicle in the world undressed and unplaced, counting towards the entity ceiling. Enough of them
+  and the streaming pass returns early every time and the resource stops spawning anything, with
+  nothing in the console to say why.
+
+  There was an honest route to the same place, which is the worse half: the comment right below the
+  line already described a re-nomination racing with the previous client's late answer, and that
+  late answer was clearing the **new** nomination's flag. `vpark:server:restoreFailed` had always
+  done it in the correct order; this one had not.
+
+### Changed
+
+- **One distance test, not three.** The proximity proofs added in 1.0.17 and here were three copies
+  of the same three lines. They are one function now, with the two rules built on top of it, so
+  they cannot drift apart.
+
+### Audited and found sound
+
+Recorded so the next pass does not repeat the work: all six panel events gate on
+`Actions.requireAdmin`. `vpark:server:captured` requires a live request token, that the token was
+issued to the answering client, and that each id reported was one that client was asked about.
+`vpark:server:describedCurrent` is bound to a token issued to that player. `vpark:server:restored`
+and `vpark:server:restoreFailed` both require the answering client to be the nominated placer.
+
+---
+
+## [1.0.19] - 2026-09-09 (français)
+
+**Un audit des seize net events du serveur, après que la 1.0.17 en a trouvé deux qui faisaient
+confiance à un id de véhicule.**
+
+La 1.0.17 a bouché un trou par chance : il a été trouvé en relisant le fichier, pas en le
+cherchant. Cette version passe donc en revue chaque net event enregistré par le serveur avec la
+même question : lesquelles de ces valeurs viennent du client, et qu'est-ce qui a réellement été
+prouvé ? Trois autres du même genre en sont sortis, dont un plus large que l'original.
+
+### Sécurité
+
+- **Le chemin de capture pouvait déplacer n'importe quel véhicule garé, sans même avoir besoin
+  d'un id.** Le serveur demande à un client des instantanés des véhicules autour de lui et lui
+  fournit la liste des ids. Le client répond avec la position de chacun, et rien ne vérifiait
+  cette position.
+
+  Le client fonctionne déjà correctement et le dit dans `Stream.snapshot` : la position est omise
+  tant que personne ne s'est assis dedans, parce que tout véhicule près d'un joueur est
+  réveillé, et un véhicule réveillé sur un dévers roule. **Cette règle n'était appliquée que
+  côté client, donc elle n'était pas appliquée.** Un client modifié pouvait mettre la voiture
+  garée de n'importe qui n'importe où sur la carte, et contrairement au trou de la 1.0.17 il
+  n'avait même pas besoin de connaître un id : le serveur les fournissait.
+
+  La même règle s'applique maintenant du côté qui décide : une position n'est acceptée que pour
+  un véhicule dont le serveur lui-même croit que quelqu'un l'a conduit. Aucun changement de
+  comportement honnête.
+
+- **Un véhicule pouvait être adopté à des coordonnées choisies par l'expéditeur.** Tout ce que
+  `Persist.adopt` reçoit vient du client, et rien n'était relu depuis l'entité. Un joueur à
+  côté de n'importe quel véhicule adoptable pouvait donc l'enregistrer comme persistant à
+  n'importe quelles coordonnées, définitivement : dans un mur, sous la mer, dans le ciel.
+
+  Deux preuves désormais, lues toutes les deux sur le serveur : le joueur qui propose doit être à
+  moins de quinze mètres de l'entité, et la position du message à moins de dix mètres de là où
+  cette entité se trouve vraiment.
+
+- **N'importe quel client pouvait empêcher un véhicule bloqué d'être jamais récupéré.**
+  `vpark:server:restored` effaçait le drapeau `pending` **avant** de vérifier que la réponse
+  venait du client effectivement désigné. Ce drapeau est ce par quoi le balayage de vingt
+  secondes retrouve un véhicule dont le client n'a jamais répondu. Assez de ces véhicules et le
+  plafond d'entités est atteint, la passe sort immédiatement, et le script arrête de faire
+  apparaître quoi que ce soit sans rien dire dans la console.
+
+  Il y avait un chemin honnête vers le même résultat, et c'est la pire moitié : le commentaire
+  juste en dessous décrivait déjà une redésignation en course avec la réponse tardive du client
+  précédent, et cette réponse tardive effaçait le drapeau de la **nouvelle** désignation.
+  `vpark:server:restoreFailed` l'avait toujours fait dans le bon ordre ; celui-ci non.
+
+### Modifié
+
+- **Un seul test de distance, plus trois.** Les preuves de proximité de la 1.0.17 et d'ici
+  étaient trois copies des mêmes trois lignes. C'est une seule fonction maintenant.
+
+### Audité et trouvé correct
+
+Noté pour que la prochaine passe ne refasse pas le travail : les six événements du panneau
+passent tous par `Actions.requireAdmin`. `vpark:server:captured` exige un jeton valide, émis pour
+le client qui répond, et que chaque id rapporté lui ait été demandé.
+`vpark:server:describedCurrent` est lié à un jeton émis pour ce joueur. `vpark:server:restored`
+et `vpark:server:restoreFailed` exigent tous les deux que le client soit le placeur désigné.
+
+---
+
 ## [1.0.18] - 2026-09-09
 
 **Disconnecting at the wheel lost the drive, and the placement search is race-free at last.**

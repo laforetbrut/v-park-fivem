@@ -1256,7 +1256,6 @@ end)
 ]]
 RegisterNetEvent('vpark:server:restored', function(id, result)
     local src = source
-    pending[id] = nil
 
     if type(id) ~= 'string' or type(result) ~= 'table' then return end
 
@@ -1266,6 +1265,25 @@ RegisterNetEvent('vpark:server:restored', function(id, result)
         -- races with a late answer from the previous one - but not something to act on.
         return
     end
+
+    --[[
+        CLEARED HERE, AFTER THE CHECK, AND NOT BEFORE IT. `restoreFailed` below has always done
+        it in this order; this one did not, and both halves of that mattered.
+
+        `pending` is what the 20-second sweep collects a stuck vehicle by. Clearing it for an
+        answer we are about to discard means the vehicle is never collected and never
+        re-nominated: it stays in the world undressed and unplaced, counting towards
+        `liveCount`. Enough of those and the ceiling is reached, the pass returns early, and the
+        resource stops spawning anything with nothing in the console to say why - which is the
+        failure the sweep's own note warns about.
+
+        Two ways to get there. The honest one is the race the comment above describes: a
+        re-nominated vehicle's flag cleared by the PREVIOUS client's late answer, so if the new
+        nomination also goes quiet nothing collects it. The other is that this ran before any
+        check at all, so any client could clear the flag for any id it knew by sending this
+        message - and ids are not secret.
+    ]]
+    pending[id] = nil
 
     if not result.ok then
         --[[
@@ -1532,15 +1550,101 @@ end)
       false  proven NOT next to it
       nil    could not tell, because the server cannot read the entity right now
 ]]
-local function nearEnoughToSpeakFor(src, entry, metres, record)
+--[[
+    How far the player is from a point, in three dimensions. The one place the distance is
+    measured, so the two rules built on it below cannot drift apart.
+
+    Returns the distance, or nil when either end cannot be read.
+]]
+local function pedDistanceTo(src, where)
+    if not where then return nil end
+
     local ped = GetPlayerPed(src)
-    if not ped or ped == 0 then return false end
+    if not ped or ped == 0 then return nil end
 
     local who = safeCoords(ped)
     if not who then return nil end
 
-    local where = (entry and entry.entity) and safeCoords(entry.entity) or nil
-    local tolerance = metres or 30.0
+    local dx, dy, dz = who.x - where.x, who.y - where.y, who.z - where.z
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+
+--[[
+    Is this player standing next to this entity?
+
+    Both positions are read on the server, so neither comes from the client being checked. That
+    is the whole point: see `nearEnoughToSpeakFor` below for the argument, and `Persist.adopt`
+    for the other caller.
+
+    true proven near, false proven not, nil could not tell.
+]]
+--[[
+    An entity's position as the SERVER sees it, or nil when it cannot be read.
+
+    A thin wrapper so callers outside this file get the safe read - the pcall, and the rejection of
+    a reading at the origin, which means `could not read it` rather than `it is at the origin`.
+    `Persist.adopt` uses it to check a client's claim about where a vehicle is against where the
+    vehicle actually is.
+
+    Reliable for an entity a client owns and has in scope, which is every entity anybody is
+    offering. See `poseIfFresh` for the case it is NOT reliable in and what to do about that.
+]]
+function Spawn.entityPosition(entity)
+    return safeCoords(entity)
+end
+
+function Spawn.playerIsNear(src, entity, metres)
+    if not entity or entity == 0 then return nil end
+
+    -- Not a connected player at all, which is a refusal and not an unknown. Kept separate from
+    -- the nil below on purpose: `nil` means the positions could not be read and the caller is
+    -- entitled to fall back to another proof, and a message from nobody is not that case.
+    local ped = GetPlayerPed(src)
+    if not ped or ped == 0 then return false end
+
+    local distance = pedDistanceTo(src, safeCoords(entity))
+    if not distance then return nil end
+
+    if distance <= (metres or 30.0) then return true end
+
+    Park.debug('%d spoke for an entity %.0f m away - refused', src, distance)
+    return false
+end
+
+--[[
+    ================================================================================================
+    A CLIENT MAY ONLY SPEAK FOR A VEHICLE IT IS ACTUALLY NEXT TO
+    ================================================================================================
+
+    `vpark:server:touched` and `vpark:server:parked` are net events, which means ANY client can
+    trigger them for ANY id, and an id is not a secret: `vpark:id` is a replicated statebag, so
+    every client that has ever been near a vehicle knows its id and keeps knowing it.
+
+    The parked handler checked that the REPORTED POSITION was within 50 m of the reporting
+    player's ped. That sounds like a proximity check and is not one, because the attacker chooses
+    the reported position: send your own coordinates and the check passes from anywhere on the
+    map. Any persistent vehicle whose id you had ever seen could be dragged to your feet, for
+    good, from across the world - and `touched` needed no proof at all, so it could be used to
+    mark a vehicle driven and make the despawn overwrite a correct position with a stale one,
+    which is the 1.0.15 bug turned into a tool.
+
+    `touched` also writes a row on every call, so it was a database write per message from an
+    unauthenticated client.
+
+    This is the proof, and it is the one an attacker cannot fabricate: THE DISTANCE BETWEEN THE
+    PLAYER'S PED AND THE VEHICLE ENTITY, both read on the server. Neither value comes from the
+    message. It is readable exactly when a client has the vehicle in scope, which is exactly when
+    a player is sitting in it or standing beside it - so the honest path always passes, and a
+    report from the other side of the map never does.
+
+    Returns:
+      true   proven next to it
+      false  proven NOT next to it
+      nil    could not tell, because the server cannot read the entity right now
+]]
+local function nearEnoughToSpeakFor(src, entry, metres, record)
+    local answer = Spawn.playerIsNear(src, entry and entry.entity, metres)
+    if answer ~= nil then return answer end
 
     --[[
         WHEN THE ENTITY CANNOT BE READ, MEASURE AGAINST THE ROW INSTEAD OF REFUSING.
@@ -1556,23 +1660,17 @@ local function nearEnoughToSpeakFor(src, entry, metres, record)
         it gives up is precision; what it keeps is the part that matters, that a report from the
         other side of the map is refused.
     ]]
-    if not where and record then
-        local x, y, z = tonumber(record.pos_x), tonumber(record.pos_y), tonumber(record.pos_z)
+    if not record then return nil end
 
-        if Park.isFinite(x) and Park.isFinite(y) and Park.isFinite(z) then
-            where = { x = x, y = y, z = z }
-            tolerance = math.max(tolerance, 150.0)
-        end
-    end
+    local x, y, z = tonumber(record.pos_x), tonumber(record.pos_y), tonumber(record.pos_z)
+    if not (Park.isFinite(x) and Park.isFinite(y) and Park.isFinite(z)) then return nil end
 
-    if not where then return nil end
+    local distance = pedDistanceTo(src, { x = x, y = y, z = z })
+    if not distance then return nil end
 
-    local dx, dy, dz = who.x - where.x, who.y - where.y, who.z - where.z
-    local distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if distance <= math.max(metres or 30.0, 150.0) then return true end
 
-    if distance <= tolerance then return true end
-
-    Park.debug('%d spoke for a vehicle %.0f m away - refused', src, distance)
+    Park.debug('%d spoke for a vehicle %.0f m from its row - refused', src, distance)
     return false
 end
 

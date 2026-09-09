@@ -8,6 +8,38 @@ out of it.
 
 ---
 
+## [2026-09-09 03:10] - The client's own rule was never enforced on the server
+
+**Context:** auditing all sixteen server-side net events after 1.0.17 found two of them accepting a
+vehicle id on trust. The point of the audit was that 1.0.17's hole was found by luck rather than by
+looking.
+
+**Error:** three more of the same kind. `Persist.applySnapshot` accepted a position for any vehicle
+a client had been asked to snapshot, and the server asks each client about every vehicle near it and
+supplies the ids - so a modified client could relocate a stranger's parked car anywhere, without
+needing to know an id at all. `Persist.adopt` took a position from the client and never compared it
+to the entity, so a vehicle could be registered as persisted at arbitrary coordinates.
+`vpark:server:restored` cleared the `pending` flag before checking the answer came from the
+nominated client, which is both a denial of service and, via a re-nomination race, an ordinary bug.
+
+**Root cause:** for the snapshot, a rule that existed and was documented in the right place - the
+client omits a position until somebody has driven the vehicle, and says exactly why - but lived only
+on the side that cannot enforce it. A rule enforced by the sender is not a rule. For adopt, the same
+mistake as the original 1.0.17 hole: a check that compares two values the client supplied, which
+proves they are consistent and nothing else.
+
+**Fix:** the snapshot position is accepted only when the SERVER believes the vehicle has been
+driven. The adopted position is compared against the entity's own server-side position. `pending` is
+cleared after the placer check, matching `restoreFailed`, which had always been right.
+
+**Prevention:** when a client-side comment explains why the client does not send something, that is
+a rule and it belongs on the server too - the comment is evidence that somebody has already reasoned
+about it and stopped one step short. And when auditing a message handler, write down which values
+came from the client before deciding what has been proven: if every input to a check is one of them,
+the check is a consistency test, not an authorisation.
+
+---
+
 ## [2026-09-09 02:40] - A capture asked the one client that could not answer
 
 **Context:** looking for what was left after the position guarantee finally held, specifically what
