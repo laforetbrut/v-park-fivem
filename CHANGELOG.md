@@ -7,6 +7,85 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.32] - 2026-09-10
+
+**1.0.31 made neons impossible to fit. This fixes that, and finishes the job it started.**
+
+### Fixed
+
+- **v-park was switching the player's neons off two seconds after they fitted them.** 1.0.31 held
+  the neons at the stored value on a two-second tick. The stored value was all-off, so every visit
+  to a mod shop was undone before the player left the bay - reported as "je n'arrive meme plus a
+  installer de neon".
+
+  Two conditions were missing, and both are obvious in hindsight. **There is nothing to hold unless
+  at least one light is meant to be ON**: holding "off" is not restoring a state, it is overwriting
+  whatever somebody is doing. And **a vehicle with somebody in it is a vehicle whose neons that
+  person owns**, so the tick does not touch it.
+
+- **A neon change made while sitting in the vehicle is saved at once.** A mod shop is the one place
+  neons are deliberately altered, and nothing in the resource noticed it: no wake, no entry, no
+  damage event. The change waited for the capture sweep, up to thirty seconds - and the whole point
+  of the immediate-write path is that nothing waits. The tick watches the neon state while a player
+  is in the driver's seat and reports a change the moment it happens.
+
+- **Anybody sitting in the vehicle may report its neons, not just the client that placed it.**
+  `driven` is set on the nominated client, and a player fitting neons at a mod shop is very often
+  not that client - so the flag alone would have refused the very change it exists to allow.
+  Somebody in the driver's seat is the same fact, observable from any machine.
+
+### What 1.0.31 got right, and keeps
+
+A vehicle nobody is in does not report the state of its neons, exactly as it does not report its
+position. That is what stops a failed restore overwriting the player's own setting, and it is the
+half of 1.0.31 that was correct.
+
+So there are two independent mechanisms now, deliberately: the restore lights them, and if it fails
+for any of the several reasons seven releases went looking for, the tick puts them back within two
+seconds. Neither needs to know why the other failed.
+
+113 automated checks on a real qb-core server with oxmysql and MariaDB 11.4, and 20 static check
+groups over 32 Lua files.
+
+---
+
+## [1.0.32] - 2026-09-10 (français)
+
+**La 1.0.31 rendait les néons impossibles à installer. Cette version corrige ça et termine ce
+qu'elle avait commencé.**
+
+### Corrigé
+
+- **v-park éteignait les néons du joueur deux secondes après qu'il les installait.** La 1.0.31 les
+  maintenait à la valeur enregistrée sur un tick de deux secondes. Cette valeur était à zéro :
+  chaque passage au magasin était annulé avant que le joueur sorte de la place.
+
+  Deux conditions manquaient. **Il n'y a rien à maintenir tant qu'aucune lumière n'est censée
+  être allumée** - maintenir &laquo;&nbsp;éteint&nbsp;&raquo;, ce n'est pas restaurer un état,
+  c'est écraser ce que quelqu'un est en train de faire. Et **un véhicule dans lequel quelqu'un est
+  assis appartient à cette personne**.
+
+- **Un changement de néons fait en étant assis dedans est enregistré sur-le-champ.** Un magasin de
+  tuning est le seul endroit où les néons changent volontairement, et rien ne le remarquait.
+
+- **N'importe qui assis dans le véhicule peut rapporter ses néons**, pas seulement le client qui
+  l'a placé. Un joueur chez un préparateur n'est très souvent pas ce client-là.
+
+### Ce que la 1.0.31 avait juste, et qui reste
+
+Un véhicule que personne n'occupe ne rapporte pas l'état de ses néons, exactement comme il ne
+rapporte pas sa position. C'est ça qui empêche une restauration ratée d'écraser le réglage du
+joueur.
+
+Il y a donc maintenant deux mécanismes indépendants, volontairement : la restauration les allume,
+et si elle échoue pour l'une des nombreuses raisons cherchées pendant sept versions, le tick les
+remet en deux secondes. Aucun des deux n'a besoin de savoir pourquoi l'autre a raté.
+
+113 vérifications automatisées sur un vrai serveur qb-core avec oxmysql et MariaDB 11.4, et 20
+groupes de vérifications statiques sur 32 fichiers Lua.
+
+---
+
 ## [1.0.31] - 2026-09-10
 
 **The rule for neons was already written in this file, for positions, seven releases ago.**

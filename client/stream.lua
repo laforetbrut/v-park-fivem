@@ -461,7 +461,57 @@ CreateThread(function()
                         a time: the value goes out for several different reasons, at several
                         different moments, and holding it is cheaper than identifying them.
                     ]]
-                    if record.neonsWanted and (record.neonsAt or 0) < Park.ticks() then
+                    --[[
+                        AND ONLY WHEN THERE IS SOMETHING TO HOLD, AND NOBODY IS HOLDING IT.
+
+                        1.0.31 held the neons at the stored value every two seconds. The stored
+                        value was all-off, so v-park switched the neons OFF two seconds after
+                        anybody fitted them - which made them impossible to install at all. Every
+                        visit to a mod shop was undone by this loop before the player left the bay.
+
+                        Two conditions, and both are obvious in hindsight. There is nothing to hold
+                        unless at least one light is meant to be ON: holding "off" is not restoring
+                        a state, it is overwriting whatever somebody is doing. And a vehicle with
+                        somebody in it is a vehicle whose neons that person owns, so nothing here
+                        touches it.
+                    ]]
+                    --[[
+                        SOMEBODY IS IN IT AND THE NEONS JUST CHANGED.
+
+                        A mod shop is the one place neons are deliberately altered, and nothing else
+                        in this resource notices it: no wake, no entry, no damage. So without this
+                        the change waits for the capture sweep, up to thirty seconds - and the whole
+                        point of the immediate-write path is that nothing waits.
+
+                        Only checked while a player is sitting in the vehicle, which is the only
+                        time the value can legitimately change.
+                    ]]
+                    if not IsVehicleSeatFree(record.entity, -1) then
+                        local now = 0
+                        for index = 0, 3 do
+                            if IsVehicleNeonLightEnabled(record.entity, index) then
+                                now = now + (2 ^ index)
+                            end
+                        end
+
+                        if record.neonSeen ~= nil and record.neonSeen ~= now then
+                            Stream.dirty(id)
+                        end
+
+                        record.neonSeen = now
+                    else
+                        record.neonSeen = nil
+                    end
+
+                    local wantsNeons = false
+                    if record.neonsWanted then
+                        for _, value in ipairs(record.neonsWanted) do
+                            if value == true then wantsNeons = true break end
+                        end
+                    end
+
+                    if wantsNeons and IsVehicleSeatFree(record.entity, -1)
+                        and (record.neonsAt or 0) < Park.ticks() then
                         record.neonsAt = Park.ticks() + 2000
 
                         local drifted = false
@@ -971,7 +1021,16 @@ function Stream.snapshot(id)
         Every previous attempt tried to DETECT the failure and suppress the report. This does not
         need to detect anything, which is why it is the last one.
     ]]
-    if not moved then
+    --[[
+        `driven` is set on the client that was nominated to place the vehicle, and a player fitting
+        neons at a mod shop is very often not that client - so the flag alone would refuse to report
+        the very change it exists to allow.
+
+        Somebody in the driver's seat right now is the same fact, observable from any machine.
+    ]]
+    local theirs = record.driven == true or not IsVehicleSeatFree(entity, -1)
+
+    if not theirs then
         for _, key in ipairs(Schema.keys.neons or {}) do
             properties[key] = nil
         end

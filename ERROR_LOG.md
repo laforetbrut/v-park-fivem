@@ -8,6 +8,36 @@ out of it.
 
 ---
 
+## [2026-09-10 03:30] - Holding a value at zero is not restoring it
+
+**Context:** 1.0.31 added a tick that re-asserts a vehicle's neons from the stored value every two
+seconds, to stop the state being lost. The next report was that neons could no longer be fitted at
+all.
+
+**Error:** the stored value for every affected vehicle was all-off, because seven releases of failed
+restores had written it there. So the tick switched the neons off two seconds after anybody turned
+them on, and every visit to a mod shop was undone before the player left the bay.
+
+**Root cause:** "hold the stored value" was implemented as an unconditional assertion, when what was
+meant was "put back a value that has been lost". Those differ in two ways that both matter. There is
+nothing to put back when the stored state is off - asserting off is not restoring, it is overwriting
+whatever somebody is currently doing. And a vehicle with a person in it is a vehicle whose state
+that person is choosing, so nothing should be asserting over them at all.
+
+The bug was also amplified by its own history: the stored value was zero precisely because earlier
+versions had corrupted it, so the new mechanism was seeded with the damage the old ones had done.
+
+**Fix:** the tick only runs when at least one light is meant to be on and the driver's seat is empty.
+A neon change made while seated is reported immediately, since a mod shop is the one place the value
+legitimately changes and nothing else in the resource noticed it.
+
+**Prevention:** an assertion loop needs an explicit answer to "when should this do nothing". Writing
+one that always writes turns any wrong stored value into a fight with the player, and turns a
+data-loss bug into a functionality bug that is worse. Two questions before adding one: is there
+anything to assert, and is somebody else currently in charge of this?
+
+---
+
 ## [2026-09-10 02:40] - Seven releases to notice the rule was already written
 
 **Context:** the neon state was lost on every restore cycle, and each failed restore then overwrote
