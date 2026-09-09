@@ -1143,12 +1143,44 @@ PARAMETERS = re.compile(r'\bfunction\s*[\w.:]*\s*\(([^)]*)\)')
 FOR_NAMES = re.compile(r'\bfor\s+([\w\s,]+?)\s+(?:=|in)\b')
 
 
+def strip_strings(source):
+    """Replace the contents of quoted strings with spaces, keeping line and column positions."""
+    out = []
+    quote = None
+    index = 0
+
+    while index < len(source):
+        character = source[index]
+
+        if quote:
+            if character == '\\':
+                out.append('  ')
+                index += 2
+                continue
+            if character == quote:
+                quote = None
+                out.append(character)
+            else:
+                out.append('\n' if character == '\n' else ' ')
+        elif character in '"\'':
+            quote = character
+            out.append(character)
+        else:
+            out.append(character)
+
+        index += 1
+
+    return ''.join(out)
+
+
 def check_local_before_declaration():
     global checks_run
     checks_run += 1
 
     for path in lua_files():
-        source = strip_comments(read(path))
+        # Strings out as well as comments: `L('list.empty')` is not a use of a local called
+        # `list`, and a locale file is mostly strings.
+        source = strip_strings(strip_comments(read(path)))
         name = relative(path)
         lines = source.split('\n')
 
@@ -1190,7 +1222,17 @@ def check_local_before_declaration():
             continue
 
         callable_names = '|'.join(re.escape(n) for n in declared)
-        calls = re.compile(r'(?<![\w.:])(' + callable_names + r')\s*\(')
+
+        # A CALL or an INDEX. The first draft covered only calls, and the very next bug of this
+        # shape was `unverified[id] = ...` written eighty lines above `local unverified = {}` -
+        # which assigns a GLOBAL of that name while every read below the declaration reads the
+        # local. Two tables, one name, and nothing raises.
+        #
+        # A FIELD read - `thing.field` - is deliberately NOT matched. Locale keys and table
+        # constructors are full of `'list.empty'` and `name = 'filter'`, and even with strings
+        # removed the noise is not worth the coverage: the shape that actually bites is a table
+        # written to before it exists.
+        calls = re.compile(r'(?<![\w.:])(' + callable_names + r')\s*[\(\[]')
 
         for number, line in enumerate(lines, start=1):
             # The declaration line itself is not a call of the thing being declared.
@@ -1202,10 +1244,11 @@ def check_local_before_declaration():
 
                 if number < declared[called]:
                     fail('scope',
-                         f'{name}:{number} calls `{called}`, which is not declared local until '
-                         f'line {declared[called]}. Above that line the name is a global, the '
-                         'global is nil, and the call raises at run time with a valid parse. '
-                         'Move the declaration up, or forward-declare it.')
+                         f'{name}:{number} uses `{called}`, which is not declared local until '
+                         f'line {declared[called]}. Above that line the name is a GLOBAL of the '
+                         'same name: a call raises, and an assignment silently writes to a '
+                         'different table from every read below the declaration. Move the '
+                         'declaration up, or forward-declare it.')
 
 
 # ==============================================================================================

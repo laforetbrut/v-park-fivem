@@ -40,6 +40,20 @@ local trackedCount = 0
 -- netId -> id, so an entity event can find its record without a scan.
 local byNet = {}
 
+--[[
+    id -> { group = true } for property groups the last restore could NOT apply.
+
+    A group that failed leaves the vehicle showing something other than what is stored, and the next
+    capture would read that back and write it over the good value. Measured on a live server: a
+    vehicle with `stored neons 1,1,1,1` came back dark, and one capture later the row said
+    `stored neons 0,0,0,0`. A failed restore was eating the data it failed to restore.
+
+    `Stream.snapshot` drops these groups from its report. The server treats an absent field as
+    "no news" and keeps what it has.
+]]
+local unverified = {}
+
+
 local nearestDistance = math.huge
 
 local function performance()
@@ -216,7 +230,11 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
         local dressed = true
 
         if type(data.properties) == 'table' then
-            dressed = pcall(Properties.apply, entity, data.properties, { version = data.version })
+            local ok, _, failed = pcall(Properties.apply, entity, data.properties,
+                { version = data.version })
+
+            dressed = ok
+            unverified[data.id] = type(failed) == 'table' and next(failed) and failed or nil
             if not dressed then
                 Park.debug('could not apply properties to %s - placing it anyway, and it will '
                     .. 'not be captured until it has been dressed', tostring(data.id))
@@ -639,6 +657,7 @@ end
     The server re-checks everything and rate-limits by `Config.Save.triggerCooldown`, so this is a
     hint about WHEN to look, never a claim that must be believed.
 ]]
+
 local lastPush = {}
 local trailing = {}
 
@@ -859,6 +878,27 @@ function Stream.snapshot(id)
         all change without anybody getting in.
     ]]
     local moved = record.driven == true
+
+    --[[
+        A GROUP THE RESTORE COULD NOT APPLY IS NOT REPORTED AS TRUTH.
+
+        See `unverified` at the top of this file. The vehicle is showing something other than what
+        is stored for these, so reporting what it shows would write the failure into the database
+        and make it permanent - which is what turned `stored neons 1,1,1,1` into
+        `stored neons 0,0,0,0` one capture after a restore that came back dark.
+
+        Dropping the keys means the server keeps what it has, and the next restore tries again with
+        the value the player actually chose.
+    ]]
+    local doubtful = unverified[id]
+
+    if doubtful then
+        for group in pairs(doubtful) do
+            for _, key in ipairs(Schema.keys[group] or {}) do
+                properties[key] = nil
+            end
+        end
+    end
 
     return {
         id = id,

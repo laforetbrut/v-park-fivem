@@ -259,6 +259,26 @@ local function onEnter(vehicle)
     local previous = offeredOnEntry[vehicle]
     local retry = tonumber(Config.Persistence and Config.Persistence.entryOfferRetrySeconds) or 60
 
+    --[[
+        FAST WHILE THEY HAVE JUST SAT DOWN, SLOW AFTER THAT.
+
+        Ownership arrives after you sit down more often than before it: `/admincar`, a mate handing
+        over keys, a dealership finishing a sale. The offer is refused the first time because the
+        car is nobody's yet, and until now the next attempt was a full retry window away - so
+        `/admincar` left you waiting, which was reported as "il devrait etre persistant aussitot".
+
+        For the first `entryOfferBurstSeconds` after getting in, the offer is repeated every
+        `entryOfferBurstRetry` seconds. That is the window in which somebody runs a command to make
+        the car theirs. After it, the ordinary retry takes over, so a player sitting in a car nobody
+        owns costs one small message a minute rather than one every few seconds forever.
+    ]]
+    local since = current.since and (Park.ticks() - current.since) or math.huge
+    local burstFor = (tonumber(Config.Persistence and Config.Persistence.entryOfferBurstSeconds) or 30) * 1000
+
+    if since < burstFor then
+        retry = tonumber(Config.Persistence and Config.Persistence.entryOfferBurstRetry) or 3
+    end
+
     if previous and previous.plate == plate and Park.ticks() - previous.at < retry * 1000 then
         return
     end

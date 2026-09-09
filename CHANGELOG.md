@@ -7,6 +7,102 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.28] - 2026-09-09
+
+**A restore that fails no longer eats the data it failed to restore.**
+
+Two `/vparkprops` screenshots of the same vehicle, minutes apart, showed the worst of it:
+
+```
+before:  stored neons 1,1,1,1
+after:   stored neons 0,0,0,0
+```
+
+The restore came back dark, and the next capture read the dark vehicle and wrote that over the
+value the player had chosen. **That is what made the bug permanent**: every failed round trip
+erased a little more of what was stored, so a property that failed once could never recover.
+
+### Fixed
+
+- **A property group the restore could not apply is not reported back at all.** `Properties.apply`
+  now tells its caller which groups failed, and `Stream.snapshot` drops those keys from the next
+  report. The server treats an absent field as "no news" and keeps what it has, so the next restore
+  tries again with the value the player actually chose.
+
+  This applies to every property group, not just the one that exposed it. A colour, a mod or a set
+  of extras that will not apply on some build can no longer overwrite itself with the failure.
+
+- **`/admincar` makes a vehicle persistent within seconds.** Ownership almost always arrives AFTER
+  somebody sits down - `/admincar`, keys handed over, a dealership finishing a sale - so the on-entry
+  offer is refused the first time and, until now, retried a full window later. For the first thirty
+  seconds after getting in, it is retried every three seconds instead. After that the ordinary
+  window takes over, so a player sitting in a car nobody owns still costs one small message a
+  minute.
+
+### Changed
+
+- **The neon diagnostic is visible.** 1.0.27 added a line reporting a neon that would not hold, and
+  wrote it with `Park.debug` - which is off at the default log level, so it never appeared. An
+  instrument nobody can read is the same as no instrument. It is a warning now, and it reports
+  whether the client held network control, which is the missing piece of evidence.
+
+- **The scope check catches an index, not just a call.** Group 20 was written after a local called
+  above its declaration. Writing this release produced the same shape in a different form -
+  `unverified[id] = ...` eighty lines above `local unverified = {}`, which assigns a global while
+  every read below the declaration reads the local. Two tables, one name, nothing raises. The check
+  covers that now, with strings stripped first so a locale key like `'list.empty'` is not mistaken
+  for a use.
+
+113 automated checks on a real qb-core server with oxmysql and MariaDB 11.4, and 20 static check
+groups over 32 Lua files.
+
+---
+
+## [1.0.28] - 2026-09-09 (français)
+
+**Une restauration qui échoue ne détruit plus la donnée qu'elle n'a pas su restaurer.**
+
+Deux captures de `/vparkprops` du même véhicule, à quelques minutes d'intervalle :
+
+```
+avant :  stored neons 1,1,1,1
+apres :  stored neons 0,0,0,0
+```
+
+La restauration revenait éteinte, et la capture suivante lisait le véhicule éteint et écrivait
+ça par-dessus la valeur choisie par le joueur. **C'est ce qui rendait le bug définitif** : chaque
+aller-retour raté effaçait un peu plus de ce qui était enregistré.
+
+### Corrigé
+
+- **Un groupe de propriétés que la restauration n'a pas pu appliquer n'est plus rapporté du
+  tout.** `Properties.apply` dit maintenant à son appelant quels groupes ont échoué, et
+  `Stream.snapshot` retire ces clés du rapport suivant. Le serveur traite un champ absent comme
+  &laquo;&nbsp;pas de nouvelles&nbsp;&raquo; et garde ce qu'il a.
+
+  Ça vaut pour tous les groupes, pas seulement celui qui l'a révélé.
+
+- **`/admincar` rend le véhicule persistant en quelques secondes.** La propriété arrive presque
+  toujours <i>après</i> qu'on se soit assis, donc l'offre est refusée la première fois. Pendant
+  les trente premières secondes, elle est retentée toutes les trois secondes.
+
+### Modifié
+
+- **Le diagnostic des néons est visible.** La 1.0.27 l'avait écrit en `Park.debug`, or le niveau
+  par défaut est `info` : la ligne n'apparaissait jamais. Un instrument que personne ne peut lire
+  ne vaut pas mieux que pas d'instrument. Il est en avertissement, et il rapporte le contrôle
+  réseau.
+
+- **La vérification de portée attrape aussi une indexation.** Écrire cette version a produit la
+  même erreur sous une autre forme : `unverified[id] = ...` quatre-vingts lignes au-dessus de
+  `local unverified = {}`, ce qui écrit dans un global pendant que chaque lecture en dessous lit
+  le local.
+
+113 vérifications automatisées sur un vrai serveur qb-core avec oxmysql et MariaDB 11.4, et 20
+groupes de vérifications statiques sur 32 fichiers Lua.
+
+---
+
 ## [1.0.27] - 2026-09-09
 
 **Nothing waits, and the neons were never a save problem at all.**

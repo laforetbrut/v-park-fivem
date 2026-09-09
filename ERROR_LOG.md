@@ -8,6 +8,36 @@ out of it.
 
 ---
 
+## [2026-09-09 23:45] - A failed restore was eating the data it failed to restore
+
+**Context:** the neons had survived five releases. Two `/vparkprops` screenshots of the same vehicle,
+minutes apart, were sent together.
+
+**Error:** `stored neons 1,1,1,1` in the first and `stored neons 0,0,0,0` in the second. The restore
+came back dark, and the next capture read the dark vehicle and wrote that over the stored value.
+
+**Root cause:** the capture treats the vehicle as the source of truth, which is right, and had no
+way to know the vehicle was showing the result of a failure rather than the result of a player's
+choice. So a property that failed to apply once was guaranteed never to recover: the failure
+overwrote the value that would have been retried.
+
+This is worse than the original bug and hid it. Every attempt to fix the apply was tested against a
+row that the previous failed attempt had already destroyed.
+
+**Fix:** `Properties.apply` returns the set of groups it could not apply, and `Stream.snapshot` drops
+those keys. An absent field already meant "no news" to the server, so the stored value survives and
+the next restore retries with it.
+
+**Prevention:** a restore and a capture are inverse operations over the same data, and an inverse
+pair must not be allowed to compound its own errors. Where a restore can fail per-group, the capture
+has to know which groups are not to be believed - otherwise the first failure is permanent.
+
+Second, smaller, and mine: 1.0.27's diagnostic line was written with `Park.debug` on a server running
+at `info`. It never printed. An instrument nobody can read is the same as no instrument, and it cost
+a full round trip to discover that rather than to use it.
+
+---
+
 ## [2026-09-09 22:30] - The diagnostic paid for itself, and disproved the previous release
 
 **Context:** neons had survived four releases of attempts. `/vparkprops`, added in 1.0.26 precisely

@@ -519,6 +519,17 @@ Config.Persistence = {
     ]]
     entryOfferRetrySeconds = 15,
 
+    --[[
+        Ownership usually arrives AFTER somebody sits down - `/admincar`, keys handed over, a
+        dealership finishing a sale - so the first half-minute in a vehicle nobody owns is asked
+        about far more often than the rest.
+
+        Without this, running `/admincar` left the player waiting a full retry window before the
+        car became persistent, which reads as broken.
+    ]]
+    entryOfferBurstSeconds = 30,
+    entryOfferBurstRetry = 3,
+
     -- Also persist a vehicle the moment its driver disconnects, without waiting for
     -- `settleSeconds`.
     --

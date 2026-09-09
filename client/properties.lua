@@ -669,9 +669,15 @@ local function applyNeons(vehicle, properties)
 
     if correct() then return true end
 
-    Park.debug('neons would not stay on %d: wanted %s, got %s', vehicle,
+    --[[
+        `warn`, not `debug`. The debug level is off on a normal server, so the last version of this
+        line was written for a log nobody was reading - which is the same mistake as not logging at
+        all, and it cost a round trip to find out.
+    ]]
+    Park.warn('neons would not stay on entity %d: wanted %s, got %s, control %s', vehicle,
         tostring(properties.neonEnabled[1] == true),
-        tostring(IsVehicleNeonLightEnabled(vehicle, 0)))
+        tostring(IsVehicleNeonLightEnabled(vehicle, 0)),
+        tostring(NetworkHasControlOfEntity and NetworkHasControlOfEntity(vehicle)))
 
     return false
 end
@@ -763,11 +769,28 @@ function Properties.apply(vehicle, properties, options)
         still run, which turns "the car came back wrong and there is nothing in the console" into one
         line saying which part of it went.
     ]]
+    --[[
+        `failed` is returned to the caller, and that return is the important half.
+
+        A group that could not be applied leaves the vehicle showing something OTHER than what is
+        stored - and the very next capture would then read that back and write it over the good
+        value. Measured on a live server: a vehicle with `stored neons 1,1,1,1` came back dark, and
+        one capture later the row said `stored neons 0,0,0,0`. The failed restore ate the data.
+
+        So the caller is told which groups are not to be believed, and `Stream.snapshot` leaves
+        them out of the next report entirely. The server treats an absent field as "no news" and
+        keeps what it has, which is the correct value.
+    ]]
+    local failed = {}
+
     local function guard(name, fn)
         local ok, err = pcall(fn)
+
         if not ok then
+            failed[name] = true
             Park.error('applying %s to %d raised: %s', name, vehicle, tostring(err))
         end
+
         return ok
     end
 
@@ -906,13 +929,22 @@ function Properties.apply(vehicle, properties, options)
         end)
     end
 
-    -- LAST, and deliberately. See `applyNeons`: the engine is switched off above, and switching a
-    -- vehicle's engine off puts its lights out - neons included.
+    --[[
+        LAST, and deliberately: see `applyNeons`, which asks for network control and reads back
+        what it wrote.
+
+        A neon that will not hold is a FAILURE, not a silent shrug. Marking it here is what stops
+        the next capture reporting the dark vehicle as the truth.
+    ]]
     if enabledGroup('neons') then
-        guard('neons', function() applyNeons(vehicle, properties) end)
+        guard('neons', function()
+            if not applyNeons(vehicle, properties) then
+                failed.neons = true
+            end
+        end)
     end
 
-    return true
+    return true, failed
 end
 
 -- ---------------------------------------------------------------------------------------
