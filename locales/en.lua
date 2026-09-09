@@ -66,6 +66,9 @@ Locale.register('en', {
     ['refuse.ambient_disabled']     = 'Vehicles nobody has driven are not kept.',
     ['refuse.in_garage']            = 'That vehicle is listed as being in a garage.',
     ['refuse.server_full']          = 'The server is holding as many vehicles as it can.',
+    ['refuse.no_plate']             = 'That vehicle has no readable plate.',
+    ['refuse.owned_immediately_off'] = 'Owned vehicles are not kept on entry on this server.',
+    ['refuse.position_mismatch']    = 'That vehicle is not where the message said it was (%s).',
     ['refuse.your_limit']           = 'You are keeping as many vehicles as you are allowed.',
 
     -- ---------------------------------------------------------------------------------
@@ -147,6 +150,9 @@ Locale.register('en', {
     -- ---------------------------------------------------------------------------------
     -- /vparkstats
     -- ---------------------------------------------------------------------------------
+    ['why.header']    = 'the last %d vehicles v-park did not keep, newest first:',
+    ['why.empty']     = 'v-park has refused nothing since it started',
+    ['why.line']      = '  %s ago  %s [%s]  %s  %s%s',
     ['diag.empty']    = 'v-park is holding nothing in the world right now',
     ['diag.header']   = 'v-park is holding %d vehicles in the world, furthest from home first:',
     ['diag.line']     = '  %s  %s [%s]  drift %s  %s',

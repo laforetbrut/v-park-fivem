@@ -81,6 +81,55 @@ end
     send anything, so the server decides again from its own config and its own view of who the
     player is.
 ]]
+--[[
+    ================================================================================================
+    WHY A VEHICLE WAS NOT KEPT
+    ================================================================================================
+
+    Every refusal in this file used to be a bare `return`. A vehicle that was not kept produced no
+    log line, no message and no record of any kind, so the only report available to anybody was
+    "it did not work" - and the only answer available to me was a guess. This resource has already
+    paid for that once: five releases of theories about vehicles being in the wrong place ended the
+    day `/vparkwhere` printed a number.
+
+    So every refusal is written down here with its reason, and `/vparkdiag` prints the last of
+    them. One command after the thing that did not work, and the guessing is over.
+
+    A ring of the last few, not a growing list: this is a diagnostic for something that just
+    happened, and a table that grows for the life of the server is a leak.
+]]
+local refusals = {}
+local REFUSAL_MEMORY = 25
+
+local function refused(src, payload, reason, detail)
+    local plate = type(payload) == 'table' and payload.plate or nil
+
+    refusals[#refusals + 1] = {
+        at = Park.now(),
+        src = src,
+        who = Bridge.name and Bridge.name(src) or tostring(src),
+        plate = type(plate) == 'string' and plate or '?',
+        model = type(payload) == 'table' and payload.modelName or '?',
+        reason = reason or 'refuse.unknown',
+        detail = detail,
+    }
+
+    while #refusals > REFUSAL_MEMORY do table.remove(refusals, 1) end
+
+    Park.debug('not keeping %s (%s) for %s: %s%s',
+        tostring(plate), tostring(type(payload) == 'table' and payload.modelName or '?'),
+        tostring(src), tostring(reason), detail and (' - ' .. tostring(detail)) or '')
+
+    return nil, reason, detail
+end
+
+-- The last refusals, newest first. `/vparkdiag` prints them.
+function Persist.refusals()
+    local out = {}
+    for index = #refusals, 1, -1 do out[#out + 1] = refusals[index] end
+    return out
+end
+
 RegisterNetEvent('vpark:server:candidate', function(payload)
     local src = source
     if type(payload) ~= 'table' then return end
@@ -102,10 +151,12 @@ RegisterNetEvent('vpark:server:candidate', function(payload)
         before sending; this is the same check on the side that decides.
     ]]
     if payload.onEntry then
-        if not (Config.Persistence and Config.Persistence.ownedImmediately ~= false) then return end
+        if not (Config.Persistence and Config.Persistence.ownedImmediately ~= false) then
+            return refused(src, payload, 'refuse.owned_immediately_off')
+        end
 
         local plate = Park.plate(payload.plate)
-        if not plate then return end
+        if not plate then return refused(src, payload, 'refuse.no_plate') end
 
         local row = Bridge.ownedByPlate(plate)
         local owned = row ~= nil and row.owner ~= nil
@@ -117,14 +168,30 @@ RegisterNetEvent('vpark:server:candidate', function(payload)
             owned = Ownership.hasKeys(src, payload.plate or plate)
         end
 
-        if not owned then return end
+        --[[
+            NOT THEIRS AS FAR AS THE FRAMEWORK KNOWS, WHICH IS THE ORDINARY CASE.
+
+            Somebody sitting in a car they do not own, which is most cars. Recorded rather than
+            logged loudly, because the vehicle still goes through the settle path on exit and
+            nothing has gone wrong - but it is also the exact answer to "I bought a car and it was
+            not kept", so it must be findable.
+
+            `detail` names the table that was consulted, because when the answer is wrong it is
+            usually the schema and not the row.
+        ]]
+        if not owned then
+            return refused(src, payload, 'refuse.not_owned',
+                (Bridge.ownedTable() or {}).table or 'no owned table detected')
+        end
 
         -- Theirs, and out of the garage. Keep it now.
-        Persist.adopt(src, payload)
+        local record, reason, detail = Persist.adopt(src, payload)
+        if not record then return refused(src, payload, reason, detail) end
         return
     end
 
-    Persist.adopt(src, payload)
+    local record, reason, detail = Persist.adopt(src, payload)
+    if not record then return refused(src, payload, reason, detail) end
 end)
 
 --[[
@@ -173,55 +240,51 @@ function Persist.adopt(src, payload, explicit)
     end
 
     --[[
-        THE PLAYER OFFERING A VEHICLE MUST BE STANDING NEXT TO IT.
+        ============================================================================================
+        THE POSITION IN THE MESSAGE MUST BE WHERE THE ENTITY ACTUALLY IS.
+        ============================================================================================
 
-        Everything in `payload` comes from the client: the network id, the plate, and - the part
-        that matters - the POSITION. Nothing here read it off the entity, so a client could name a
-        real vehicle anywhere on the map and claim any position for it, and that claim became a row.
+        The position is the value that becomes a row, and it comes from the client. Without checking
+        it, a player beside any adoptable vehicle could register that vehicle as persisted AT
+        COORDINATES OF THEIR CHOOSING, anywhere on the map, permanently: inside a wall, under the
+        sea, in the sky. Both sides of the comparison here are read on the server, so neither is a
+        value the client chose.
 
-        The offer is generated when a player gets into a vehicle or looks at one, so proving it
-        costs nothing and refuses nothing honest. Fifteen metres, which covers looking at a vehicle
-        from the far side of a road.
+        The payload was generated from this very entity, so an honest offer is within centimetres.
+        Ten metres allows for the vehicle rolling between the client building the message and the
+        server reading it.
 
-        Skipped when there is no player to measure - the API and a rental script adopt with no
-        source, and their caller is server-side code that is trusted by definition.
+        --------------------------------------------------------------------------------------------
+        AND WHY THE PLAYER'S OWN POSITION IS NO LONGER PART OF IT
+        --------------------------------------------------------------------------------------------
+
+        1.0.19 also required the offering PLAYER to be within fifteen metres of the entity. That was
+        a mistake, and its shape is one this project keeps making: IT DEPENDS ON A POSITION THE
+        SERVER MAY NOT HAVE YET.
+
+        A ped's position reaches the server by sync. A vehicle bought from a dealership is spawned
+        at the shop's spawn point while the buyer is still standing in the showroom, and
+        `TaskWarpPedIntoVehicle` moves them on the client with the server finding out afterwards -
+        a gap wider than fifteen metres in qb-vehicleshop's own config. So a legitimate purchase
+        could be refused for being too far from the car the player was sitting in.
+
+        It also bought almost nothing. Adopting a vehicle does not make it the offerer's -
+        `Ownership.resolve` reads the owner from the framework row - so the worst a distant offer
+        could do was keep a car that would have been kept anyway.
+
+        A weaker check that cannot refuse an honest purchase beats a stronger one that can.
     ]]
-    local offerProven = true
+    local claimed = Park.toVec(payload.position)
+    local actually = Spawn.entityPosition and Spawn.entityPosition(entity) or nil
 
-    if type(src) == 'number' and src > 0 and Spawn.playerIsNear then
-        if Spawn.playerIsNear(src, entity, 15.0) == false then
-            return nil, 'refuse.gone'
-        end
+    if claimed and actually then
+        local dx = claimed.x - actually.x
+        local dy = claimed.y - actually.y
+        local dz = claimed.z - actually.z
 
-        --[[
-            AND THE POSITION IN THE PAYLOAD MUST BE WHERE THE ENTITY ACTUALLY IS.
-
-            Proving the player is next to the vehicle is not the same as proving the payload
-            describes it. They are two values the client chose independently, and the position is
-            the one that becomes a row: without this, a player standing beside any adoptable
-            vehicle could register it as persisted AT COORDINATES OF THEIR CHOOSING, anywhere on
-            the map, permanently. Inside a wall, under the sea, in the sky.
-
-            The payload was generated from this very entity, so an honest offer is within
-            centimetres and this refuses nothing real. Ten metres allows for the vehicle rolling
-            between the client building the message and the server reading it.
-
-            Read on the server, from the entity, so neither side of the comparison is a value the
-            client supplied twice.
-        ]]
-        local claimed = Park.toVec(payload.position)
-        local actually = Spawn.entityPosition and Spawn.entityPosition(entity) or nil
-
-        if claimed and actually then
-            local dx = claimed.x - actually.x
-            local dy = claimed.y - actually.y
-            local dz = claimed.z - actually.z
-
-            if (dx * dx + dy * dy + dz * dz) > (10.0 * 10.0) then
-                Park.debug('%d offered a vehicle at a position %.0f m away from it - refused',
-                    src, math.sqrt(dx * dx + dy * dy + dz * dz))
-                return nil, 'refuse.unknown'
-            end
+        if (dx * dx + dy * dy + dz * dz) > (10.0 * 10.0) then
+            return nil, 'refuse.position_mismatch',
+                ('%.0f m from the vehicle'):format(math.sqrt(dx * dx + dy * dy + dz * dz))
         end
     end
 
@@ -234,10 +297,10 @@ function Persist.adopt(src, payload, explicit)
         -- than adding a second is the only answer that cannot produce two of the car.
         Park.debug('plate %s is already persisted as %s - updating it instead of adding a row',
             plate, existing.id)
-        -- `offerProven`: the player was measured against the entity above, so this payload may
-        -- say where the vehicle is. Without it, a plate collision would be a way to move a car
+        -- `true`: the position in this payload was measured against the entity above, so it may
+        -- say where the vehicle is. Without that, a plate collision would be a way to move a car
         -- that the driven rule in `applySnapshot` would otherwise refuse.
-        Persist.applySnapshot(existing.id, payload, offerProven)
+        Persist.applySnapshot(existing.id, payload, true)
         return existing
     end
 

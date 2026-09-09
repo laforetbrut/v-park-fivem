@@ -225,6 +225,7 @@ resource. Rename any of them in `Config.Commands`; set `enabled = false` to remo
 | `/vparkprobe [model]` | Run the placement probe where you stand, and print the result |
 | `/vparkwhere` | Report how far each restored vehicle near you is from where the database says it should be - per axis, plus heading, frozen, dressed and owner |
 | `/vparkdiag [id\|plate]` | What the SERVER thinks. With no argument, every vehicle in the world ordered by how far it drifted from its stored place; with one, the full record - stored pose, actual pose, drift, entity and net id, and the four flags that decide whether its position may be saved. Works from the console, unlike `/vparkwhere` |
+| `/vparkwhy` | Why the last twenty-five vehicles were not kept: model, plate, who offered it, and the reason. Every refusal in the adoption path used to be silent |
 | `/vparkdebug` | Toggle debug logging and the on-screen overlay |
 | `/vparkmigrate <scan\|dry\|run\|rollback>` | The Advanced Parking migration |
 
@@ -414,7 +415,9 @@ The design, in four sentences:
 Beyond that: the save sweep is sliced into quarters so the cost is a trickle rather than a
 sawtooth; the expensive half of a capture - seventy-five native calls of mod slots, colours,
 extras and neons - is cached against a twelve-call fingerprint and re-read only when somebody
-has actually fitted something; writes are batched into one upsert per 200 vehicles inside a
+has actually fitted something; the other expensive half, the sixty-eight deformation samples, is
+cached the same way against body health, which cannot stay still while bodywork deforms, so an
+undamaged car costs one native call and an unchanged one costs one too; writes are batched into one upsert per 200 vehicles inside a
 transaction; the semi-persistence sweep walks an ownership index rather than the whole store;
 a placement takes one snapshot of the vehicle pool and every probe reads from it; the spiral
 search starts all of its shape tests before reading any of them, so forty-five candidates cost
@@ -516,14 +519,14 @@ webhooks off, after which the next real error goes unread for a fortnight.
 ## Known limits, stated plainly
 
 - **What has actually been run, and what has not.** The server half is exercised on a real
-  qb-core server with oxmysql and MariaDB 11.4 before every release: **111 automated checks**
+  qb-core server with oxmysql and MariaDB 11.4 before every release: **112 automated checks**
   covering boot, schema creation and upgrade, detection, every console command, the loader, the
   spatial grid, ownership, the lifecycle maths, the save pipeline, the trash, the audit log and
   the full migration cycle including backup and rollback. Several real defects have come out of
   it, including one - console commands never being audited - that had survived two releases
   because the pcall that caught it logged a single line nobody read.
 
-  `tools/check.py` runs seventeen static groups over the Lua and the stylesheets, including a
+  `tools/check.py` runs nineteen static groups over the Lua and the stylesheets, including a
   real Lua 5.4 parse of every file, a check that the theme file sets no layout property, and a check
   that the database column list and the value list agree position by position - which is a bug
   that has shipped twice and writes every value after the mismatch into the wrong column.
@@ -696,6 +699,7 @@ importer à la main.
 | `/vparkgoto` / `/vparkhere` | Se téléporter au véhicule / le faire venir |
 | `/vparkprobe` | Tester le placement là où vous êtes |
 | `/vparkdiag [id\|plaque]` | Ce que le SERVEUR pense : sans argument, tous les véhicules du monde classés par écart avec leur place enregistrée ; avec un argument, la fiche complète. Fonctionne depuis la console |
+| `/vparkwhy` | Pourquoi les derniers véhicules n'ont pas été conservés |
 | `/vparkmigrate scan` | Analyser la table Advanced Parking |
 
 La liste complète est dans la section anglaise ci-dessus.

@@ -101,6 +101,44 @@ local appliedVersion = {}
 -- entity cannot fight each other.
 local applying = {}
 
+--[[
+    ================================================================================================
+    THE EXPENSIVE READ, GUARDED BY A CHEAP ONE
+    ================================================================================================
+
+    Reading a deformation is `GRID_SIZE` calls to `GetVehicleDeformationAtPos` - 68 of them - and
+    it ran on every capture of every vehicle in range, on every sweep, whether the vehicle had
+    been touched or not.
+
+    `Properties.capture` already works this way for the other expensive half of a snapshot: the
+    seventy-odd calls that read mod slots, colours, extras and neons sit behind a twelve-call
+    fingerprint and are re-read only when somebody has actually fitted something. Deformation had
+    no such guard, so it was the whole cost of a capture on a fleet that is mostly parked.
+
+    THE FINGERPRINT IS BODY HEALTH, AND IT IS ONE NATIVE CALL. Bodywork cannot deform without body
+    health moving - it is the number the engine derives from exactly the damage this file samples -
+    so a vehicle whose body health has not changed since the last read has the same dents it had
+    then, and the cached answer is not an approximation of the truth, it IS the last truth.
+
+    Keyed by entity handle, which the engine reuses, so the model is stored alongside and a
+    mismatch throws the entry away. `Deformation.clear` drops it on every path that lets go of a
+    vehicle - see the note on `tuningFingerprint` in client/properties.lua for what a stale cache
+    against a reused handle did in 1.0.1.
+]]
+local lastRead = {}
+
+--[[
+    Body health, rounded, or nil when it cannot be read.
+
+    Rounded because the engine returns a float that wobbles in the last decimal places on a
+    vehicle nobody is touching, and a fingerprint that flaps is not a fingerprint.
+]]
+local function healthPrint(vehicle)
+    local ok, health = pcall(GetVehicleBodyHealth, vehicle)
+    if not ok or type(health) ~= 'number' then return nil end
+    return math.floor(health * 10.0 + 0.5)
+end
+
 local function options()
     local config = (Config and Config.Deformation) or {}
     return config
@@ -238,9 +276,13 @@ end
 --[[
     Read the deformation off a vehicle.
 
-    Returns nil when there is nothing worth storing, which is the overwhelmingly common case
-    and is why this is cheap: an undamaged car costs `GRID_SIZE` native calls, roughly a
-    hundred, and returns nil.
+    Returns nil when there is nothing worth storing, which is the overwhelmingly common case.
+
+    IT USED TO COST THE WHOLE GRID TO FIND THAT OUT - sixty-eight calls to
+    `GetVehicleDeformationAtPos`, on every vehicle in range, on every sweep, to establish that a
+    car nobody has crashed has no dents. Two gates below answer that for one native call instead:
+    body health at full means no deformed panel anywhere, and body health unchanged since the last
+    read means the same dents as the last read. See the note over `lastRead`.
 
     The returned shape is a flat array of alternating index and quantised magnitude:
 
@@ -253,7 +295,42 @@ function Deformation.capture(vehicle)
     if not enabled() then return nil end
     if not DoesEntityExist(vehicle) then return nil end
 
-    local points = gridFor(GetEntityModel(vehicle))
+    local model = GetEntityModel(vehicle)
+
+    --[[
+        GATE ONE: IS THERE ANY BODYWORK DAMAGE AT ALL?
+
+        One native call. A vehicle at full body health has no deformed panel anywhere on it, so
+        the sixty-eight reads below can only return zeroes, and returning nil now is the same
+        answer for one sixty-eighth of the cost.
+
+        This is the common case by a wide margin. Most vehicles a server holds have never been
+        crashed, and every one of them was paying the full grid every sweep.
+    ]]
+    local health = healthPrint(vehicle)
+    local pristine = tonumber(options().pristineHealth) or 999.0
+
+    if health and health >= math.floor(pristine * 10.0 + 0.5) then
+        lastRead[vehicle] = { model = model, health = health, flat = false }
+        return nil
+    end
+
+    --[[
+        GATE TWO: HAS ANYTHING CHANGED SINCE THE LAST READ?
+
+        Bodywork cannot deform without body health moving, so an unchanged fingerprint means
+        unchanged dents and the previous answer still stands. See the note over `lastRead`.
+
+        The model guard is the handle-reuse guard: a cache entry keyed on a freed handle can be
+        handed to a completely different vehicle.
+    ]]
+    local cached = lastRead[vehicle]
+    if health and cached and cached.model == model and cached.health == health then
+        if cached.flat == false then return nil end
+        return cached.flat
+    end
+
+    local points = gridFor(model)
     if not points then return nil end
 
     local threshold = tonumber(options().threshold) or 0.05
@@ -276,7 +353,13 @@ function Deformation.capture(vehicle)
         end
     end
 
-    if count == 0 then return nil end
+    if count == 0 then
+        -- Only ever cached against a fingerprint that was readable. An entry stored with a nil
+        -- health would match every later call, because `nil == nil`, and would freeze this
+        -- answer for the life of the handle.
+        if health then lastRead[vehicle] = { model = model, health = health, flat = false } end
+        return nil
+    end
 
     -- A cap, because a vehicle that has been rolled down a hill can light up most of the
     -- grid, and a statebag is not the place for an unbounded array. The deepest dents are
@@ -285,6 +368,8 @@ function Deformation.capture(vehicle)
     if count / 2 > maximum then
         out = Deformation.trim(out, maximum)
     end
+
+    if health then lastRead[vehicle] = { model = model, health = health, flat = out } end
 
     return out
 end
@@ -455,6 +540,10 @@ function Deformation.apply(vehicle, flat, version)
 
         applying[vehicle] = nil
 
+        -- The shape just changed, so anything cached about it is describing the car as it was
+        -- before this ran.
+        lastRead[vehicle] = nil
+
         if version then
             appliedVersion[vehicle] = version
         end
@@ -491,7 +580,9 @@ end
 function Deformation.clear(vehicle)
     appliedVersion[vehicle] = nil
     applying[vehicle] = nil
+    lastRead[vehicle] = nil
 end
+
 
 function Deformation.appliedAt(vehicle)
     return appliedVersion[vehicle]

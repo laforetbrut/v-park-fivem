@@ -234,7 +234,16 @@ end
     changing what is stored takes effect on the next save rather than on the next time every
     client restarts.
 ]]
-function Properties.capture(vehicle)
+--[[
+    `options.skipDeformation` leaves the deformation out entirely.
+
+    Not a micro-optimisation: `Deformation.read` is the most expensive thing in a capture, and
+    `Stream.snapshot` knows before it asks whether it is going to keep the answer - a restored
+    vehicle whose body health has not moved is not re-captured, because apply is approximate and
+    re-capturing a restored shape walks the damage. It used to read the deformation and then throw
+    it away, which is the whole cost for none of the benefit.
+]]
+function Properties.capture(vehicle, options)
     if not DoesEntityExist(vehicle) then return nil end
 
     local properties = {}
@@ -448,7 +457,9 @@ function Properties.capture(vehicle)
     properties.doorsOpen = doorsOpen
 
     -- --------------------------------------------------------------- deformation ---
-    properties.deformation = Deformation.read(vehicle)
+    if not (type(options) == 'table' and options.skipDeformation) then
+        properties.deformation = Deformation.read(vehicle)
+    end
 
     return properties
 end

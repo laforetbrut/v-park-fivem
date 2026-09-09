@@ -8,6 +8,40 @@ out of it.
 
 ---
 
+## [2026-09-09 03:55] - A security check refused a legitimate purchase
+
+**Context:** the user reported that buying a vehicle from a dealership did not make it persistent,
+one release after 1.0.19 added proximity proofs to the adoption path.
+
+**Error:** `Persist.adopt` refused the offer when the offering player's ped was more than fifteen
+metres from the entity being offered. A purchased vehicle is created at the shop's `VehicleSpawn`
+while the buyer is still standing at the display car, and `TaskWarpPedIntoVehicle` moves them
+client-side with the server learning the new position by sync afterwards. Measured from
+qb-vehicleshop's shipped config: display-to-spawn is 11.7-22.1 m at PDM and 22.1-40.7 m at the
+Luxury shop, so every display position at one shop and most at the other exceed the threshold. The
+offer was refused whenever the ped's position had not synced yet, which is a race.
+
+**Root cause:** the same mistake as the bug 1.0.19 was written to fix, in the opposite direction.
+1.0.19 correctly identified that a check comparing two client-supplied values proves nothing - and
+then replaced it with a check that depends on a SERVER-side value the server does not reliably have
+yet. This project has now been bitten three times by reading a position the server has not been
+told about: 1.0.15 (the despawn read), 1.0.18 (the nearest-client search using a stale stored
+position), and this.
+
+**Fix:** the ped is out of the check. What remains is the payload position compared against the
+entity's server-side position, which is the proof that actually matters - the payload position is
+the value that becomes a row - and which does not depend on any sync arriving in time. The ped
+check bought almost nothing anyway: adopting a vehicle does not make it the offerer's, because
+`Ownership.resolve` reads the owner from the framework row.
+
+**Prevention:** before a check uses a position, ask which machine owns that entity and whether the
+server has been told. A ped's position after a client-side teleport, and a vehicle's position after
+its owner has walked away, are both values the server holds a stale copy of. Second: every refusal
+in the adoption path was a silent `return`, so this took a measurement of a third-party config to
+diagnose rather than one command. They are all recorded now and `/vparkwhy` prints them.
+
+---
+
 ## [2026-09-09 03:10] - The client's own rule was never enforced on the server
 
 **Context:** auditing all sixteen server-side net events after 1.0.17 found two of them accepting a

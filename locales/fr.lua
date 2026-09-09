@@ -62,6 +62,9 @@ Locale.register('fr', {
     ['refuse.ambient_disabled']     = "Les véhicules que personne n'a conduits ne sont pas conservés.",
     ['refuse.in_garage']            = "Ce véhicule est indiqué comme étant au garage.",
     ['refuse.server_full']          = "Le serveur conserve déjà autant de véhicules qu'il le peut.",
+    ['refuse.no_plate']             = "Ce véhicule n'a pas de plaque lisible.",
+    ['refuse.owned_immediately_off'] = "Les véhicules possédés ne sont pas conservés à l'entrée sur ce serveur.",
+    ['refuse.position_mismatch']    = "Ce véhicule n'est pas là où le message le disait (%s).",
     ['refuse.your_limit']           = "Vous conservez déjà le nombre maximum de véhicules autorisé.",
 
     -- ---------------------------------------------------------------------------------
@@ -143,6 +146,9 @@ Locale.register('fr', {
     -- ---------------------------------------------------------------------------------
     -- /vparkstats
     -- ---------------------------------------------------------------------------------
+    ['why.header']    = "les %d derniers véhicules que v-park n'a pas conservés, du plus récent :",
+    ['why.empty']     = "v-park n'a rien refusé depuis son démarrage",
+    ['why.line']      = "  il y a %s  %s [%s]  %s  %s%s",
     ['diag.empty']    = "v-park ne tient aucun véhicule dans le monde pour le moment",
     ['diag.header']   = "v-park tient %d véhicules dans le monde, le plus éloigné de sa place en premier :",
     ['diag.line']     = "  %s  %s [%s]  écart %s  %s",

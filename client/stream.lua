@@ -621,12 +621,17 @@ function Stream.snapshot(id)
     end
 
     local entity = record.entity
-    local properties = Properties.capture(entity)
-    if not properties then return nil end
+    --[[
+        ASKED BEFORE THE CAPTURE, NOT AFTER IT.
 
-    if not Deformation.shouldRecapture(entity, record.restoredHealth) then
-        properties.deformation = nil
-    end
+        `Deformation.read` is the most expensive part of a snapshot - sixty-eight native calls -
+        and this decision was being made AFTER paying for it, then throwing the answer away. The
+        answer does not depend on the capture, so there is no reason to.
+    ]]
+    local recapture = Deformation.shouldRecapture(entity, record.restoredHealth)
+
+    local properties = Properties.capture(entity, { skipDeformation = not recapture })
+    if not properties then return nil end
 
     local position = GetEntityCoords(entity)
     local rotation = GetEntityRotation(entity, 2)

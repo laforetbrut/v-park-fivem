@@ -568,6 +568,46 @@ register('diag', {
     replyMany(src, lines)
 end)
 
+--[[
+    Why a vehicle was not kept.
+
+    The report that could not be made before this existed was "I bought a car and it did not become
+    persistent", and there was no way to answer it: every refusal in the adoption path was a bare
+    `return`, so the vehicle simply was not kept and nothing anywhere said why. That is the same
+    hole `/vparkwhere` filled for positions, and it cost five releases there.
+
+    Run it after the thing that did not work. The reason is a locale key, so it is the same wording
+    the player would have been shown if the refusal had been something worth telling them about.
+]]
+register('why', {
+    description = 'Why the last few vehicles were not kept',
+    params = {},
+}, function(src)
+    local list = Persist.refusals and Persist.refusals() or {}
+
+    if #list == 0 then
+        reply(src, L('why.empty'))
+        return
+    end
+
+    local now = Park.now()
+    local lines = { L('why.header', #list) }
+
+    for _, entry in ipairs(list) do
+        lines[#lines + 1] = L('why.line',
+            Park.duration(now - (entry.at or now)),
+            tostring(entry.model or '?'),
+            tostring(entry.plate or '?'),
+            tostring(entry.who or entry.src or '?'),
+            -- The reason as a player would read it, and the raw key after it: the sentence is
+            -- what makes the list readable and the key is what a bug report needs.
+            Locale.has(entry.reason) and L(entry.reason, entry.detail or '') or tostring(entry.reason),
+            ('  [%s]'):format(tostring(entry.reason)))
+    end
+
+    replyMany(src, lines)
+end)
+
 register('zones', {
     description = 'List the zones where nothing persists',
     params = {},

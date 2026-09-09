@@ -1071,6 +1071,44 @@ def check_store_near():
 
 
 # ==============================================================================================
+# 19. Every refusal reason is a real locale key
+#
+# A refusal reason is a locale key returned as a bare string - `return nil, 'refuse.in_garage'` -
+# and it travels a long way from where it is written to where it is printed. Group 4b checks keys
+# used through `L('...')` at a call site, and these never appear at one: the caller does `L(reason)`
+# with a variable, so a reason with no entry sails past every existing check and prints its own key
+# at the player.
+#
+# Three of them shipped that way in one change. This is the check that would have caught it.
+# ==============================================================================================
+
+
+def check_refusal_reasons(english):
+    global checks_run
+    checks_run += 1
+
+    if not english:
+        return
+
+    for path in lua_files():
+        if '/locales/' in relative(path):
+            continue
+
+        source = strip_comments(read(path))
+        name = relative(path)
+
+        for found in re.finditer(r"'(refuse\.[a-z0-9_]+)'", source):
+            key = found.group(1)
+
+            if key not in english:
+                line = source[:found.start()].count('\n') + 1
+                fail('refusals',
+                     f'{name}:{line} returns `{key}`, which is not in en.lua. A reason is printed '
+                     'through `L(reason)` with a variable, so nothing else checks it and the '
+                     'player is shown the raw key.')
+
+
+# ==============================================================================================
 
 def main():
     english = check_locales()
@@ -1092,6 +1130,7 @@ def main():
     check_live_fields()
     check_locale_arity(english)
     check_store_near()
+    check_refusal_reasons(english)
 
     print(f'v-park: {checks_run} check groups run over {len(lua_files())} Lua files')
 

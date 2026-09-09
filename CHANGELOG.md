@@ -7,6 +7,139 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.20] - 2026-09-09
+
+**A vehicle bought from a dealership was not kept, because of a check 1.0.19 added yesterday. And
+deformation no longer costs sixty-eight native calls to establish that a car has no dents.**
+
+### Fixed
+
+- **Buying a vehicle did not make it persistent.** 1.0.19 required the player offering a vehicle to
+  be within fifteen metres of it, as part of closing a hole where a client could register a vehicle
+  at coordinates of its choosing. That check was wrong, and its shape is one this project keeps
+  making: **it depends on a position the server may not have yet.**
+
+  A purchased vehicle is spawned at the shop's `VehicleSpawn` while the buyer is still standing at
+  the display car, and `TaskWarpPedIntoVehicle` moves them on the client with the server finding out
+  by sync afterwards. Measured from qb-vehicleshop's own config, the gap between a display position
+  and the spawn point is **11.7 m to 22.1 m at PDM and 22.1 m to 40.7 m at the Luxury shop** - so
+  every display position at one shop and most at the other are beyond fifteen metres, and the offer
+  was refused whenever the ped's position had not caught up.
+
+  The ped is out of it. What remains is the check that actually mattered: the position in the
+  message must be within ten metres of where the server reads the entity to be. Both sides of that
+  comparison are read on the server, neither is a value the client chose, and none of it depends on
+  a sync arriving in time. The distant offer the ped check was meant to stop bought almost nothing
+  anyway - adopting a vehicle does not make it the offerer's, because `Ownership.resolve` reads the
+  owner from the framework row.
+
+- **Every refusal is now recorded, and `/vparkwhy` prints the last twenty-five.** Every refusal in
+  the adoption path used to be a bare `return`: a vehicle that was not kept produced no log line, no
+  message and no record, so the only possible report was "it did not work" and the only possible
+  answer was a guess. That is precisely the hole `/vparkwhere` filled for positions, and it cost
+  five releases there before anybody could see a number.
+
+  Each entry carries the model, the plate, who offered it, how long ago, the reason as a sentence,
+  and the raw reason key for a bug report. Three reasons that had no wording of their own now have
+  it, and a new static check refuses a refusal reason that is not a real locale key - reasons are
+  printed through `L(reason)` with a variable, so nothing else was checking them and the player was
+  shown the raw key.
+
+### Changed
+
+- **Reading a deformation costs one native call instead of sixty-eight, unless something changed.**
+  Sampling the bodywork is `GetVehicleDeformationAtPos` across the whole grid, and it ran on every
+  vehicle in range on every sweep - to establish, almost every time, that a car nobody has crashed
+  has no dents.
+
+  `Properties.capture` already solves this for the other expensive half of a snapshot: the seventy
+  native calls that read mod slots, colours, extras and neons sit behind a twelve-call fingerprint
+  and are re-read only when somebody has fitted something. Deformation had no equivalent, so it was
+  the entire cost of a capture on a fleet that is mostly parked. It has one now, and it is one call:
+
+  - **Body health at full means no deformed panel anywhere**, so the grid is skipped outright.
+  - **Body health unchanged since the last read means the same dents**, so the last answer stands.
+    Bodywork cannot deform without body health moving - it is the number the engine derives from
+    exactly the damage this file samples - so the cached answer is not an approximation of the
+    truth, it is the last truth.
+
+  Keyed by entity handle, so the model is stored alongside and a mismatch throws the entry away, and
+  nothing is ever cached against a fingerprint that could not be read: an entry stored with a nil
+  health would match every later call, because `nil == nil`, and freeze the answer for the life of
+  the handle.
+
+- **The snapshot no longer pays for a deformation it is about to discard.** A restored vehicle whose
+  body health has not moved is deliberately not re-captured, because apply is approximate and
+  re-capturing a restored shape walks the damage. That decision was being made **after** the read,
+  and the answer does not depend on it.
+
+112 automated checks on a real qb-core server with oxmysql and MariaDB 11.4, and 19 static check
+groups over 32 Lua files.
+
+---
+
+## [1.0.20] - 2026-09-09 (français)
+
+**Un véhicule acheté en concession n'était pas conservé, à cause d'une vérification ajoutée hier
+par la 1.0.19. Et lire une déformation ne coûte plus soixante-huit appels natifs pour établir
+qu'une voiture n'a aucune bosse.**
+
+### Corrigé
+
+- **Acheter un véhicule ne le rendait pas persistant.** La 1.0.19 exigeait que le joueur qui
+  propose un véhicule soit à moins de quinze mètres de celui-ci. Cette vérification était
+  mauvaise, et sa forme est celle que ce projet reproduit sans cesse : **elle dépend d'une position
+  que le serveur n'a peut-être pas encore.**
+
+  Un véhicule acheté apparaît au `VehicleSpawn` du magasin alors que l'acheteur est encore devant
+  la voiture d'exposition, et `TaskWarpPedIntoVehicle` le déplace côté client, le serveur
+  l'apprenant ensuite par synchronisation. Mesuré dans la config de qb-vehicleshop, l'écart entre
+  une position d'exposition et le point d'apparition est de **11,7 à 22,1 m au PDM et de 22,1 à
+  40,7 m à la concession de luxe** : toutes les positions d'un magasin et la plupart de l'autre
+  dépassent quinze mètres, et l'offre était refusée dès que la position du ped n'avait pas suivi.
+
+  Le ped n'en fait plus partie. Il reste la vérification qui compte vraiment : la position du
+  message doit être à moins de dix mètres de là où le serveur lit l'entité. Les deux côtés de
+  cette comparaison sont lus sur le serveur, aucun n'est une valeur choisie par le client, et rien
+  n'y dépend d'une synchronisation qui arrive à temps.
+
+- **Chaque refus est désormais enregistré, et `/vparkwhy` affiche les vingt-cinq derniers.** Chaque
+  refus dans le chemin d'adoption était un `return` nu : un véhicule non conservé ne produisait
+  aucune ligne de log, aucun message et aucune trace. Le seul rapport possible était
+  &laquo;&nbsp;ça n'a pas marché&nbsp;&raquo; et la seule réponse possible une supposition. C'est
+  exactement le trou que `/vparkwhere` a comblé pour les positions, et il avait coûté cinq
+  versions.
+
+  Chaque entrée porte le modèle, la plaque, qui a proposé, il y a combien de temps, la raison en
+  phrase et la clé brute pour un rapport de bug. Une nouvelle vérification statique refuse une
+  raison de refus qui n'est pas une vraie clé de traduction.
+
+### Modifié
+
+- **Lire une déformation coûte un appel natif au lieu de soixante-huit, sauf si quelque chose a
+  changé.** L'échantillonnage de la carrosserie tournait sur chaque véhicule à portée, à chaque
+  balayage, pour établir presque toujours qu'une voiture que personne n'a accidentée n'a pas de
+  bosse.
+
+  `Properties.capture` résout déjà ça pour l'autre moitié coûteuse d'un instantané : les
+  soixante-dix appels qui lisent les modifications, les couleurs, les extras et les néons sont
+  derrière une empreinte de douze appels. La déformation n'avait pas d'équivalent. Elle en a une
+  maintenant, et c'est un seul appel :
+
+  - **Santé de la carrosserie au maximum = aucun panneau déformé**, la grille est sautée.
+  - **Santé inchangée depuis la dernière lecture = les mêmes bosses**, la dernière réponse tient.
+    La carrosserie ne peut pas se déformer sans que cette santé bouge, donc la réponse en cache
+    n'est pas une approximation de la vérité : c'est la dernière vérité.
+
+- **L'instantané ne paie plus une déformation qu'il va jeter.** Un véhicule restauré dont la santé
+  n'a pas bougé n'est volontairement pas recapturé, et cette décision était prise **après** la
+  lecture.
+
+112 vérifications automatisées sur un vrai serveur qb-core avec oxmysql et MariaDB 11.4, et 19
+groupes de vérifications statiques sur 32 fichiers Lua.
+
+---
+
 ## [1.0.19] - 2026-09-09
 
 **An audit of all sixteen server-side net events, after 1.0.17 found two of them taking a vehicle

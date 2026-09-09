@@ -821,6 +821,15 @@ Config.Deformation = {
     -- capturing from a car we restored and storing that is a copy of a copy. Doing it every
     -- save sweep walks the damage away from what the player actually did. 20 body health is
     -- comfortably more than noise and comfortably less than a real impact.
+    --[[
+        Body health at or above which a vehicle is treated as having no bodywork damage, so the
+        whole sampling grid is skipped for one native call instead of sixty-eight.
+
+        1000 is pristine. The default leaves a little room because a vehicle that has been driven
+        through a hedge reads a fraction under 1000 with nothing visible on it.
+    ]]
+    pristineHealth = 999.0,
+
     recaptureDelta = 20.0,
 
     -- Stand aside when Kiminaze's VehicleDeformation resource is installed.
@@ -1873,6 +1882,9 @@ Config.Commands = {
     -- vehicles and reports what the client sees; this reports what the SERVER thinks, including
     -- the four flags that decide whether a vehicle's position may be written down at all.
     diag       = { name = 'vparkdiag',    permission = 'admin',    enabled = true },
+    -- Why the last few vehicles were not kept. Every refusal in the adoption path used to be a
+    -- silent return, which made "I bought a car and it was not kept" unanswerable.
+    why        = { name = 'vparkwhy',     permission = 'admin',    enabled = true },
     migrate    = { name = 'vparkmigrate', permission = 'admin',    enabled = true },
 
     -- A console-only command. Never available in game, whatever `permission` says elsewhere.
