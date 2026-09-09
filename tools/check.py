@@ -1017,6 +1017,60 @@ def check_locale_arity(english):
 
 
 # ==============================================================================================
+# 18. Store.near hands back wrappers, not records
+#
+# `Store.near` returns a list of { record = <the record>, distanceSq = <number> }, because every
+# caller wants the distance and recomputing it is silly. The shape is easy to forget, and getting
+# it wrong FAILS SILENTLY IN THE WORST WAY: `wrapper.id` is nil, so a comparison against it is
+# vacuously true and a lookup with it returns nil. The loop runs, finds nothing, reports nothing,
+# and whatever depended on it quietly does not happen.
+#
+# Written after exactly that: a neighbour list built for the placement search iterated `.id` on
+# the wrapper and was empty on every call, which would have shipped as "the search still moves
+# cars it should not".
+#
+# WHAT IT DOES NOT COVER, stated so nobody trusts it further than it goes: it follows reads off
+# the loop variable itself, not through an alias. `local thing = wrapper` and then `thing.id`
+# passes. That is the form nobody writes by accident - every caller in the resource reads the
+# field straight off the loop variable, which is the form this catches.
+# ==============================================================================================
+
+NEAR_FIELDS = {'record', 'distanceSq'}
+
+
+def check_store_near():
+    global checks_run
+    checks_run += 1
+
+    for path in lua_files():
+        source = strip_comments(read(path))
+        name = relative(path)
+
+        # `for _, thing in ipairs(Store.near(...))` - capture the loop variable, then look at
+        # what is read off it inside the loop.
+        for found in re.finditer(
+                r'for\s+[\w,\s]*?\b(\w+)\s+in\s+ipairs\(\s*Store\.near\(', source):
+            variable = found.group(1)
+            line = source[:found.start()].count('\n') + 1
+
+            # The loop body: from the match to the matching `end` at the same indent. Close
+            # enough to take the next 40 lines, which is longer than any of these loops.
+            body = '\n'.join(source[found.start():].split('\n')[:40])
+
+            for use in re.finditer(r'\b' + re.escape(variable) + r'\.(\w+)', body):
+                field = use.group(1)
+
+                if field not in NEAR_FIELDS:
+                    fail('store-near',
+                         f'{name}:{line} iterates Store.near() as `{variable}` and reads '
+                         f'`{variable}.{field}`. Store.near returns '
+                         '{ record = ..., distanceSq = ... } wrappers, so that is nil and the '
+                         'loop silently does nothing. Use '
+                         f'`{variable}.record.{field}`.')
+                    break
+
+
+# ==============================================================================================
 
 def main():
     english = check_locales()
@@ -1037,6 +1091,7 @@ def main():
     check_store_columns()
     check_live_fields()
     check_locale_arity(english)
+    check_store_near()
 
     print(f'v-park: {checks_run} check groups run over {len(lua_files())} Lua files')
 

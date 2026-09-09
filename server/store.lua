@@ -569,6 +569,10 @@ end
     placer        The client nominated to dress and place it. Read when re-sending a restore and
                   when telling that client to forget the vehicle.
     placedAt      When it was created. Diagnostics only.
+    spawnX        Where the server created it, which is the value a stale server-side read
+    spawnY        returns - so it is what makes a stale read detectable. Written once by
+    spawnZ        `Spawn.create` and read only by `poseIfFresh`. Absent on an adopted vehicle,
+                  because the server did not place that one.
     adopted       True when the vehicle already existed and we took it over, rather than having
                   created it. Distinguishes the two paths in the panel and the logs.
 
@@ -618,6 +622,7 @@ end
 ]]
 Store.liveFields = {
     entity = true, netId = true, placer = true, placedAt = true, adopted = true,
+    spawnX = true, spawnY = true, spawnZ = true,
     ready = true, seen = true, restoreAt = true, restoreTries = true,
     frozen = true, driven = true, parked = true, nudged = true,
     occupant = true,

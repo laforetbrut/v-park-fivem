@@ -232,6 +232,10 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
             interior = data.interior,
             room = data.room,
             frozen = data.frozen,
+
+            -- The server's own list of the vehicles it is holding near this one. See
+            -- `neighboursOf` on the server: it replaces a statebag read that had to win a race.
+            neighbours = data.neighbours,
         })
 
         if result.ok then

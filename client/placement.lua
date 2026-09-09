@@ -197,8 +197,29 @@ end
     in the caller's cleanup, because a snapshot left behind would be used by the NEXT placement
     and would describe a world that has moved on.
 ]]
-function Placement.beginBatch(ignore)
-    takeSnapshot(ignore)
+--[[
+    `neighbours` is the server's list of network ids of the vehicles IT is holding near the one
+    being placed. Resolved to entities once, here, rather than per overlap test - a placement runs
+    dozens of probes and the answer cannot change while it does.
+
+    See `neighboursOf` in server/spawn.lua for why the server sends this at all.
+]]
+function Placement.beginBatch(ignore, neighbours)
+    local shot = takeSnapshot(ignore)
+
+    if type(neighbours) == 'table' and shot then
+        local ours = {}
+
+        for _, netId in ipairs(neighbours) do
+            local ok, entity = pcall(NetworkGetEntityFromNetworkId, netId)
+
+            -- Not streamed in on this client, so it is not in the pool either and there is
+            -- nothing to exclude.
+            if ok and entity and entity ~= 0 then ours[entity] = true end
+        end
+
+        shot.ours = ours
+    end
 end
 
 function Placement.endBatch()
@@ -278,9 +299,19 @@ local function overlappingVehicles(centre, half, heading, ignore, margin)
                         placement on a busy street. Only a handful of vehicles ever overlap,
                         and only those are asked.
                     ]]
-                    local ok, id = pcall(function() return Entity(entry.entity).state['vpark:id'] end)
+                    -- The server's list first: it is authoritative and it is a table lookup.
+                    -- The statebag second, because it also covers a vehicle restored after that
+                    -- list was built.
+                    local mine = source.ours and source.ours[entry.entity] == true
 
-                    if not (ok and id ~= nil) then
+                    if not mine then
+                        local ok, id = pcall(function()
+                            return Entity(entry.entity).state['vpark:id']
+                        end)
+                        mine = ok and id ~= nil
+                    end
+
+                    if not mine then
                         out[#out + 1] = entry.entity
                     end
                 end
@@ -984,7 +1015,7 @@ function Placement.place(entity, data)
 
     -- One view of the world for the whole placement. See `Placement.beginBatch`: without it
     -- every probe and every search candidate re-scanned the entire vehicle pool.
-    Placement.beginBatch(entity)
+    Placement.beginBatch(entity, data and data.neighbours)
 
     local ok, result = pcall(Placement.placeInner, entity, data)
 

@@ -7,6 +7,149 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.18] - 2026-09-09
+
+**Disconnecting at the wheel lost the drive, and the placement search is race-free at last.**
+
+### Fixed
+
+- **A vehicle being driven is captured four times as often, and asked of the person driving it.**
+  Two things were wrong with one loop, and together they are the last way a vehicle could come back
+  somewhere it used to be.
+
+  The capture sweep cuts the live set into quarters so that three thousand parked cars are not
+  hashed at once. A parked car has nothing to say - it is provably identical to its last capture -
+  but a car being driven is the one thing in the set whose position is changing, and there is at
+  most one per player. It is now in every slice: every 30 seconds becomes every 7.5.
+
+  Worse, the sweep asked **the client nearest the vehicle's stored position**, which for a car being
+  driven is where the drive started. Drive further than the streaming radius and the capture was
+  asked of somebody who could not see the vehicle, so they answered nothing about it - silently,
+  because a client that cannot see a vehicle is not an error. The occupant is now asked directly:
+  they are sitting in it, which is an exact answer rather than an estimate.
+
+- **The disconnect trigger looked at the wrong player.** `Persist.onPlayerDropped` marked dirty
+  every vehicle whose **placer** was the leaving player. The placer is the client the server
+  nominated to dress and place the vehicle, not the person driving it - the same confusion 1.0.16
+  was made of, and they are the same client only on a single-player test. A player who got into
+  somebody else's restored vehicle and then disconnected at the wheel flushed nothing at all. The
+  occupant is marked now as well.
+
+- **A stale server-side position is detected rather than guessed at.** A server-side entity's
+  position is maintained by its network owner, so once the driver has walked away the value stops
+  being updated - and what it is stale at is the position the server created the entity with. A
+  stale read does not look like an error. It looks like an ordinary position from before the drive,
+  which is what 1.0.15 wrote over a correct one.
+
+  Three flags stood between that read and the row, and they work, but they are a heuristic about
+  who might have moved the vehicle rather than a test of whether the number is real. The spawn
+  position is now recorded, so the test is exact: a read that has not moved from where we put the
+  car carries no information and is refused.
+
+### Changed
+
+- **The server names its own vehicles in the restore instruction, so the placement search no longer
+  has to win a race.** A persisted vehicle standing at its saved pose was standing there when every
+  other persisted vehicle nearby was saved. They coexisted, so neither is an obstacle to the other -
+  but the box the client tests with is bigger than the bodywork, so two cars parked thirty
+  centimetres apart overlap in it, and the search moved one of them by exactly `search.step`. That
+  is the `1.250 m` reported from `/vparkwhere`, and it is why the search has shipped disabled since
+  1.0.11.
+
+  1.0.11 answered it with the `vpark:id` statebag, which is correct and was not enough: a replicated
+  statebag arrives asynchronously, and several vehicles restored at once are placed before their
+  neighbours' bags have landed. The server already knows the answer, with no race and nothing to
+  wait for, so it says so. The statebag check stays as the second line.
+
+  **The search is still off by default**, now for a different reason. What has not changed is the
+  trade: with it on, a vehicle whose bay is genuinely occupied is placed up to `radius` away from
+  where it was left, and that is what gets saved. Fifteen releases of this resource were about
+  vehicles not being exactly where they were left, so exact wins by default.
+  `Config.Placement.search.enabled = true` for a server where bays are genuinely contested.
+
+- **Corrected two figures in the README** that had gone stale: the automated pass is 111 checks, not
+  87, and `tools/check.py` runs seventeen groups, not fifteen.
+
+### Prevention
+
+- **`Store.near` returns wrappers, and reading a record field off one now fails the build.** It
+  hands back `{ record, distanceSq }`, and getting that wrong fails in the worst way available:
+  `wrapper.id` is nil, so a comparison against it is vacuously true and a lookup with it returns
+  nil. The loop runs, finds nothing, reports nothing, and whatever depended on it quietly does not
+  happen. Written after exactly that, in the neighbour list above, which was empty on every call
+  before the check caught it.
+
+- **A test procedure for the client half.** Twenty-two cases over the position guarantee, entity
+  count, paint and modifications, tight spaces with the search both off and on, ownership, the
+  panel, and the timing line. Every case asks for a figure rather than an impression, because
+  eighteen releases of server-side checks have never once caught the bug that was actually
+  reported: all of them lived in the client.
+
+---
+
+## [1.0.18] - 2026-09-09 (français)
+
+**Se déconnecter au volant perdait le trajet, et la recherche de place ne dépend plus d'une course
+réseau.**
+
+### Corrigé
+
+- **Un véhicule en cours de conduite est capturé quatre fois plus souvent, et demandé à la
+  personne qui le conduit.** Deux erreurs dans la même boucle, et ensemble elles sont la
+  dernière façon dont un véhicule pouvait revenir à un ancien endroit.
+
+  Le balayage de capture découpe l'ensemble en quarts pour ne pas hacher trois mille voitures
+  garées d'un coup. Une voiture garée n'a rien à dire, mais une voiture conduite est la seule
+  chose dont la position change, et il y en a au plus une par joueur. Elle est maintenant dans
+  chaque quart : toutes les 30 secondes devient toutes les 7,5.
+
+  Pire, le balayage demandait **au client le plus proche de la position enregistrée**, c'est-à-dire
+  là où le trajet a commencé. En roulant plus loin que le rayon de streaming, la capture était
+  demandée à quelqu'un qui ne voyait pas le véhicule, et qui ne répondait donc rien à son sujet,
+  en silence. C'est l'occupant qui est interrogé maintenant : il est assis dedans.
+
+- **Le déclencheur de déconnexion regardait le mauvais joueur.** Il marquait les véhicules dont le
+  **placeur** partait. Le placeur est le client désigné pour habiller et placer le véhicule, pas
+  celui qui le conduit : la même confusion que la 1.0.16. Un joueur qui montait dans le véhicule
+  restauré de quelqu'un d'autre puis se déconnectait au volant n'enregistrait rien du tout.
+
+- **Une position serveur périmée est maintenant détectée, plus devinée.** Une lecture périmée ne
+  ressemble pas à une erreur : elle ressemble à une position ordinaire d'avant le trajet, et c'est
+  ce que la 1.0.15 a écrit par-dessus une bonne. La position de création est maintenant
+  enregistrée, donc le test est exact : une lecture qui n'a pas bougé de là où on a posé la
+  voiture ne porte aucune information et est refusée.
+
+### Modifié
+
+- **Le serveur nomme ses propres véhicules dans l'instruction de restauration**, donc la recherche
+  de place n'a plus de course à gagner. Deux voitures garées à trente centimètres se chevauchent
+  dans la boîte de test, et la recherche en déplaçait une de `search.step` exactement : c'est le
+  `1.250 m` rapporté par `/vparkwhere`.
+
+  La 1.0.11 avait répondu avec le statebag `vpark:id`, ce qui était juste et insuffisant : un
+  statebag répliqué arrive de façon asynchrone. Le serveur connaît déjà la réponse, sans course
+  et sans attente.
+
+  **La recherche reste désactivée par défaut**, pour une autre raison désormais. Le compromis n'a
+  pas changé : activée, un véhicule dont la place est vraiment occupée est posé jusqu'à `radius`
+  plus loin, et c'est ça qui est enregistré. Quinze versions de ce script portaient sur des
+  véhicules qui n'étaient pas exactement où on les avait laissés.
+
+- **Deux chiffres corrigés dans le README** : 111 vérifications et non 87, dix-sept groupes et non
+  quinze.
+
+### Prévention
+
+- **`Store.near` renvoie des enveloppes, et lire un champ d'enregistrement dessus fait maintenant
+  échouer la vérification.** L'erreur échouait de la pire manière possible : silencieusement. La
+  boucle tournait, ne trouvait rien, ne signalait rien.
+
+- **Une procédure de test pour la moitié client.** Vingt-deux cas, et chacun demande un chiffre et
+  pas une impression : dix-huit versions de vérifications côté serveur n'ont jamais attrapé le bug
+  qui a été rapporté, parce qu'ils vivaient tous dans le client.
+
+---
+
 ## [1.0.17] - 2026-09-09
 
 **It works, so this release does not change what it does. It hardens it, measures it, and closes

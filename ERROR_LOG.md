@@ -8,6 +8,36 @@ out of it.
 
 ---
 
+## [2026-09-09 02:40] - A capture asked the one client that could not answer
+
+**Context:** looking for what was left after the position guarantee finally held, specifically what
+happens when a player disconnects while driving.
+
+**Error:** two faults in the capture sweep. A vehicle being driven was captured on one sweep slice
+in four, so up to 30 seconds of driving existed nowhere but on the client. And the sweep asked the
+client nearest the vehicle's STORED position - which for a car being driven is where the drive
+started - so a vehicle driven beyond the streaming radius was asked of somebody who could not see
+it. They answered nothing about it and that is not an error, so nothing was logged. Separately,
+`Persist.onPlayerDropped` marked dirty by `placer` rather than by occupant, so a player who
+disconnected in somebody else's restored vehicle flushed nothing.
+
+**Root cause:** an optimisation applied to a set it did not describe. Slicing exists because a
+parked car is provably identical to its last capture, and it was applied to the whole live set
+including the one member of that set the argument does not cover. The nearest-client search has the
+same shape: `pos_x` is where the vehicle is for every vehicle in the set except the ones that are
+moving, which are exactly the ones being asked about.
+
+**Fix:** a driven vehicle is in every slice, and it is asked of its occupant, which is exact rather
+than an estimate. `onPlayerDropped` marks both placer and occupant. The spawn position is recorded
+so a stale server-side read is detectable rather than guessed at from flags.
+
+**Prevention:** when a rule is justified by a property of the data - a parked car does not change -
+check whether the set the rule is applied to actually has that property throughout. The exception
+here was one vehicle per player, which is small enough to be invisible in testing and is the only
+one anybody would notice.
+
+---
+
 ## [2026-09-09 01:55] - A net event took a vehicle id on trust
 
 **Context:** reading the parked and touched handlers with fresh eyes after the position work was

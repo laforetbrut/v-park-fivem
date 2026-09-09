@@ -1097,7 +1097,36 @@ Config.Placement = {
         Turn it on for a server where vehicles are parked somewhere genuinely contested and
         being a metre out matters less than overlapping.
     ]]
+    --[[
+        How far around a vehicle's saved place the server looks for the other vehicles it is
+        holding, and names them in the restore instruction so the client does not treat them as
+        obstacles. See `neighboursOf` in server/spawn.lua.
+
+        It only has to cover the box the client tests with, which is the vehicle's own extents
+        plus a margin plus six metres. Thirty is comfortably beyond that and keeps the list to a
+        few entries.
+    ]]
+    neighbourRadius = 30.0,
+
     search = {
+        --[[
+            STILL OFF BY DEFAULT, AND NOW FOR A DIFFERENT REASON THAN IN 1.0.11.
+
+            The reason it was off was that it could not tell our own parked cars from real
+            obstacles without winning a network race, so it moved vehicles that had no need to
+            move. That is fixed: the server names its own vehicles in the restore instruction and
+            there is no race left.
+
+            What has not changed is the trade. With this on, a vehicle whose bay is genuinely
+            occupied - by ambient traffic, or by a car somebody is driving - is placed up to
+            `radius` away from where it was left, and that position is what gets saved. Off, it
+            goes exactly where it was and stays frozen, and two frozen cars briefly overlapping
+            resolves itself the moment somebody drives one out.
+
+            Fifteen releases of this resource were about vehicles not being exactly where they
+            were left, so exact wins by default. Turn it on for a server where bays are genuinely
+            contested and a metre matters less than overlapping.
+        ]]
         enabled = false,
 
         -- Look for a free spot near the saved one when the saved one is blocked by something

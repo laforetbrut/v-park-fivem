@@ -516,15 +516,15 @@ webhooks off, after which the next real error goes unread for a fortnight.
 ## Known limits, stated plainly
 
 - **What has actually been run, and what has not.** The server half is exercised on a real
-  qb-core server with oxmysql and MariaDB 11.4 before every release: **87 automated checks**
+  qb-core server with oxmysql and MariaDB 11.4 before every release: **111 automated checks**
   covering boot, schema creation and upgrade, detection, every console command, the loader, the
   spatial grid, ownership, the lifecycle maths, the save pipeline, the trash, the audit log and
   the full migration cycle including backup and rollback. Several real defects have come out of
   it, including one - console commands never being audited - that had survived two releases
   because the pcall that caught it logged a single line nobody read.
 
-  `tools/check.py` runs fifteen static groups over the Lua and the stylesheets, including a real
-  Lua 5.4 parse of every file, a check that the theme file sets no layout property, and a check
+  `tools/check.py` runs seventeen static groups over the Lua and the stylesheets, including a
+  real Lua 5.4 parse of every file, a check that the theme file sets no layout property, and a check
   that the database column list and the value list agree position by position - which is a bug
   that has shipped twice and writes every value after the mismatch into the wrong column.
 

@@ -111,8 +111,66 @@ local noteFailure
     the client answers that it could not take network control of it. See the note on the
     re-ask in the `vpark:server:restored` handler.
 ]]
+--[[
+    ================================================================================================
+    THE SERVER TELLS THE CLIENT WHICH VEHICLES ARE OURS. IT DOES NOT LEAVE IT TO GUESS.
+    ================================================================================================
+
+    A persisted vehicle standing at its saved pose was standing there when every other persisted
+    vehicle nearby was saved. They coexisted, so they are not in each other's way, and the client
+    must not treat one as an obstacle to placing another. The box the client tests with is bigger
+    than the bodywork, so two cars parked thirty centimetres apart overlap in it and the search
+    then moves one of them a metre and a quarter - which is the `1.250 m` reported from
+    `/vparkwhere` and the reason the search has shipped disabled since 1.0.11.
+
+    1.0.11 answered the question with the `vpark:id` statebag, which is correct and was not
+    enough: a replicated statebag arrives asynchronously, and several vehicles restored at once are
+    placed before their neighbours' bags have landed. A fix that depends on winning a network race
+    is not a fix, and the search was switched off rather than shipped unreliable.
+
+    THE SERVER ALREADY KNOWS THE ANSWER. It knows every vehicle it is holding and where each one
+    is, with no race and nothing to wait for, so it says so in the restore instruction itself. The
+    statebag check stays as the second line - it is right whenever the bag has landed, and it also
+    covers a vehicle restored after this message was built.
+
+    A vehicle that has no network id yet is left out, and that is not a gap: an entity the server
+    cannot address is an entity no client has streamed in, so it is not in the client's vehicle
+    pool and cannot be an obstacle.
+]]
+local function neighboursOf(record)
+    local list = {}
+
+    local radius = tonumber((Config.Placement or {}).neighbourRadius) or 30.0
+
+    -- `Store.near` hands back { record, distanceSq } wrappers, not bare records.
+    for _, near in ipairs(Store.near(record.pos_x, record.pos_y, radius, record.bucket)) do
+        local other = near.record
+
+        if other and other.id ~= record.id then
+            local entry = Store.live(other.id)
+
+            if entry then
+                local id = entry.netId
+
+                -- Recorded when the vehicle was dressed. Between being created and being
+                -- dressed there is a window where the entity exists and the id has not been
+                -- written down yet, so ask the engine rather than skip it.
+                if not id and entry.entity then
+                    local ok, answer = pcall(NetworkGetNetworkIdFromEntity, entry.entity)
+                    if ok and answer and answer ~= 0 then id = answer end
+                end
+
+                if id then list[#list + 1] = id end
+            end
+        end
+    end
+
+    return list
+end
+
 local function sendRestore(record, src, netId)
     TriggerClientEvent('vpark:client:restore', src, netId, {
+        neighbours = neighboursOf(record),
         id = record.id,
         version = record.updated_at,
         position = { x = record.pos_x, y = record.pos_y, z = record.pos_z },
@@ -180,6 +238,57 @@ local function safeRotation(entity)
     local ok, rotation = pcall(GetEntityRotation, entity)
     if not ok then return nil end
     return rotation
+end
+
+--[[
+    ================================================================================================
+    IS THIS SERVER-SIDE POSITION A FACT, OR IS IT JUST WHERE WE PUT THE CAR?
+    ================================================================================================
+
+    A server-side entity's position is maintained by its network owner. Once the driver has walked
+    away and ownership has lapsed, the value the server holds stops being updated - and what it is
+    stale AT is the position the server created the entity with. So a stale read does not look like
+    an error. It looks like a perfectly ordinary position, and it is the position from BEFORE the
+    drive.
+
+    That is the 1.0.15 bug exactly: a correct parked position, written by the client that was
+    driving, overwritten seconds later on despawn by a read that had never moved. Three flags on
+    the live entry currently stand between that read and the row, and they work - but they are a
+    heuristic about who might have moved the vehicle, not a test of whether the number is real.
+
+    This is the test. We know what the stale value would be, because we wrote it: it is the
+    position the entity was created at. If the read has not moved from there, it carries no
+    information and is refused. If it has moved, something simulated the vehicle and the value is
+    a fact.
+
+    The one thing it gets wrong is a vehicle driven away and returned to within a few centimetres
+    of where it started, whose real position is then refused - and refusing it leaves the stored
+    position, which in that case is correct anyway. A false negative that costs nothing is the
+    right side to be wrong on.
+
+    Returns the position and rotation, or nil.
+]]
+local function poseIfFresh(entry)
+    if not entry or not entry.entity then return nil end
+
+    local position = safeCoords(entry.entity)
+    if not position then return nil end
+
+    local sx, sy, sz = tonumber(entry.spawnX), tonumber(entry.spawnY), tonumber(entry.spawnZ)
+
+    -- Nothing to compare against, so nothing can be proven either way. An adopted vehicle has
+    -- no spawn position because the server did not place it; its position was read from the
+    -- world in the first place, which is the case this test is not about.
+    if sx and sy and sz then
+        local dx, dy, dz = position.x - sx, position.y - sy, position.z - sz
+
+        -- Five centimetres, the same threshold the writer uses to decide a position changed.
+        if (dx * dx + dy * dy + dz * dz) < (0.05 * 0.05) then
+            return nil
+        end
+    end
+
+    return position, safeRotation(entry.entity)
 end
 
 local function safeExists(entity)
@@ -671,6 +780,14 @@ function Spawn.create(record, players)
         placedAt = Park.ticks(),
         -- Not usable yet. `ready` becomes true when a client has been told to restore it.
         ready = false,
+
+        --[[
+            WHERE THE SERVER PUT IT. This is what a stale server-side read returns, so it is
+            what makes a stale read detectable. See `poseIfFresh`.
+        ]]
+        spawnX = record.pos_x,
+        spawnY = record.pos_y,
+        spawnZ = record.pos_z,
     })
 
     pending[record.id] = Park.ticks()
@@ -853,8 +970,9 @@ function Spawn.despawn(id, reason)
         and not entry.nudged and not entry.parked
 
     if record and couldHaveMoved and safeExists(entity) then
-        local position = safeCoords(entity)
-        local rotation = safeRotation(entity)
+        -- `poseIfFresh` rather than a bare read: see its note. The flags above say who MIGHT
+        -- have moved it; this says whether the number actually moved.
+        local position, rotation = poseIfFresh(entry)
 
         if position and rotation then
             Store.update(id, {

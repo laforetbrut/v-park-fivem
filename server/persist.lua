@@ -577,26 +577,51 @@ local function sweep()
     local players = Spawn.onlinePlayers()
     if #players == 0 then return end
 
-    -- Group the vehicles due this slice by the client nearest them, so each client gets one
-    -- message listing everything it is responsible for.
+    --[[
+        Group the vehicles due this slice by the client nearest them, so each client gets one
+        message listing everything it is responsible for.
+
+        A VEHICLE SOMEBODY IS DRIVING IS TREATED DIFFERENTLY, IN BOTH HALVES OF THAT SENTENCE.
+
+        `due this slice`: it is due EVERY slice. The slice exists so that three thousand parked
+        cars are not hashed at once, and a parked car has nothing to say - it is provably
+        identical to the last capture. A car being driven is the one thing in the live set whose
+        position is changing, and it is at most one per player, so the whole reason for slicing
+        does not apply to it. Every 30 seconds becomes every 7.5, for a handful of vehicles.
+
+        `the client nearest them`: nearest is computed from the STORED position, which for a car
+        being driven is where the drive STARTED. Drive further than the streaming radius and the
+        capture was asked of a client that does not have the vehicle in scope, so it answered
+        nothing about it - silently, because a client that cannot see a vehicle is not an error.
+        The vehicle then had nothing written for it until it was parked, and if the parked report
+        never arrived - the player disconnected at the wheel - the drive was lost.
+
+        The occupant is the exact answer, not an estimate: they are sitting in it.
+    ]]
     local perClient = {}
     local index = 0
 
     for id, entry in pairs(Store.allLive()) do
         index = index + 1
 
-        if (index % slices) + 1 == sliceCursor then
+        local driving = entry.driven == true and entry.occupant ~= nil
+
+        if driving or (index % slices) + 1 == sliceCursor then
             local record = Store.get(id)
 
             if record and entry.entity and DoesEntityExist(entry.entity) then
                 local best, bestDistance
 
-                for _, player in ipairs(players) do
-                    if player.bucket == record.bucket then
-                        local dx, dy = player.x - record.pos_x, player.y - record.pos_y
-                        local distance = dx * dx + dy * dy
-                        if not bestDistance or distance < bestDistance then
-                            best, bestDistance = player.src, distance
+                if driving then
+                    best = entry.occupant
+                else
+                    for _, player in ipairs(players) do
+                        if player.bucket == record.bucket then
+                            local dx, dy = player.x - record.pos_x, player.y - record.pos_y
+                            local distance = dx * dx + dy * dy
+                            if not bestDistance or distance < bestDistance then
+                                best, bestDistance = player.src, distance
+                            end
                         end
                     end
                 end
@@ -884,11 +909,29 @@ end
     the middle of the motorway, which `Config.Placement` handles far better than losing it
     would be handled.
 ]]
+--[[
+    A player disconnected. Write down what they were responsible for before the answer is gone.
+
+    `placer` WAS THE WRONG PLAYER, and it is the same mistake 1.0.16 was made of: the placer is
+    the client the server nominated to dress and place the vehicle, not the person who was
+    driving it. Those are the same client only on a single-player test, and they stop being the
+    same the moment the placer drives away. So a player who got into somebody else's restored
+    vehicle and then disconnected at the wheel marked nothing dirty and flushed nothing.
+
+    `occupant` is who the server watched get in, which is the person whose disconnect actually
+    loses information. Both are marked now: the placer because the vehicle is about to lose the
+    client responsible for it, the occupant because they were the one moving it.
+
+    What this flushes is what the store already holds, which is the last capture - it does not
+    read a new position. That is why the sweep above puts a driven vehicle in every slice: this
+    trigger can only save what something else has already captured, so the value of it is set by
+    how recent that capture is.
+]]
 function Persist.onPlayerDropped(src)
     if not (saveConfig().triggers or {}).onDisconnect then return end
 
     for id, entry in pairs(Store.allLive()) do
-        if entry.placer == src then
+        if entry.placer == src or entry.occupant == src then
             Store.markDirty(id)
         end
     end
