@@ -7,6 +7,100 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.27] - 2026-09-09
+
+**Nothing waits, and the neons were never a save problem at all.**
+
+`/vparkprops`, added one release ago to stop the guessing, settled both of these in a single
+screenshot. It showed `stored neons 1,1,1,1` - so the save had been working - and it showed
+`engine off` beside `live neons 1,1,1,1`, which disproves the reason given in 1.0.25. **Switching a
+vehicle's engine off does not put its neons out.** That release's fix was harmless and its
+explanation was wrong.
+
+### Fixed
+
+- **A neon written without network control is written into the void.** This is the failure that cost
+  1.0.9 the vehicle colours, in a different property: a native applied by a client that does not own
+  the entity takes effect locally and is overwritten by the owner's next sync, silently, within a
+  frame or two.
+
+  The neons are applied twice on a restore - at the end of the property apply, which holds control,
+  and again after `Placement.place`, which turns the engine off on its way past. The second is the
+  one that matters, and by then the control taken for the placement may have lapsed. So it wrote,
+  the owner's sync said otherwise, and the vehicle came back dark with the right value sitting in
+  the database.
+
+  It asks for control and writes again now, **reads the value back**, and retries up to three times
+  a quarter of a second apart. If it still disagrees, that goes in the log with the vehicle's id -
+  so the next report is a line rather than another release.
+
+- **The first change is sent at once. Only the ones behind it wait.** 1.0.26 waited 1.5 seconds
+  before sending anything, to collapse a mod shop visit into one message. Right instinct, wrong
+  edge: it made every change late, including the single change somebody makes and then immediately
+  drives away from. Leading edge now - the first send is immediate and anything within the window
+  folds into one follow-up.
+
+- **A write blocked by the cooldown is deferred, not dropped.** `Persist.touch` marked the row dirty
+  and left it for the sweep, up to thirty seconds away, so a second change inside the ten-second
+  window looked like nothing had been saved at all. Reported exactly that way. The cooldown still
+  collapses a vehicle being rammed repeatedly into one write - and that write now happens, at the
+  end of the window.
+
+- **A repair by anything other than v-park is noticed at once.** 1.0.26 made the capture sweep see
+  it; the sweep is up to thirty seconds away and never runs at all if the vehicle despawns first.
+  The client now watches body health on every tracked vehicle each tick - one native call - and
+  reports the moment it moves, which is what makes "fix it and drive off" stick.
+
+- **Every panel action writes immediately.** Repair, clean, refuel, lock, rename and transfer all
+  called `Store.update`, which queues the row for a flush up to fifteen seconds later. They go
+  through the immediate path now, which is what `Config.Save.triggers` has always described.
+
+113 automated checks on a real qb-core server with oxmysql and MariaDB 11.4, and 20 static check
+groups over 32 Lua files.
+
+---
+
+## [1.0.27] - 2026-09-09 (français)
+
+**Plus rien n'attend, et les néons n'ont jamais été un problème de sauvegarde.**
+
+`/vparkprops`, ajouté il y a une version pour arrêter de deviner, a tranché les deux en une
+capture d'écran. Elle montrait `stored neons 1,1,1,1` - donc l'enregistrement marchait - et
+`engine off` à côté de `live neons 1,1,1,1`, ce qui contredit la raison donnée en 1.0.25.
+**Couper le moteur d'un véhicule n'éteint pas ses néons.** Le correctif de cette version était
+inoffensif et son explication était fausse.
+
+### Corrigé
+
+- **Un néon écrit sans contrôle réseau est écrit dans le vide.** C'est la panne qui avait
+  coûté les couleurs en 1.0.9, sur une autre propriété : un native appliqué par un client qui ne
+  possède pas l'entité prend effet en local puis est écrasé par la synchro du propriétaire,
+  silencieusement.
+
+  Les néons sont appliqués deux fois à la restauration, et la seconde - après `Placement.place` -
+  tombe juste après l'expiration du contrôle pris pour le placement. Elle redemande le contrôle,
+  **relit ce qu'elle a écrit**, et réessaie jusqu'à trois fois. Si ça ne tient toujours pas,
+  ça part dans le log avec l'id du véhicule.
+
+- **La première modification part sur-le-champ. Seules les suivantes attendent.** La 1.0.26
+  patientait 1,5 seconde avant d'envoyer quoi que ce soit. Bonne intention, mauvais bord : toutes
+  les modifications devenaient tardives, y compris celle qu'on fait juste avant de partir.
+
+- **Une écriture bloquée par l'anti-spam est reportée, plus jetée.** `Persist.touch` marquait la
+  ligne et la laissait au balayage, jusqu'à trente secondes plus tard.
+
+- **Une réparation faite par autre chose que v-park est remarquée immédiatement.** Le client
+  surveille la santé de la carrosserie de chaque véhicule suivi à chaque tick - un seul appel
+  natif - et le signale dès qu'elle bouge.
+
+- **Chaque action du panneau écrit immédiatement.** Réparer, nettoyer, remplir, verrouiller,
+  renommer et transférer passaient par une file vidée jusqu'à quinze secondes plus tard.
+
+113 vérifications automatisées sur un vrai serveur qb-core avec oxmysql et MariaDB 11.4, et 20
+groupes de vérifications statiques sur 32 fichiers Lua.
+
+---
+
 ## [1.0.26] - 2026-09-09
 
 **Nothing waits to be saved any more, and a repaired car stops coming back damaged.**

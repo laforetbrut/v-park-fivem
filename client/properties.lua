@@ -614,18 +614,66 @@ end
 ]]
 local function applyNeons(vehicle, properties)
     if type(properties) ~= 'table' then return end
+    if type(properties.neonEnabled) ~= 'table' then return end
 
-    if type(properties.neonEnabled) == 'table' then
+    local colour = properties.neonColor
+
+    local function write()
         for index = 0, 3 do
             SetVehicleNeonLightEnabled(vehicle, index, properties.neonEnabled[index + 1] == true)
         end
+
+        if type(colour) == 'table' and #colour >= 3 then
+            Properties.native('SetVehicleNeonLightsColour', 'SetVehicleNeonLightsColor',
+                vehicle, colour[1], colour[2], colour[3])
+        end
     end
 
-    local colour = properties.neonColor
-    if type(colour) == 'table' and #colour >= 3 then
-        Properties.native('SetVehicleNeonLightsColour', 'SetVehicleNeonLightsColor',
-            vehicle, colour[1], colour[2], colour[3])
+    local function correct()
+        for index = 0, 3 do
+            local wanted = properties.neonEnabled[index + 1] == true
+            if IsVehicleNeonLightEnabled(vehicle, index) ~= wanted then return false end
+        end
+        return true
     end
+
+    write()
+
+    -- Already right, and nothing was fighting us for it.
+    if correct() then return true end
+
+    --[[
+        ================================================================================================
+        A NEON WRITTEN WITHOUT NETWORK CONTROL IS WRITTEN INTO THE VOID.
+        ================================================================================================
+
+        This is the failure that cost 1.0.9 the vehicle colours, in a different property: a native
+        applied by a client that does not own the entity takes effect locally and is then overwritten
+        by the owner's next sync, silently and within a frame or two.
+
+        The neons are applied twice on a restore - at the end of the property apply, which holds
+        control, and again after `Placement.place`, which turns the engine off and puts the lights
+        out on its way past. That second one is the one that matters, and by then the control taken
+        for the placement may have lapsed. So it wrote, the owner's sync said otherwise, and the
+        vehicle came back dark with the right value sitting in the database.
+
+        Asking for control and writing again is the fix. Reading the value back afterwards is what
+        makes it honest: if it still disagrees, that goes in the log with the vehicle's id, and the
+        next report is a line rather than a guess.
+    ]]
+    if Placement and Placement.takeControl then
+        Placement.takeControl(vehicle, 1000)
+    end
+
+    write()
+
+    if correct() then return true end
+
+    Park.debug('neons would not stay on %d: wanted %s, got %s', vehicle,
+        tostring(properties.neonEnabled[1] == true),
+        tostring(IsVehicleNeonLightEnabled(vehicle, 0)))
+
+    return false
 end
 
 Properties.applyNeons = applyNeons

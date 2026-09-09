@@ -8,6 +8,38 @@ out of it.
 
 ---
 
+## [2026-09-09 22:30] - The diagnostic paid for itself, and disproved the previous release
+
+**Context:** neons had survived four releases of attempts. `/vparkprops`, added in 1.0.26 precisely
+to stop the guessing, was run by the tester and screenshotted.
+
+**Error:** two findings in one reading. `stored neons 1,1,1,1` - the save had been working all
+along, so every release that treated this as a capture problem was aimed at the wrong half. And
+`engine off` printed beside `live neons 1,1,1,1` - which disproves 1.0.25's stated cause outright.
+Switching a vehicle's engine off does not put its neons out.
+
+**Root cause:** a native applied without network control. The neons are written twice on a restore,
+and the second write - after `Placement.place` - lands after the control taken for the placement may
+have lapsed. A property native applied by a client that does not own the entity takes effect locally
+and is overwritten by the owner's next sync, within a frame or two, with nothing logged. This is
+exactly the 1.0.9 colour failure in a different property.
+
+**Fix:** ask for control, write again, READ THE VALUE BACK, and retry up to three times. A write that
+still will not hold is logged with the vehicle's id.
+
+**Prevention:** two.
+
+The diagnostic was worth more than the four releases that preceded it. `/vparkwhere` did this for
+positions and ended five releases of theories; `/vparkprops` did it for properties in one screenshot.
+When a class of bug recurs, the next thing to build is the instrument, not the fix.
+
+And: 1.0.25 shipped a fix with a stated cause that was never verified. The fix was harmless, the
+explanation was wrong, and it went into the changelog as fact. A cause that has not been demonstrated
+should be written as a hypothesis, or the release should carry the instrument that would demonstrate
+it.
+
+---
+
 ## [2026-09-09 21:10] - A documented mechanism that nothing called, on both sides
 
 **Context:** the tester objected to a test step that said "wait 30 seconds", on the grounds that no

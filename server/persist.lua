@@ -47,6 +47,9 @@ local nextToken = 0
 -- Vehicles whose immediate-write cooldown has not expired. id -> tick.
 local cooldown = {}
 
+-- Vehicles with a write already scheduled for the end of their cooldown. See `Persist.touch`.
+local deferred = {}
+
 -- The rotating slice cursor for the sweep.
 local sliceCursor = 0
 
@@ -1103,8 +1106,34 @@ function Persist.touch(id, trigger)
     local last = cooldown[id]
 
     if last and (Park.ticks() - last) < cooldownMs then
+        --[[
+            DEFERRED, NOT DROPPED.
+
+            This used to mark the row dirty and leave it for the sweep, which is up to thirty
+            seconds away - so a second change inside the cooldown looked to the player like
+            nothing had been saved at all. Reported exactly that way: "faut attendre 10 secondes,
+            si on se tp loin aussitot rien est enregistre".
+
+            The cooldown is here to stop a vehicle being rammed repeatedly from writing a row per
+            impact. It does that just as well by collapsing everything in the window into ONE
+            write at the end of it, and that write actually happens.
+        ]]
         Store.markDirty(id)
         stats.skipped = stats.skipped + 1
+
+        if not deferred[id] then
+            deferred[id] = true
+
+            SetTimeout(cooldownMs - (Park.ticks() - last) + 50, function()
+                deferred[id] = nil
+
+                if Store.get(id) then
+                    cooldown[id] = Park.ticks()
+                    Database.thread(function() Persist.flushNow() end)
+                end
+            end)
+        end
+
         return false
     end
 

@@ -151,6 +151,21 @@ Actions.askClient = askClient
     Two and a half metres to the left of the vehicle's own right vector is the passenger side,
     which is where you would walk up to it from.
 ]]
+--[[
+    Write this vehicle to the database now, rather than at the next sweep.
+
+    Every action below changes something a player can see, and a player who repairs a car and
+    drives off expects the repair to have been saved before they got out of the door. It was not:
+    these all called `Store.update`, which marks the row dirty, and the flush that acts on that is
+    up to fifteen seconds away - up to thirty if the change also had to wait for a capture.
+
+    `Persist.touch` collapses repeated calls through `Config.Save.triggerCooldown` and defers rather
+    than drops anything inside that window, so calling it on every action is safe.
+]]
+local function writeNow(id, trigger)
+    if Persist and Persist.touch then Persist.touch(id, trigger) end
+end
+
 function Actions.teleportTo(src, reference)
     local record, err = target(src, reference, true)
     if not record then return false, err end
@@ -297,6 +312,8 @@ function Actions.repair(src, reference)
     Database.audit('repair', Bridge.characterId(src), Bridge.name(src), record.id, nil)
     Webhook.admin('repair', src, record.plate or record.id, { model = record.model_name })
 
+    writeNow(record.id, 'onDamage')
+
     return true, 'notify.repaired'
 end
 
@@ -312,6 +329,8 @@ function Actions.clean(src, reference)
     local properties = record.properties or {}
     properties.dirtLevel = 0.0
     Store.update(record.id, { properties = properties, touched_at = Park.now() })
+
+    writeNow(record.id, 'onDamage')
 
     return true, 'notify.cleaned'
 end
@@ -338,6 +357,8 @@ function Actions.refuel(src, reference, level)
 
     Webhook.admin('refuel', src, record.plate or record.id, { level = level })
 
+    writeNow(record.id, 'onDamage')
+
     return true, 'notify.refuelled'
 end
 
@@ -353,6 +374,8 @@ function Actions.setLock(src, reference, locked)
     local properties = record.properties or {}
     properties.lockState = locked and 2 or 1
     Store.update(record.id, { properties = properties, touched_at = Park.now() })
+
+    writeNow(record.id, 'onLockChange')
 
     return true, locked and 'notify.locked' or 'notify.unlocked'
 end
@@ -382,6 +405,8 @@ function Actions.setOwner(src, reference, targetSrc)
 
     Bridge.notify(targetSrc, 'adminAction',
         L('notify.given_vehicle', record.model_name or L('vehicle.unknown')), 'success')
+
+    writeNow(record.id, 'onOwnerChange')
 
     return true, 'notify.owner_set'
 end
@@ -413,6 +438,8 @@ function Actions.rename(src, reference, label)
     if entry and entry.entity and DoesEntityExist(entry.entity) then
         Entity(entry.entity).state:set('vpark:label', label ~= '' and label or nil, true)
     end
+
+    writeNow(record.id, 'onOwnerChange')
 
     return true, 'notify.renamed'
 end

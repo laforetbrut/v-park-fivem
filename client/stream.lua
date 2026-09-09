@@ -242,14 +242,25 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
             THE PLACEMENT SWITCHES THE ENGINE OFF TOO, SO THE NEONS GO BACK ON AFTER IT.
 
             `Properties.apply` already puts them on last for the same reason, and that is not
-            enough on its own: `Placement.place` runs afterwards and ends with
-            `SetVehicleEngineOn(entity, false, ...)`, which puts the vehicle's lights out again.
+            enough on its own: `Placement.place` turns the engine off on its way past, which puts
+            the vehicle's lights out again.
 
-            Cheap - four calls and a colour, on a vehicle that has just been restored anyway - and
-            it is the difference between neons surviving a restart and never coming back at all.
+            On its own thread and repeated, because this is the moment network control is most
+            likely to have just lapsed - see the note in `applyNeons`, which asks for control and
+            checks its own work. Three attempts a quarter of a second apart covers a vehicle whose
+            ownership is still settling, and stops at the first one that holds.
         ]]
         if type(data.properties) == 'table' and Properties.applyNeons then
-            pcall(Properties.applyNeons, entity, data.properties)
+            CreateThread(function()
+                for _ = 1, 3 do
+                    if not DoesEntityExist(entity) then return end
+
+                    local ok, held = pcall(Properties.applyNeons, entity, data.properties)
+                    if ok and held then return end
+
+                    Wait(250)
+                end
+            end)
         end
 
         if result.ok then
@@ -418,6 +429,27 @@ CreateThread(function()
                 else
                     local distance = #(GetEntityCoords(record.entity) - playerPosition)
                     if distance < nearestDistance then nearestDistance = distance end
+
+                    --[[
+                        SOMETHING ELSE CHANGED THIS VEHICLE.
+
+                        A repair from txAdmin, a mechanic script, a collision handled by another
+                        resource: none of them tell v-park anything, and the capture sweep would
+                        not look at a frozen vehicle at all. Body health is one native call per
+                        tracked vehicle per tick and it moves for a repair and for damage alike.
+
+                        Reported the moment it moves, which is what makes "fix it and drive off"
+                        stick. Before this, the repair was noticed at the next sweep - up to thirty
+                        seconds later, and never at all if the vehicle despawned first.
+                    ]]
+                    local health = GetVehicleBodyHealth(record.entity)
+
+                    if record.seenHealth == nil then
+                        record.seenHealth = health
+                    elseif math.abs(health - record.seenHealth) >= 1.0 then
+                        record.seenHealth = health
+                        Stream.dirty(id)
+                    end
 
                     if shouldWake(record, playerPosition) then
                         if Placement.wake(record.entity) then
@@ -607,27 +639,62 @@ end
     The server re-checks everything and rate-limits by `Config.Save.triggerCooldown`, so this is a
     hint about WHEN to look, never a claim that must be believed.
 ]]
-local pushAt = {}
-local PUSH_DELAY = 1500
+local lastPush = {}
+local trailing = {}
 
+-- How long after a send another change is folded into a single follow-up rather than sent on its
+-- own. NOT a delay before the first send: see below.
+local PUSH_WINDOW = 1500
+
+local function sendNow(id)
+    local record = tracked[id]
+    if not record or not record.entity or not DoesEntityExist(record.entity) then return end
+
+    local snapshot = Stream.snapshot(id)
+    if not snapshot then return end
+
+    lastPush[id] = Park.ticks()
+    TriggerServerEvent('vpark:server:changed', id, snapshot)
+end
+
+--[[
+    ================================================================================================
+    THE FIRST CHANGE GOES AT ONCE. ONLY THE ONES BEHIND IT WAIT.
+    ================================================================================================
+
+    1.0.26 waited 1.5 seconds before sending anything, to collapse a mod shop visit into one
+    message. That is the right instinct and the wrong edge: it made EVERY change late, including
+    the single change somebody makes and then immediately drives away from. Repair a car, teleport
+    off, and the send never happened.
+
+    Leading edge instead. The first change is sent immediately - no timer, no wait - and anything
+    that follows within `PUSH_WINDOW` is folded into one trailing send at the end of the window. A
+    mod shop still costs two messages rather than twenty, and a single change costs nothing but the
+    message itself.
+
+    This is the same shape as the parked position report, which has always been instant and which
+    the tester confirms works: "quand on quitte le vehicule et part aussitot la position est bien
+    enregistree".
+]]
 local function pushChange(id)
-    local due = Park.ticks() + PUSH_DELAY
-    pushAt[id] = due
+    local now = Park.ticks()
+    local last = lastPush[id]
+
+    if not last or (now - last) >= PUSH_WINDOW then
+        sendNow(id)
+        return
+    end
+
+    -- Inside the window. One follow-up covers everything that happens in it.
+    if trailing[id] then return end
+    trailing[id] = true
+
+    local wait = PUSH_WINDOW - (now - last)
 
     CreateThread(function()
-        Wait(PUSH_DELAY)
-
-        -- Something changed again while we waited; that later thread owns the send.
-        if pushAt[id] ~= due then return end
-        pushAt[id] = nil
-
-        local record = tracked[id]
-        if not record or not record.entity or not DoesEntityExist(record.entity) then return end
-
-        local snapshot = Stream.snapshot(id)
-        if snapshot then
-            TriggerServerEvent('vpark:server:changed', id, snapshot)
-        end
+        Wait(wait)
+        trailing[id] = nil
+        sendNow(id)
     end)
 end
 
