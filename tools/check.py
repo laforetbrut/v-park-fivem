@@ -1109,6 +1109,106 @@ def check_refusal_reasons(english):
 
 
 # ==============================================================================================
+# 20. A local is not callable before it is declared
+#
+# `local function f` binds the name at the line it appears on, and NOT before. A call written
+# above that line does not reach it: the name resolves to a global, the global is nil, and the
+# call raises `attempt to call a nil value (global 'f')` - at run time, in whatever handler
+# happens to reach it, with a perfectly valid parse.
+#
+# That is why the Lua parse in group 1 does not catch it, and why this shipped in 1.0.16 and
+# survived six releases: `onEnter` in client/track.lua called `vparkId` eighty-nine lines before
+# its declaration, so ENTERING A VEHICLE RAISED, EVERY TIME. The on-entry offer and the `somebody
+# got in` message both live below that line, so a vehicle a player owned was never kept at the
+# moment they sat in it, and the server never learned the vehicle had been driven.
+#
+# A forward declaration is the fix and is recognised here: `local f` on its own line, assigned
+# later, binds at the `local f`.
+#
+# DELIBERATELY CONSERVATIVE, because a check that cries wolf gets ignored. A name that is also a
+# function PARAMETER anywhere in the file is skipped entirely: `Migrate.execute(commit, force,
+# report)` calls `report` legitimately hundreds of lines above an unrelated `local function report`
+# in a command handler, and telling that apart properly needs real scope analysis rather than line
+# numbers. Losing those is worth it - the bug this exists for is a top-level local called from a
+# top-level function above it, and that is still caught exactly.
+# ==============================================================================================
+
+# `local function NAME`, `local NAME =`, `local NAME` - the line the name starts being visible on.
+LOCAL_FUNCTION = re.compile(r'^\s*local\s+function\s+(\w+)\s*\(')
+LOCAL_ASSIGN = re.compile(r'^\s*local\s+([\w\s,]+?)\s*(?:=|$)')
+
+# Every parameter list in the file, and every loop variable: names bound by something this check
+# cannot see the extent of.
+PARAMETERS = re.compile(r'\bfunction\s*[\w.:]*\s*\(([^)]*)\)')
+FOR_NAMES = re.compile(r'\bfor\s+([\w\s,]+?)\s+(?:=|in)\b')
+
+
+def check_local_before_declaration():
+    global checks_run
+    checks_run += 1
+
+    for path in lua_files():
+        source = strip_comments(read(path))
+        name = relative(path)
+        lines = source.split('\n')
+
+        # First line each local name becomes visible on. First wins: a forward declaration is
+        # the whole point, and a later re-declaration of the same name does not un-declare it.
+        declared = {}
+
+        for number, line in enumerate(lines, start=1):
+            found = LOCAL_FUNCTION.match(line)
+            if found:
+                declared.setdefault(found.group(1), number)
+                continue
+
+            found = LOCAL_ASSIGN.match(line)
+            if found:
+                for part in found.group(1).split(','):
+                    part = part.strip()
+                    if part and part.isidentifier():
+                        declared.setdefault(part, number)
+
+        # Names bound elsewhere by a form this check does not track. Skipped rather than
+        # guessed at - see the note above.
+        shadowed = set()
+        for match in PARAMETERS.finditer(source):
+            for part in match.group(1).split(','):
+                part = part.strip()
+                if part and part.isidentifier():
+                    shadowed.add(part)
+        for match in FOR_NAMES.finditer(source):
+            for part in match.group(1).split(','):
+                part = part.strip()
+                if part and part.isidentifier():
+                    shadowed.add(part)
+
+        for name_ in shadowed:
+            declared.pop(name_, None)
+
+        if not declared:
+            continue
+
+        callable_names = '|'.join(re.escape(n) for n in declared)
+        calls = re.compile(r'(?<![\w.:])(' + callable_names + r')\s*\(')
+
+        for number, line in enumerate(lines, start=1):
+            # The declaration line itself is not a call of the thing being declared.
+            if LOCAL_FUNCTION.match(line):
+                continue
+
+            for found in calls.finditer(line):
+                called = found.group(1)
+
+                if number < declared[called]:
+                    fail('scope',
+                         f'{name}:{number} calls `{called}`, which is not declared local until '
+                         f'line {declared[called]}. Above that line the name is a global, the '
+                         'global is nil, and the call raises at run time with a valid parse. '
+                         'Move the declaration up, or forward-declare it.')
+
+
+# ==============================================================================================
 
 def main():
     english = check_locales()
@@ -1131,6 +1231,7 @@ def main():
     check_locale_arity(english)
     check_store_near()
     check_refusal_reasons(english)
+    check_local_before_declaration()
 
     print(f'v-park: {checks_run} check groups run over {len(lua_files())} Lua files')
 

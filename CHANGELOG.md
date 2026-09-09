@@ -7,6 +7,80 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.22] - 2026-09-09
+
+**Getting into a vehicle raised a script error, on every client, every time, for six releases.**
+
+```
+SCRIPT ERROR: @v-park/client/track.lua:140: attempt to call a nil value (global 'vparkId')
+```
+
+### Fixed
+
+- **`onEnter` called `vparkId` eighty-nine lines before it was declared.** `local function f` binds
+  the name on the line it appears on and NOT before, so above that line the name resolved to a
+  global, the global was nil, and the call raised.
+
+  The parse is valid, which is why nothing caught it. It arrived with the statebag change in 1.0.16
+  and has been live ever since.
+
+  **Everything below that call is what did not happen.** The on-entry offer, so a vehicle the player
+  owned was never kept the moment they sat in it - which is why a bought car did not appear in the
+  admin panel, and why the occasional one still did: those got in later through the settle path on
+  exit, which is a different function and worked. And `vpark:server:touched`, so the server never
+  learned a vehicle had been driven: no `driven` flag, so the despawn would not re-read the pose and
+  the driven-vehicle capture added in 1.0.18 never triggered on anything.
+
+### Prevention
+
+- **A local called above its own declaration now fails the build.** This is the third distinct bug in
+  three releases that a static check has caught only after it shipped, and it is the one with the
+  worst reach: a valid parse, a run-time raise, in a handler most players hit within a minute of
+  connecting.
+
+  Deliberately conservative. A name that is also a function parameter anywhere in the file is skipped
+  entirely - `Migrate.execute(commit, force, report)` calls `report` legitimately hundreds of lines
+  above an unrelated `local function report`, and telling those apart properly needs real scope
+  analysis rather than line numbers. Five false positives came out of the first draft and the check
+  was narrowed until only the real one remained, because a check that cries wolf gets ignored.
+
+---
+
+## [1.0.22] - 2026-09-09 (français)
+
+**Monter dans un véhicule levait une erreur de script, sur tous les clients, à chaque fois, depuis
+six versions.**
+
+### Corrigé
+
+- **`onEnter` appelait `vparkId` quatre-vingt-neuf lignes avant sa déclaration.** `local function f`
+  lie le nom à la ligne où il apparaît et **pas avant** : au-dessus de cette ligne le nom se
+  résout en global, le global est nil, et l'appel lève.
+
+  L'analyse syntaxique est valide, c'est pour ça que rien ne l'a attrapé. C'est arrivé avec le
+  changement de statebag en 1.0.16 et c'est en production depuis.
+
+  **Tout ce qui est en dessous de cet appel est ce qui n'arrivait pas.** L'offre à l'entrée, donc
+  un véhicule que le joueur possède n'était jamais conservé au moment où il s'asseyait dedans -
+  c'est pour ça qu'une voiture achetée n'apparaissait pas dans le panneau admin, et pourquoi une
+  de temps en temps y arrivait quand même : celles-là passaient plus tard par le chemin du
+  minuteur à la sortie, qui est une autre fonction et qui marchait. Et `vpark:server:touched`, donc
+  le serveur n'apprenait jamais qu'un véhicule avait été conduit.
+
+### Prévention
+
+- **Un local appelé au-dessus de sa propre déclaration fait maintenant échouer la
+  vérification.** C'est le troisième bug distinct en trois versions qu'une vérification statique
+  n'attrape qu'après coup, et celui qui portait le plus loin : analyse valide, erreur à
+  l'exécution, dans un handler que la plupart des joueurs déclenchent dans la minute qui suit leur
+  connexion.
+
+  Volontairement conservatrice : un nom qui est aussi un paramètre de fonction quelque part dans le
+  fichier est ignoré. Cinq faux positifs sont sortis du premier jet, et la vérification a été
+  resserrée jusqu'à ne garder que le vrai - une vérification qui crie au loup finit ignorée.
+
+---
+
 ## [1.0.21] - 2026-09-09
 
 **Rien n'était conservé du tout, et c'est la vérification de proximité de la 1.0.19 qui en était

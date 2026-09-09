@@ -526,7 +526,7 @@ webhooks off, after which the next real error goes unread for a fortnight.
   it, including one - console commands never being audited - that had survived two releases
   because the pcall that caught it logged a single line nobody read.
 
-  `tools/check.py` runs nineteen static groups over the Lua and the stylesheets, including a
+  `tools/check.py` runs twenty static groups over the Lua and the stylesheets, including a
   real Lua 5.4 parse of every file, a check that the theme file sets no layout property, and a check
   that the database column list and the value list agree position by position - which is a bug
   that has shipped twice and writes every value after the mismatch into the wrong column.

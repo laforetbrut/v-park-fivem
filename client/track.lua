@@ -129,6 +129,54 @@ Track.describe = describe
 -- entity -> { plate, at }. See the note in `onEnter`; it is not a plain "already asked" set.
 local offeredOnEntry = {}
 
+--[[
+    DECLARED ABOVE ITS CALLERS, AND THAT IS NOT A STYLE CHOICE.
+
+    `local function f` binds the name on the line it appears on and not before. This lived below
+    `onEnter` from 1.0.16 until 1.0.22, so the call in `onEnter` resolved to a global, the global
+    was nil, and GETTING INTO A VEHICLE RAISED - every time, on every client, for six releases.
+
+    Everything below that call is what did not happen: the on-entry offer, so a vehicle the player
+    owned was never kept the moment they sat in it, and `vpark:server:touched`, so the server never
+    learned the vehicle had been driven. The parse is valid, so nothing caught it until
+    `tools/check.py` group 20 was written to.
+
+    -------------------------------------------------------------------------------------------
+    IS THIS VEHICLE ONE V-PARK KEEPS, AND WHAT IS ITS ID?
+    -------------------------------------------------------------------------------------------
+
+    THE STATEBAG, NOT THE TRACKED TABLE. THIS DISTINCTION COST A RELEASE.
+
+    `Stream.byEntity` answers from `tracked`, which is populated by the `vpark:client:restore`
+    handler - and that instruction is sent to ONE client, the one the server nominated to dress
+    and place the vehicle. Every other client has an empty `tracked` for it.
+
+    So a player who gets into a vehicle that was restored for somebody else - which is most
+    vehicles, on a server with more than one player, and any vehicle at all after the nominated
+    client has driven off - was invisible to every check written against `tracked`. Getting out
+    of it reported nothing, and the parked position was never sent.
+
+    That is what "almost, but one of them still went back to an old place" was: the fix worked
+    when the player happened to be the placer and did nothing when they were not.
+
+    `vpark:id` is a REPLICATED statebag. Every client in scope has it, and a player who has just
+    spent time sitting in the vehicle has certainly had it for a while. It is the right question
+    to ask here.
+]]
+local function vparkId(vehicle)
+    if not vehicle or vehicle == 0 or not DoesEntityExist(vehicle) then return nil end
+
+    -- The tracked table first: it is a table lookup, and on the nominated client it is already
+    -- the answer.
+    local record, id = Stream.byEntity(vehicle)
+    if id then return id, record end
+
+    local ok, bagId = pcall(function() return Entity(vehicle).state['vpark:id'] end)
+    if ok and type(bagId) == 'string' then return bagId, nil end
+
+    return nil, nil
+end
+
 local function onEnter(vehicle)
     current.entity = vehicle
     current.netId = NetworkGetNetworkIdFromEntity(vehicle)
@@ -201,43 +249,6 @@ local function onEnter(vehicle)
         payload.onEntry = true
         TriggerServerEvent('vpark:server:candidate', payload)
     end
-end
-
---[[
-    Is this vehicle one v-park keeps, and what is its id?
-
-    -------------------------------------------------------------------------------------------
-    THE STATEBAG, NOT THE TRACKED TABLE. THIS DISTINCTION COST A RELEASE.
-    -------------------------------------------------------------------------------------------
-
-    `Stream.byEntity` answers from `tracked`, which is populated by the `vpark:client:restore`
-    handler - and that instruction is sent to ONE client, the one the server nominated to dress
-    and place the vehicle. Every other client has an empty `tracked` for it.
-
-    So a player who gets into a vehicle that was restored for somebody else - which is most
-    vehicles, on a server with more than one player, and any vehicle at all after the nominated
-    client has driven off - was invisible to every check written against `tracked`. Getting out
-    of it reported nothing, and the parked position was never sent.
-
-    That is what "almost, but one of them still went back to an old place" was: the fix worked
-    when the player happened to be the placer and did nothing when they were not.
-
-    `vpark:id` is a REPLICATED statebag. Every client in scope has it, and a player who has just
-    spent time sitting in the vehicle has certainly had it for a while. It is the right question
-    to ask here.
-]]
-local function vparkId(vehicle)
-    if not vehicle or vehicle == 0 or not DoesEntityExist(vehicle) then return nil end
-
-    -- The tracked table first: it is a table lookup, and on the nominated client it is already
-    -- the answer.
-    local record, id = Stream.byEntity(vehicle)
-    if id then return id, record end
-
-    local ok, bagId = pcall(function() return Entity(vehicle).state['vpark:id'] end)
-    if ok and type(bagId) == 'string' then return bagId, nil end
-
-    return nil, nil
 end
 
 local function onExit(vehicle)

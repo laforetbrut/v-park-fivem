@@ -8,6 +8,43 @@ out of it.
 
 ---
 
+## [2026-09-09 13:10] - A local called before its declaration, live for six releases
+
+**Context:** the user ran the test procedure and case 0.2 came back with a console error. Case 1.1 -
+a bought vehicle not appearing in the admin panel - turned out to be the same bug from the other end.
+
+**Error:** `@v-park/client/track.lua:140: attempt to call a nil value (global 'vparkId')`. `onEnter`
+called `vparkId` at line 140; `local function vparkId` was at line 229.
+
+**Root cause:** `local function f` binds the name at the line it appears on. A call above that line
+does not see it and resolves to a global instead, which is nil. The parse is entirely valid, so the
+Lua syntax check in group 1 passes, and the raise only happens at run time in whatever handler
+reaches the call. It arrived with the statebag change in 1.0.16 and survived six releases because
+nothing exercises `onEnter` without a game client, and the automated suite has none.
+
+Everything after the call is what silently did not happen: the on-entry offer (so an owned vehicle
+was never kept the moment the player sat in it, which is the entire `0 KEPT` report) and
+`vpark:server:touched` (so `driven` was never set, so the despawn would not re-read the pose and the
+1.0.18 driven-vehicle capture never fired).
+
+**Fix:** the function moved above its callers, with a note saying why the position is not a style
+choice. `tools/check.py` group 20 now fails the build on any call to a local made above its
+declaration.
+
+**Prevention:** the check itself, and a note about its shape. The first draft produced five false
+positives on `Migrate.execute(commit, force, report)`, where `report` is a parameter and the
+similarly-named local hundreds of lines below is unrelated. Names bound as parameters or loop
+variables are now skipped entirely rather than guessed at: distinguishing them properly needs real
+scope analysis, and a check that cries wolf gets ignored, which would cost more than the coverage
+given up.
+
+Second lesson, about testing rather than code: three releases in a row have shipped a defect that a
+static check caught immediately once it was written. The automated suite cannot reach the client half
+at all, so the client is where they accumulate. The manual test procedure exists for that reason, and
+this is the first bug it found.
+
+---
+
 ## [2026-09-09 04:40] - A proximity check emptied the entire store
 
 **Context:** the user reported that a bought vehicle did not appear in the admin panel, and the
