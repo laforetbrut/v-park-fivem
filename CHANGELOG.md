@@ -7,6 +7,84 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.33] - 2026-09-10
+
+**The stored value was being destroyed at the precise moment somebody checked it.**
+
+### Fixed
+
+- **Presence is not intent.** 1.0.32 let any occupied vehicle report its neons, on the reasoning
+  that the person sitting in it owns them. That is true of somebody who changes something and false
+  of somebody who gets in **to look** - which is exactly what a player does when checking whether
+  their neons survived.
+
+  So getting in fired an immediate report of whatever the failed restore had left, and the stored
+  value went to zero at the moment it was being inspected. The same mistake as 1.0.29's guard, in a
+  different place.
+
+  A report now goes only when the neon state is observed to **move** while somebody is in the
+  driver's seat. That is the only event in the game that means a person decided something about this
+  vehicle's neons.
+
+- **Changing the neons updates what the tick holds.** Without that, the two-second assertion loop
+  would put the old value back the moment the player got out, fighting them over the change they had
+  just made.
+
+### Confirmed, not guessed
+
+Two things established this release rather than assumed.
+
+**Losing neon state when a vehicle is stored and taken out again is known FiveM behaviour**, reported
+in the community independently of this resource. That is why holding the value and re-asserting it is
+the answer rather than finding the one place that drops it: there is no such place.
+
+**Neons only illuminate when the vehicle's lights are on.** A vehicle v-park has parked has its
+engine off, so correctly-restored neons do not glow until somebody gets in and turns the lights on.
+That is GTA, and the tester was right to say so - several of the test cases in earlier releases were
+asking for something the game does not do.
+
+113 automated checks on a real qb-core server with oxmysql and MariaDB 11.4, and 20 static check
+groups over 32 Lua files.
+
+---
+
+## [1.0.33] - 2026-09-10 (français)
+
+**La valeur enregistrée se détruisait au moment précis où quelqu'un l'inspectait.**
+
+### Corrigé
+
+- **La présence n'est pas l'intention.** La 1.0.32 laissait tout véhicule occupé rapporter ses
+  néons, en partant du principe que la personne assise dedans en est propriétaire. C'est vrai de
+  celui qui change quelque chose et faux de celui qui monte **pour regarder** - c'est-à-dire
+  exactement ce que fait un joueur qui vérifie si ses néons ont survécu.
+
+  Monter déclenchait donc un envoi immédiat de ce que la restauration ratée avait laissé, et la
+  valeur tombait à zéro pendant qu'on l'inspectait. La même erreur que le verrou de la 1.0.29,
+  ailleurs.
+
+  Le rapport ne part plus que quand l'état est observé en train de **bouger** pendant que quelqu'un
+  est au volant.
+
+- **Changer les néons met à jour ce que le tick maintient.** Sinon la boucle remettrait l'ancienne
+  valeur dès la sortie du joueur, en se battant contre le changement qu'il vient de faire.
+
+### Établi, pas supposé
+
+**Perdre l'état des néons quand un véhicule est rangé puis ressorti est un comportement connu de
+FiveM**, rapporté par la communauté indépendamment de ce script. C'est pour ça que tenir la valeur
+et la remettre est la réponse, plutôt que de chercher l'endroit unique qui la perd : il n'y en a pas.
+
+**Les néons ne s'illuminent que quand les feux du véhicule sont allumés.** Un véhicule garé par
+v-park a le moteur coupé, donc des néons correctement restaurés ne brillent pas tant que personne
+n'est monté allumer les phares. C'est du GTA, et le testeur avait raison de le dire - plusieurs cas
+de test des versions précédentes demandaient quelque chose que le jeu ne fait pas.
+
+113 vérifications automatisées sur un vrai serveur qb-core avec oxmysql et MariaDB 11.4, et 20
+groupes de vérifications statiques sur 32 fichiers Lua.
+
+---
+
 ## [1.0.32] - 2026-09-10
 
 **1.0.31 made neons impossible to fit. This fixes that, and finishes the job it started.**

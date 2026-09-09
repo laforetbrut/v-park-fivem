@@ -494,7 +494,35 @@ CreateThread(function()
                             end
                         end
 
+                        --[[
+                            ================================================================================
+                            SOMEBODY CHANGING THE NEONS IS NOT THE SAME AS SOMEBODY BEING PRESENT.
+                            ================================================================================
+
+                            1.0.32 let any occupied vehicle report its neons, on the reasoning that
+                            the person sitting in it owns them. That is true of somebody who changes
+                            something and false of somebody who gets in TO LOOK - which is what a
+                            player does when checking whether their neons survived. Getting in fired
+                            an immediate report of the state the failed restore had left, and the
+                            stored value went to zero at the exact moment it was being inspected.
+
+                            The same mistake as 1.0.29's guard, in a different place. Presence is
+                            not intent, and the way to tell them apart is to watch for the state
+                            actually moving.
+
+                            `neonsWanted` moves with it, or the tick below would put the old value
+                            back the moment the player got out - fighting them over the change they
+                            had just made.
+                        ]]
                         if record.neonSeen ~= nil and record.neonSeen ~= now then
+                            record.neonsChosen = true
+
+                            local wanted = {}
+                            for index = 0, 3 do
+                                wanted[index + 1] = IsVehicleNeonLightEnabled(record.entity, index)
+                            end
+                            record.neonsWanted = wanted
+
                             Stream.dirty(id)
                         end
 
@@ -1022,15 +1050,21 @@ function Stream.snapshot(id)
         need to detect anything, which is why it is the last one.
     ]]
     --[[
-        `driven` is set on the client that was nominated to place the vehicle, and a player fitting
-        neons at a mod shop is very often not that client - so the flag alone would refuse to report
-        the very change it exists to allow.
+        REPORTED ONLY AFTER SOMEBODY HAS ACTUALLY CHANGED THEM.
 
-        Somebody in the driver's seat right now is the same fact, observable from any machine.
+        Not "has been driven", and not "somebody is in it". Both of those are true of a player who
+        gets in to check whether their neons survived, and reporting then is how the stored value
+        was destroyed at the exact moment it was being inspected.
+
+        `neonsChosen` is set by the tick above, and only when the state is observed to MOVE while
+        somebody is in the driver's seat. That is the only event in the game that means a person
+        decided something about this vehicle's neons.
+
+        Everything else - a restore that did not take, ownership moving, the engine dropping the
+        state, which FiveM is known to do when a vehicle is stored and taken out again - leaves the
+        stored value alone, and the tick puts the lights back.
     ]]
-    local theirs = record.driven == true or not IsVehicleSeatFree(entity, -1)
-
-    if not theirs then
+    if record.neonsChosen ~= true then
         for _, key in ipairs(Schema.keys.neons or {}) do
             properties[key] = nil
         end

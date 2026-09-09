@@ -8,6 +8,39 @@ out of it.
 
 ---
 
+## [2026-09-10 04:20] - Presence is not intent, twice
+
+**Context:** the neon state had survived eight releases. Each one narrowed who is allowed to say the
+neons changed, and two of them landed on the same wrong answer in different places.
+
+**Error:** 1.0.29 cleared the protection on the stored value when somebody got into the vehicle.
+1.0.32, after that was fixed, let any occupied vehicle report its neons. Both treated a person being
+in the vehicle as a person choosing something about it.
+
+The person who gets in is, more often than not, the tester checking whether the value survived. So
+both versions destroyed the stored value at the exact moment it was being inspected - which also
+means every subsequent attempt was measured against a row the act of measuring had just corrupted.
+
+**Root cause:** using an observable that is easy to check (is somebody in the seat) as a proxy for
+one that is not (did somebody decide something). They coincide often enough to look right and differ
+in precisely the case being tested.
+
+**Fix:** watch the state itself. A report goes only when the neon state is seen to CHANGE while
+somebody is in the driver's seat, which is the actual event. The held value moves with it, or the
+assertion loop would fight the player over the change they had just made.
+
+**Prevention:** when a rule is about intent, the observable has to be the thing changing, not the
+circumstances around it. "Somebody is present" and "somebody acted" are different questions, and a
+system that cannot tell them apart will be wrong specifically when somebody is observing it.
+
+Also worth recording: two facts were established by research this release rather than assumed, and
+both should have been established eight releases earlier. Losing neon state across a store-and-retrieve
+cycle is known FiveM behaviour, which is why no single "correct place to set it" was ever going to
+exist. And neons only illuminate with the vehicle's lights on, which means several earlier test cases
+were asking for something the game does not do - the tester said so and was right.
+
+---
+
 ## [2026-09-10 03:30] - Holding a value at zero is not restoring it
 
 **Context:** 1.0.31 added a tick that re-asserts a vehicle's neons from the stored value every two
