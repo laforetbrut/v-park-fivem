@@ -122,8 +122,8 @@ local applying = {}
 
     Keyed by entity handle, which the engine reuses, so the model is stored alongside and a
     mismatch throws the entry away. `Deformation.clear` drops it on every path that lets go of a
-    vehicle - see the note on `tuningFingerprint` in client/properties.lua for what a stale cache
-    against a reused handle did in 1.0.1.
+    vehicle, because a stale cache against a reused handle hands one car's data to another - which
+    is exactly what 1.0.1 did with colours.
 ]]
 local lastRead = {}
 
@@ -513,20 +513,38 @@ function Deformation.apply(vehicle, flat, version)
                     if current >= item.target - tolerance then
                         item.done = true
                     else
-                        -- First pass seeds from the target; later passes correct by the
-                        -- remaining shortfall, which is what makes this converge rather
-                        -- than crawl up in fixed steps.
+                        --[[
+                            EACH CALL CARRIES THE SHORTFALL, NOT THE RUNNING TOTAL.
+
+                            `SetVehicleDamage` adds to the deformation already there. This used
+                            to pass `item.damage + correction` - the whole accumulated figure -
+                            on every pass, so the second hit added the first one again on top of
+                            the correction, and the third added both. The dents came out deeper
+                            than the ones that were captured, which is the report: the damage
+                            looks exaggerated when the vehicle comes back.
+
+                            The correction also carried `seedDamage`'s base, twenty, which is the
+                            floor for a FIRST hit on undamaged bodywork and far too much for a
+                            top-up of a few centimetres. A correction is proportional to what is
+                            missing and nothing else.
+                        ]]
+                        local step
+
                         if item.damage == nil then
-                            item.damage = seedDamage(item.target)
+                            step = seedDamage(item.target)
                         else
-                            item.damage = item.damage + seedDamage(item.target - current) * 0.6
+                            local gain = tonumber(options().seedGain) or 90.0
+                            local correction = tonumber(options().correctionFactor) or 0.35
+                            step = math.max(2.0, (item.target - current) * gain * correction)
                         end
+
+                        item.damage = step
 
                         SetVehicleDamage(
                             vehicle,
                             item.point.x, item.point.y, item.point.z,
-                            item.damage,
-                            item.damage,
+                            step,
+                            step,
                             true
                         )
 

@@ -7,6 +7,104 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.23] - 2026-09-09
+
+**Five defects from one manual test pass. Four of them were reported in the notes of cases the
+tester had marked as passing.**
+
+### Fixed
+
+- **A vehicle being driven could be deleted out from under its driver.** The streaming pass decided
+  what was out of range by measuring from `record.pos_x` - THE STORED POSITION, which is where the
+  vehicle was last written down and not where it is. For a car being driven those diverge at the
+  speed of the car.
+
+  Buy a car, drive away quickly, and a few seconds later the stored position is 350 m behind you:
+  the pass finds no player near it, calls it out of range and deletes it. It reappears at the stored
+  position the next time anybody goes near there, which is the report - "elle disparait et re
+  apparait au point de spawn".
+
+  The distance is now measured from the entity when the server can read it, because for a car with a
+  driver in it that value is live and maintained by the driver. And a vehicle with an occupant is
+  never collected, whatever any distance says.
+
+- **`tp`, `tpm` and noclip stopped moving vehicles.** A restored vehicle is frozen so it cannot fall
+  through the map, and `FreezeEntityPosition` means the entity IGNORES POSITION WRITES - including
+  every other resource's. An admin teleport moved the player and left the car behind, with nothing
+  in any log to explain it.
+
+  A vehicle v-park keeps is now unfrozen the moment somebody sits in it, on whichever client that
+  player is on. The existing wake did this only on the client the server had nominated to place the
+  vehicle, because it was keyed on that client's own restore table - the same distinction that cost
+  a release in 1.0.16. This one is keyed on the replicated statebag.
+
+- **Neons, extras and bumpers were never saved.** One cause, three symptoms. The tuning cache stored
+  the `modifications`, `extras` and `neons` groups in full, and the twelve-call fingerprint that
+  guarded it sampled none of them: not the bumpers (mods 1 and 2), not the extras, not the neon
+  colour. Extras and neons were even read fresh a few lines earlier and then overwritten by the
+  cached copy.
+
+  The cache's own note claimed the gap "requires a deliberate effort to construct". Fitting a front
+  bumper is the second thing anybody does at a mod shop.
+
+  **The cache is gone.** It could have been kept by widening the fingerprint, but widening it far
+  enough to be honest means reading the extras and every visual mod slot, which is most of what it
+  was avoiding. And the saving no longer buys anything: a frozen, untouched vehicle returns nil from
+  `Stream.snapshot` before it reaches the capture at all. Measured on a live server with 39 vehicles
+  in the world, the whole capture sweep averages 0.1 ms.
+
+- **Restored damage came back deeper than the damage that was captured.** `SetVehicleDamage` adds to
+  the deformation already there, and the convergence loop passed it the accumulated running total on
+  every pass - so the second hit applied the first one again on top of the correction, and the third
+  applied both. Each pass now carries only the shortfall, and a correction is proportional to what is
+  missing rather than carrying the base value meant for a first hit on undamaged bodywork.
+
+112 automated checks on a real qb-core server with oxmysql and MariaDB 11.4, and 20 static check
+groups over 32 Lua files.
+
+---
+
+## [1.0.23] - 2026-09-09 (français)
+
+**Cinq défauts sortis d'une seule passe de test manuel. Quatre d'entre eux étaient dans les notes
+de cas que le testeur avait cochés comme réussis.**
+
+### Corrigé
+
+- **Un véhicule en cours de conduite pouvait être supprimé sous son conducteur.** La passe de
+  streaming mesurait la distance depuis `record.pos_x` - la position **enregistrée**, c'est-à-dire
+  là où le véhicule a été écrit pour la dernière fois et pas là où il est. Pour une voiture qui
+  roule, les deux s'écartent à la vitesse de la voiture.
+
+  La distance est maintenant mesurée depuis l'entité quand le serveur peut la lire, et un véhicule
+  occupé n'est jamais collecté, quelle que soit la distance.
+
+- **`tp`, `tpm` et le noclip ne déplaçaient plus les véhicules.** Un véhicule restauré est gelé
+  pour qu'il ne traverse pas la carte, et `FreezeEntityPosition` fait qu'il **ignore toute écriture
+  de position** - y compris celles des autres ressources.
+
+  Un véhicule conservé par v-park est désormais dégelé dès que quelqu'un s'assied dedans, sur le
+  client où se trouve ce joueur.
+
+- **Les néons, les extras et les pare-chocs n'étaient jamais enregistrés.** Une cause, trois
+  symptômes : le cache de tuning stockait les modifications, les extras et les néons en entier, et
+  l'empreinte de douze appels qui le protégeait n'en échantillonnait aucun.
+
+  Le commentaire du cache affirmait que ce trou demandait &laquo;&nbsp;un effort délibéré&nbsp;&raquo;.
+  Poser un pare-chocs avant est la deuxième chose que fait n'importe qui chez un préparateur.
+
+  **Le cache est supprimé.** Mesuré sur un serveur en fonctionnement avec 39 véhicules dans le
+  monde, tout le balayage de capture est à 0,1 ms de moyenne.
+
+- **Les dégâts restaurés revenaient plus profonds que ceux capturés.** `SetVehicleDamage`
+  **ajoute** à la déformation existante, et la boucle lui renvoyait le cumul à chaque passe.
+  Chaque passe ne porte plus que ce qui manque.
+
+112 vérifications automatisées sur un vrai serveur qb-core avec oxmysql et MariaDB 11.4, et 20
+groupes de vérifications statiques sur 32 fichiers Lua.
+
+---
+
 ## [1.0.22] - 2026-09-09
 
 **Getting into a vehicle raised a script error, on every client, every time, for six releases.**

@@ -1115,7 +1115,7 @@ local function pass()
     local despawnBudget = tonumber(streaming().despawnsPerPass) or 20
     local despawned = 0
 
-    for id in pairs(Store.allLive()) do
+    for id, entry in pairs(Store.allLive()) do
         if despawned >= despawnBudget then break end
         if not wanted[id] then
             local record = Store.get(id)
@@ -1124,12 +1124,40 @@ local function pass()
                 pcall(Spawn.despawn, id, 'no record')
                 despawned = despawned + 1
             else
-                -- Wanted-set membership uses the spawn radius; the despawn radius is larger,
-                -- so a vehicle can be unwanted and still inside the hysteresis band. Only the
-                -- ones past the outer boundary actually go.
+--[[
+                    ================================================================================
+                    A VEHICLE SOMEBODY IS SITTING IN IS NEVER OUT OF RANGE.
+                    ================================================================================
+
+                    This measured the distance from each player to `record.pos_x` - THE STORED
+                    POSITION, which is where the vehicle was last written down, not where it is.
+                    For a car being driven those are different, and they diverge at the speed of
+                    the car.
+
+                    So: buy a car, drive away fast, and a few seconds later the stored position is
+                    350 m behind you. The pass finds nothing near it, calls it out of range, and
+                    DELETES THE CAR YOU ARE DRIVING. It comes back at the stored position the next
+                    time anybody goes near there, which is the report: it vanishes and reappears at
+                    the spawn point.
+
+                    Two answers, and both are needed. The entity's own position when the server can
+                    read it, because for a car with a driver in it that value is live and correct -
+                    it is maintained by the network owner, who is the driver. And an occupant check,
+                    because a vehicle with somebody in it must not be collected whatever any
+                    distance says.
+                ]]
+                if entry.occupant and Bridge.playerName(entry.occupant) then
+                    goto nextDespawn
+                end
+
+                local where = safeCoords(entry.entity)
+
+                local fromX = where and where.x or record.pos_x
+                local fromY = where and where.y or record.pos_y
+
                 local nearest = math.huge
                 for _, player in ipairs(players) do
-                    local dx, dy = player.x - record.pos_x, player.y - record.pos_y
+                    local dx, dy = player.x - fromX, player.y - fromY
                     local distance = dx * dx + dy * dy
                     if distance < nearest then nearest = distance end
                 end
@@ -1140,6 +1168,8 @@ local function pass()
                 end
             end
         end
+
+        ::nextDespawn::
     end
 
     -- ---------------------------------------------------------------- entity cap ---

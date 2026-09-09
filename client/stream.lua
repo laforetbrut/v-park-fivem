@@ -299,7 +299,6 @@ RegisterNetEvent('vpark:client:forget', function(id)
     ]]
     if record.entity then
         Deformation.clear(record.entity)
-        Properties.forget(record.entity)
     end
 
     if record.netId then byNet[record.netId] = nil end
@@ -394,10 +393,9 @@ CreateThread(function()
                     -- The caches MUST be dropped here as well as in `vpark:client:forget`.
                     -- This is the path a vehicle takes when the server restarts or the engine
                     -- culls it, and a cache entry left against a freed handle is one the game
-                    -- can hand to an entirely different vehicle - see `tuningFingerprint`.
+                    -- can hand to an entirely different vehicle.
                     if record.entity then
                         Deformation.clear(record.entity)
-                        Properties.forget(record.entity)
                     end
 
                     if record.netId then byNet[record.netId] = nil end

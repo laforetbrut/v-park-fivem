@@ -8,6 +8,47 @@ out of it.
 
 ---
 
+## [2026-09-09 17:20] - Four defects hiding in the notes of passing test cases
+
+**Context:** the first full manual pass came back 28 of 29 cases passing. The single failure was
+real, and so were three of the notes attached to cases the tester had marked green, plus one in the
+free-text summary.
+
+**Error:** four separate defects.
+
+1. The streaming pass measured despawn distance from the STORED position, so a vehicle driven fast
+   was deleted under its driver once the stored position fell 350 m behind, then re-created where the
+   row said it was.
+2. A restored vehicle stays frozen until driven, and `FreezeEntityPosition` makes the entity ignore
+   position writes from every resource - so admin teleports and noclip silently left cars behind.
+3. The tuning cache stored the modifications, extras and neon groups while the fingerprint guarding
+   it sampled none of them, so bumpers, extras and neon colours were never captured.
+4. The deformation convergence passed `SetVehicleDamage` its accumulated running total on every
+   pass, and that native adds to what is already there, so restored damage came back deeper each
+   cycle.
+
+**Root cause:** three of the four share a shape. A value was used as though it described the present
+when it describes the last time somebody wrote it down: the stored position in (1), the cached tuning
+block in (3), the accumulated damage figure in (4). (2) is different and is the recurring one - a
+mechanism v-park needs for itself (the freeze) with a side effect on every other resource that was
+never considered.
+
+**Fix:** measure from the entity and never collect an occupied vehicle; unfreeze on entry through the
+replicated statebag; delete the cache rather than widen a fingerprint that would then cost what the
+cache saved; send the shortfall rather than the total.
+
+**Prevention:** two things, and neither is a check.
+
+First, READ THE NOTES, NOT THE VERDICTS. Four of these five were written into notes on cases marked
+as passing, because the tester was answering the question the case asked and mentioning the odd thing
+separately. The next procedure asks for the odd thing explicitly.
+
+Second, when a fix touches something that already worked, the retest has to cover the thing that
+worked and say which fix would be to blame. That is now a section of its own in the procedure rather
+than a hope.
+
+---
+
 ## [2026-09-09 13:10] - A local called before its declaration, live for six releases
 
 **Context:** the user ran the test procedure and case 0.2 came back with a console error. Case 1.1 -

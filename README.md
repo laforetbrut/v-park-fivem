@@ -413,11 +413,11 @@ The design, in four sentences:
   rest costs the client almost nothing.
 
 Beyond that: the save sweep is sliced into quarters so the cost is a trickle rather than a
-sawtooth; the expensive half of a capture - seventy-five native calls of mod slots, colours,
-extras and neons - is cached against a twelve-call fingerprint and re-read only when somebody
-has actually fitted something; the other expensive half, the sixty-eight deformation samples, is
-cached the same way against body health, which cannot stay still while bodywork deforms, so an
-undamaged car costs one native call and an unchanged one costs one too; writes are batched into one upsert per 200 vehicles inside a
+sawtooth; the sixty-eight deformation samples are cached against body health, which cannot
+stay still while bodywork deforms, so an undamaged car costs one native call and an unchanged
+one costs one too; the tuning half is NOT cached, deliberately - it was, behind a twelve-call
+fingerprint that did not cover the bumpers, extras and neon colours the cache was storing, and
+silently losing a player's modifications is not worth a tenth of a millisecond; writes are batched into one upsert per 200 vehicles inside a
 transaction; the semi-persistence sweep walks an ownership index rather than the whole store;
 a placement takes one snapshot of the vehicle pool and every probe reads from it; the spiral
 search starts all of its shape tests before reading any of them, so forty-five candidates cost

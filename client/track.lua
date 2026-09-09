@@ -188,9 +188,30 @@ local function onEnter(vehicle)
     local id, record = vparkId(vehicle)
 
     if id then
+        --[[
+            NOTHING V-PARK KEEPS STAYS FROZEN WHILE SOMEBODY IS SITTING IN IT.
+
+            A restored vehicle is frozen so it cannot fall through the map before it is placed,
+            and `FreezeEntityPosition` does exactly what it says: THE ENTITY IGNORES POSITION
+            WRITES. That is the 1.0.9 lesson, and it applies to every other resource too - an
+            admin teleport, a `tpm`, a noclip, a tow script. The car simply stays where it was
+            while the player arrives somewhere else, with nothing in any log to explain it.
+
+            The wake in `Stream.lua` handles this already on the client that was nominated to
+            place the vehicle, and only there: it is keyed on that client's own restore table.
+            This is keyed on the REPLICATED statebag, so it runs on whichever machine the player
+            is actually on - the same distinction that cost a release in 1.0.16.
+
+            Unconditional, and cheap: unfreezing an entity that is not frozen does nothing.
+        ]]
+        FreezeEntityPosition(vehicle, false)
+
         -- Driven, so its position becomes worth recording. See `Stream.snapshot`. Only on the
         -- client that tracks it; the others have nothing to mark and do not capture it.
-        if record then record.driven = true end
+        if record then
+            record.driven = true
+            record.frozen = false
+        end
 
         -- `true`: somebody got IN it. See `Config.Cleanup` for why that is a different fact
         -- from the vehicle merely having been interacted with.
