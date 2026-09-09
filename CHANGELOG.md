@@ -7,6 +7,86 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.29] - 2026-09-09
+
+**Two mistakes of mine, found by reading my own instrument's silence.**
+
+The warning added in 1.0.27 to report a neon that would not hold never printed once, on a server
+where the neons were demonstrably being lost. That silence was the finding.
+
+### Fixed
+
+- **The verification could not fail, so it never did.** `applyNeons` wrote the value and read it
+  back in the same frame. A native write always takes effect LOCALLY, so that read agrees with
+  itself whatever the network thinks - the check passed every single time and the warning below it
+  was unreachable code.
+
+  What actually decides is whether the value survives the owner's next sync, a moment later. So a
+  watchdog comes back and looks: four times at 0.5, 1, 2 and 4 seconds, re-asserting the value if it
+  has drifted and declaring success only when it finds it already correct. The warning is evaluated
+  after all four, where it can genuinely fire.
+
+- **1.0.28's protection was on the wrong client.** It had the restoring client leave unproven groups
+  out of its own report, which is right and is not enough: **the capture is asked of whichever
+  client is nearest**, and every other client's idea of what is unproven is empty. That is the
+  distinction that cost a release in 1.0.16, made again.
+
+  The flag lives on the server now, where there is one of it. It is set when a restore is sent for a
+  vehicle whose neons are on, and while it is set the neon keys are dropped from any snapshot from
+  anybody. So a vehicle that came back dark cannot write its own failure over the player's value -
+  which is what made this permanent rather than intermittent, and what meant every previous attempt
+  was being tested against a row the last failure had already destroyed.
+
+  It is cleared when the placing client reports the neons held, or when somebody gets into the
+  vehicle - at which point whatever they do to it is deliberate, so turning your own neons off still
+  works.
+
+### Not tested this release
+
+The 113-check integration suite did **not** run for 1.0.29. The test server was in use and shares
+its database, so running it would have written and deleted rows underneath a live session. The
+twenty static groups pass. Said here rather than implied.
+
+---
+
+## [1.0.29] - 2026-09-09 (français)
+
+**Deux erreurs de ma part, trouvées en lisant le silence de mon propre instrument.**
+
+L'avertissement ajouté en 1.0.27 pour signaler un néon qui ne tient pas ne s'est jamais affiché,
+sur un serveur où les néons se perdaient manifestement. Ce silence était la trouvaille.
+
+### Corrigé
+
+- **La vérification ne pouvait pas échouer, donc elle n'a jamais échoué.** `applyNeons` écrivait
+  la valeur et la relisait dans la même frame. Une écriture native prend **toujours** effet en
+  local, donc cette relecture est d'accord avec elle-même quoi qu'en pense le réseau : le test
+  passait à chaque fois et l'avertissement en dessous était du code inatteignable.
+
+  Ce qui décide, c'est la survie à la synchro du propriétaire, un instant plus tard. Un chien de
+  garde repasse donc quatre fois - à 0,5 s, 1 s, 2 s et 4 s - réaffirme la valeur si elle a
+  dérivé, et ne déclare victoire que quand il la trouve déjà bonne.
+
+- **La protection de la 1.0.28 était sur le mauvais client.** Elle faisait filtrer le client qui
+  restaure, ce qui est juste et insuffisant : **la capture est demandée au client le plus proche**,
+  et chez lui la liste de ce qui n'est pas prouvé est vide. C'est la distinction qui avait coûté
+  la 1.0.16, refaite.
+
+  Le drapeau est sur le serveur désormais, où il n'y en a qu'un. Il est posé quand une
+  restauration part pour un véhicule dont les néons sont allumés, et tant qu'il est là les clés
+  néon sont retirées de tout instantané, de n'importe qui.
+
+  Il est levé quand le client placeur signale que les néons ont tenu, ou quand quelqu'un monte
+  dans le véhicule - à partir de là ce qui est fait est délibéré, donc éteindre ses propres
+  néons fonctionne toujours.
+
+### Non testé cette version
+
+La suite d'intégration de 113 vérifications **n'a pas tourné** pour la 1.0.29 : le serveur de
+test était utilisé et partage sa base de données. Les vingt groupes statiques passent.
+
+---
+
 ## [1.0.28] - 2026-09-09
 
 **A restore that fails no longer eats the data it failed to restore.**

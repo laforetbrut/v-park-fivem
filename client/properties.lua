@@ -639,7 +639,20 @@ local function applyNeons(vehicle, properties)
 
     write()
 
-    -- Already right, and nothing was fighting us for it.
+    --[[
+        READ BACK IMMEDIATELY, AND KNOW WHAT THAT PROVES: ALMOST NOTHING.
+
+        A native write always takes effect LOCALLY. Reading it back in the same frame therefore
+        agrees with itself whatever the network thinks, so this check passed every single time and
+        the warning below it never once printed - on a server where the neons were demonstrably
+        being lost. An instrument that cannot fail is not an instrument.
+
+        What actually decides is whether the value survives the owner's next sync, which happens
+        somewhere in the following second. That is checked by the watchdog in `client/stream.lua`,
+        which comes back and looks a few times after the restore has finished.
+
+        This is still worth doing: it catches an outright refusal, and it is the write itself.
+    ]]
     if correct() then return true end
 
     --[[

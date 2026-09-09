@@ -8,6 +8,42 @@ out of it.
 
 ---
 
+## [2026-09-10 00:30] - A verification that could not fail, and a guard on the wrong machine
+
+**Context:** the neons had survived six releases. 1.0.27 added a warning for a neon that would not
+hold; across two full test passes it never printed once, on a server where the neons were
+demonstrably being lost.
+
+**Error:** two, and the first explains why the second went unnoticed for so long.
+
+`applyNeons` wrote the value and read it back in the same frame. A native write always takes effect
+locally, so the read agrees with itself regardless of what the network does. The check passed every
+time and the warning under it was unreachable. Every release that relied on it was reading a green
+light from an instrument wired to nothing.
+
+Then 1.0.28's protection - having the restoring client omit unproven groups from its report - was on
+the wrong machine. The capture is requested from whichever client is nearest the vehicle, and that
+client's idea of what is unproven is empty. This is the same distinction that cost 1.0.16 a release,
+and I made it again in the same file.
+
+**Root cause:** for the first, confusing "did the call succeed" with "did the state change stick" on
+a networked entity. For the second, per-client state used to answer a question about the world.
+
+**Fix:** a watchdog that checks after the sync rather than during the write, four times with backoff,
+re-asserting on drift. And the unproven flag moved to the server, where there is one of it, cleared
+by the placing client on success or by anybody getting into the vehicle.
+
+**Prevention:** an instrument that has never fired on a system that is known to be failing is not
+evidence of health - it is a broken instrument, and it should be the first thing suspected rather
+than the last. Ask what would have to be true for it to fire, and check that that is reachable.
+
+And, for the second time in this project: per-client state cannot answer a question about the world.
+1.0.16 wrote that down. The next occurrence was in the same file, fourteen releases later, and the
+note did not stop it. Anything of the form "this client knows X about a vehicle" needs to be asked
+whether every client knows it.
+
+---
+
 ## [2026-09-09 23:45] - A failed restore was eating the data it failed to restore
 
 **Context:** the neons had survived five releases. Two `/vparkprops` screenshots of the same vehicle,

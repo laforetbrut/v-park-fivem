@@ -658,6 +658,33 @@ function Persist.applySnapshot(id, snapshot, proven)
     if type(snapshot.properties) == 'table' then
         local properties = Schema.filter(snapshot.properties)
 
+        --[[
+            ================================================================================================
+            A GROUP THE RESTORE HAS NOT PROVED IS NOT ACCEPTED FROM ANYBODY.
+            ================================================================================================
+
+            The client that restores a vehicle knows whether its neons actually held, and 1.0.28 had
+            it drop them from its own report when they had not. That was right and it was not
+            enough, for the reason that cost a release in 1.0.16: THE CAPTURE IS ASKED OF WHICHEVER
+            CLIENT IS NEAREST, and every other client's idea of what is unproven is empty.
+
+            So the flag lives here, where there is one of it. It is set when a restore is sent for a
+            vehicle whose neons are on, and cleared either by the restoring client saying they held
+            or by somebody getting into the vehicle - at which point whatever they do to it is
+            deliberate.
+
+            While it is set, a snapshot's neon keys are dropped and the stored value stands. That is
+            what stops a vehicle that came back dark from writing its own failure into the database,
+            which is what made this bug permanent rather than intermittent.
+        ]]
+        local live = Store.live(id)
+
+        if live and live.unverifiedNeons then
+            for _, key in ipairs(Schema.keys.neons or {}) do
+                properties[key] = nil
+            end
+        end
+
         -- A snapshot with no deformation means "not re-read", not "no damage". Keeping the
         -- stored one is what makes `Deformation.shouldRecapture` work: without this line the
         -- drift guard would silently erase every dent it declined to re-measure.

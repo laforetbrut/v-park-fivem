@@ -257,28 +257,69 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
         })
 
         --[[
-            THE PLACEMENT SWITCHES THE ENGINE OFF TOO, SO THE NEONS GO BACK ON AFTER IT.
+            ================================================================================================
+            THE NEON WATCHDOG, AND WHY A WATCHDOG RATHER THAN ANOTHER WRITE.
+            ================================================================================================
 
-            `Properties.apply` already puts them on last for the same reason, and that is not
-            enough on its own: `Placement.place` turns the engine off on its way past, which puts
-            the vehicle's lights out again.
+            Five releases went at this by writing the value again in a better place. Every one of
+            them wrote it successfully - the read-back in `applyNeons` agreed every time, and the
+            warning it logs on failure never printed once. The write is not the problem.
 
-            On its own thread and repeated, because this is the moment network control is most
-            likely to have just lapsed - see the note in `applyNeons`, which asks for control and
-            checks its own work. Three attempts a quarter of a second apart covers a vehicle whose
-            ownership is still settling, and stops at the first one that holds.
+            What happens is that the value is lost AFTERWARDS, in the second or so while the entity
+            settles: ownership moves, the placement finishes, the engine goes off, and somewhere in
+            there the neons go out. A check in the same frame as the write cannot see any of that,
+            which is why the instrument said everything was fine while the tester watched it fail.
+
+            So this comes back and looks. Four times, backing off, over about eight seconds. Each
+            look re-asserts the value if it has drifted, and the vehicle is marked as NOT TO BE
+            BELIEVED for neons until one of them finds it already correct.
+
+            That second half is what stops the bug being permanent. Until a check passes, the
+            capture leaves the neon keys out of its report entirely, so a vehicle sitting there dark
+            cannot overwrite the value the player chose - which is exactly what had been happening,
+            and what made every previous attempt look like it had failed even when it had not.
         ]]
         if type(data.properties) == 'table' and Properties.applyNeons then
-            CreateThread(function()
-                for _ = 1, 3 do
-                    if not DoesEntityExist(entity) then return end
+            local id = data.id
+            local properties = data.properties
 
-                    local ok, held = pcall(Properties.applyNeons, entity, data.properties)
-                    if ok and held then return end
+            if type(properties.neonEnabled) == 'table' then
+                unverified[id] = unverified[id] or {}
+                unverified[id].neons = true
 
-                    Wait(250)
-                end
-            end)
+                CreateThread(function()
+                    for _, wait in ipairs({ 500, 1000, 2000, 4000 }) do
+                        Wait(wait)
+
+                        if not DoesEntityExist(entity) then return end
+                        if tracked[id] == nil then return end
+
+                        local settled = true
+                        for index = 0, 3 do
+                            local wanted = properties.neonEnabled[index + 1] == true
+                            if IsVehicleNeonLightEnabled(entity, index) ~= wanted then
+                                settled = false
+                                break
+                            end
+                        end
+
+                        if settled then
+                            -- It held. Both this client and the server may believe neons again.
+                            if unverified[id] then unverified[id].neons = nil end
+                            TriggerServerEvent('vpark:server:verified', id, 'neons')
+                            return
+                        end
+
+                        pcall(Properties.applyNeons, entity, properties)
+                    end
+
+                    Park.warn('neons on %s would not hold after four attempts: wanted %s, got %s, '
+                        .. 'control %s', tostring(id),
+                        tostring(properties.neonEnabled[1] == true),
+                        tostring(IsVehicleNeonLightEnabled(entity, 0)),
+                        tostring(NetworkHasControlOfEntity and NetworkHasControlOfEntity(entity)))
+                end)
+            end
         end
 
         if result.ok then

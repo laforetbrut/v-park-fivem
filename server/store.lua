@@ -613,6 +613,14 @@ end
     AUTHORSHIP - who is allowed to speak for this vehicle
     ------------------------------------------------------------------------------------------
 
+    unverifiedNeons
+                  Set when a restore is sent for a vehicle whose neons are on, and cleared when the
+                  placing client reports they held or when somebody gets in. While it is set,
+                  `Persist.applySnapshot` drops the neon keys from any snapshot, so a vehicle that
+                  came back dark cannot write that failure over the player's own value. It lives
+                  here rather than on the client because the capture is asked of whichever client is
+                  nearest, and only the server has one view of that.
+
     occupant      The player the server watched get into it, set by `vpark:server:touched` only
                   after reading, on the server, that their ped was within ten metres of the
                   entity. It is the fallback proof for a parked report that arrives after every
@@ -626,6 +634,7 @@ Store.liveFields = {
     ready = true, seen = true, restoreAt = true, restoreTries = true,
     frozen = true, driven = true, parked = true, nudged = true,
     occupant = true,
+    unverifiedNeons = true,
 }
 
 function Store.setLive(id, entry)

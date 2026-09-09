@@ -168,7 +168,29 @@ local function neighboursOf(record)
     return list
 end
 
+--[[
+    Does this record carry neons that are switched on?
+
+    Only those need the guard: a vehicle whose neons are off has nothing to lose if a capture reports
+    them off. See the note in `Persist.applySnapshot`.
+]]
+local function hasNeonsOn(record)
+    local properties = record and record.properties
+    if type(properties) ~= 'table' then return false end
+    if type(properties.neonEnabled) ~= 'table' then return false end
+
+    for _, value in ipairs(properties.neonEnabled) do
+        if value == true then return true end
+    end
+
+    return false
+end
+
 local function sendRestore(record, src, netId)
+    -- Not to be believed about its neons until the client that places it says they held.
+    local entry = Store.live(record.id)
+    if entry and hasNeonsOn(record) then entry.unverifiedNeons = true end
+
     TriggerClientEvent('vpark:client:restore', src, netId, {
         neighbours = neighboursOf(record),
         id = record.id,
@@ -1807,6 +1829,25 @@ RegisterNetEvent('vpark:server:parked', function(id, position, rotation)
     Park.debug('%s was parked at %.2f, %.2f, %.2f', id, x, y, z)
 end)
 
+--[[
+    The client that placed a vehicle says its neons held after all.
+
+    Proven the same way as every other client message: the vehicle must be one we hold and the
+    sender must be next to it.
+]]
+RegisterNetEvent('vpark:server:verified', function(id, group)
+    local src = source
+
+    if type(id) ~= 'string' or group ~= 'neons' then return end
+
+    local entry = Store.live(id)
+    if not entry then return end
+
+    if Spawn.playerIsNear and Spawn.playerIsNear(src, entry.entity, 30.0) == false then return end
+
+    entry.unverifiedNeons = nil
+end)
+
 RegisterNetEvent('vpark:server:touched', function(id, used)
     local src = source
 
@@ -1844,6 +1885,9 @@ RegisterNetEvent('vpark:server:touched', function(id, used)
         -- Who the server watched get in. The only thing left to check a parked report against
         -- once every client has lost scope and there is no distance to measure.
         entry.occupant = src
+
+        -- Somebody is in it, so whatever the neons do from here is their doing and worth saving.
+        entry.unverifiedNeons = nil
 
         entry.frozen = false
         entry.seen = true
