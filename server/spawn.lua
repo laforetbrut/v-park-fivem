@@ -1785,6 +1785,15 @@ RegisterNetEvent('vpark:server:parked', function(id, position, rotation)
         Cleared when somebody gets in again: from that moment the vehicle can move and this
         report is no longer the truth.
     ]]
+    --[[
+        WRITTEN NOW, NOT AT THE NEXT SWEEP.
+
+        Getting out of a vehicle is the moment its position stops changing, and the moment a player
+        expects it to be saved. `Config.Save.triggers.onExit` has always said so, and until now
+        nothing called the function that honours it.
+    ]]
+    if Persist and Persist.touch then Persist.touch(id, 'onExit') end
+
     entry.parked = true
     entry.seen = true
     entry.nudged = nil

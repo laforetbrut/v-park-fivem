@@ -146,6 +146,13 @@ Locale.register('fr', {
     -- ---------------------------------------------------------------------------------
     -- /vparkstats
     -- ---------------------------------------------------------------------------------
+    ['props.none']         = "tu n'es ni dans ni à côté d'un véhicule",
+    ['props.nothing_stored'] = "  enregistré  rien : v-park ne conserve pas ce véhicule",
+    ['props.header']       = "propriétés de %s [%s], id %s :",
+    ['props.live_neons']   = "  en jeu      néons %s  couleur %s  moteur %s",
+    ['props.stored_neons'] = "  enregistré  néons %s  couleur %s",
+    ['props.live_damage']  = "  en jeu      vitres intactes %s  portières abîmées %s  caisse %s",
+    ['props.stored_damage'] = "  enregistré  vitres brisées %s  portières cassées %s  caisse %s",
     ['why.header']    = "les %d derniers véhicules que v-park n'a pas conservés, du plus récent :",
     ['why.empty']     = "v-park n'a rien refusé depuis son démarrage",
     ['why.line']      = "  il y a %s  %s [%s]  %s  %s%s",

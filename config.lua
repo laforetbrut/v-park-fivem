@@ -1296,7 +1296,14 @@ Config.Streaming = {
     --
     -- 1000 is four times finer than it needs to be at walking pace and about right at
     -- 200 km/h. The pass itself is a grid lookup per player, not a scan of the table.
-    interval = 1000,
+    --[[
+        How often the streaming pass runs, in milliseconds.
+
+        Halved from 1000 in 1.0.26: a vehicle appeared up to a second after you came into range,
+        which reads as slow when you are driving towards a car park. The pass costs 0.1 ms on
+        average with forty vehicles in the world, measured, so twice as often is still nothing.
+    ]]
+    interval = 500,
 
     -- Maximum vehicles created per pass, across the whole server.
     --
@@ -1892,6 +1899,9 @@ Config.Commands = {
     -- Prints, per restored vehicle around you, how far it is from where the database says it
     -- should be. The answer to "they are not quite in the right place", in numbers.
     ['where']  = { name = 'vparkwhere',   permission = 'admin',    enabled = true },
+    -- Live property values from your client, printed beside the stored ones. The answer to
+    -- "this modification does not survive", in one reading rather than one release.
+    props      = { name = 'vparkprops',   permission = 'admin',    enabled = true },
     -- The console half of the same question. `/vparkwhere` needs a player standing next to the
     -- vehicles and reports what the client sees; this reports what the SERVER thinks, including
     -- the four flags that decide whether a vehicle's position may be written down at all.

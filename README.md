@@ -225,6 +225,7 @@ resource. Rename any of them in `Config.Commands`; set `enabled = false` to remo
 | `/vparkprobe [model]` | Run the placement probe where you stand, and print the result |
 | `/vparkwhere` | Report how far each restored vehicle near you is from where the database says it should be - per axis, plus heading, frozen, dressed and owner |
 | `/vparkdiag [id\|plate]` | What the SERVER thinks. With no argument, every vehicle in the world ordered by how far it drifted from its stored place; with one, the full record - stored pose, actual pose, drift, entity and net id, and the four flags that decide whether its position may be saved. Works from the console, unlike `/vparkwhere` |
+| `/vparkprops` | What your client sees on the vehicle you are in, beside what is stored: neons, windows, doors, body health. The answer to "this modification does not survive" |
 | `/vparkwhy` | Why the last twenty-five vehicles were not kept: model, plate, who offered it, and the reason. Every refusal in the adoption path used to be silent |
 | `/vparkdebug` | Toggle debug logging and the on-screen overlay |
 | `/vparkmigrate <scan\|dry\|run\|rollback>` | The Advanced Parking migration |
@@ -519,7 +520,7 @@ webhooks off, after which the next real error goes unread for a fortnight.
 ## Known limits, stated plainly
 
 - **What has actually been run, and what has not.** The server half is exercised on a real
-  qb-core server with oxmysql and MariaDB 11.4 before every release: **112 automated checks**
+  qb-core server with oxmysql and MariaDB 11.4 before every release: **113 automated checks**
   covering boot, schema creation and upgrade, detection, every console command, the loader, the
   spatial grid, ownership, the lifecycle maths, the save pipeline, the trash, the audit log and
   the full migration cycle including backup and rollback. Several real defects have come out of

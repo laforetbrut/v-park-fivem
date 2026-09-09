@@ -685,6 +685,43 @@ end
 --[[
     A client has answered a capture request.
 ]]
+--[[
+    ================================================================================================
+    A CLIENT SAYING "THIS ONE CHANGED, TAKE IT NOW"
+    ================================================================================================
+
+    The capture sweep asks about a vehicle roughly every thirty seconds, and the flush runs every
+    fifteen. So fitting neons, respraying a car or breaking a window and then walking away could
+    take the better part of a minute to reach the database - and if the vehicle despawned first, it
+    never got there at all.
+
+    Nobody should have to wait for a modification to be saved. The client already knows the exact
+    moment something changed, because `Stream.dirty` is called by every wake, entry and damage
+    handler, so it says so instead of waiting to be asked.
+
+    PROVEN THE SAME WAY AS EVERY OTHER CLIENT MESSAGE. The vehicle must be one we are holding, and
+    the sender must be next to it, read on the server from two positions the client does not
+    supply. See `Spawn.playerIsNear`.
+
+    Rate limiting is `Config.Save.triggerCooldown`, applied by `Persist.touch` below: a client
+    shouting about the same vehicle repeatedly gets one write and the rest are folded into the
+    sweep.
+]]
+RegisterNetEvent('vpark:server:changed', function(id, snapshot)
+    local src = source
+
+    if type(id) ~= 'string' or type(snapshot) ~= 'table' then return end
+    if not Runtime.ready() then return end
+
+    local entry = Store.live(id)
+    if not entry then return end
+
+    if Spawn.playerIsNear and Spawn.playerIsNear(src, entry.entity, 30.0) == false then return end
+
+    Persist.applySnapshot(id, snapshot)
+    Persist.touch(id, 'onExit')
+end)
+
 RegisterNetEvent('vpark:server:captured', function(snapshots, token)
     local src = source
     local request = requests[token]
@@ -1073,6 +1110,21 @@ function Persist.touch(id, trigger)
 
     cooldown[id] = Park.ticks()
     Store.markDirty(id)
+
+    --[[
+        AND WRITTEN NOW, WHICH IS THE ENTIRE POINT OF THIS FUNCTION.
+
+        Marking dirty only queues the row for the next flush, fifteen seconds away by default, so
+        `Config.Save.triggers` promised an immediate write and delivered a slightly earlier one.
+        The whole mechanism was also dead code: nothing in the resource called `Persist.touch`,
+        so none of `onExit`, `onDamage`, `onLockChange` or `onOwnerChange` did anything at all.
+
+        The cooldown above is what keeps this safe - a vehicle being rammed repeatedly collapses
+        into one write and the sweep picks up the rest.
+    ]]
+    Database.thread(function()
+        Persist.flushNow()
+    end)
 
     return true
 end

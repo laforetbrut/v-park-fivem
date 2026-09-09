@@ -424,8 +424,9 @@ CreateThread(function()
                             record.frozen = false
                             record.awaySince = nil
                             -- Awake means it can move and be damaged again, so it is worth
-                            -- capturing again.
-                            record.captureClean = false
+                            -- capturing again. Through `Stream.dirty`, which also offers the
+                            -- new state to the server instead of waiting for the next sweep.
+                            Stream.dirty(id)
                         end
                     elseif shouldSleep(record, playerPosition) then
                         if Placement.sleep(record.entity) then
@@ -468,7 +469,7 @@ AddEventHandler('gameEventTriggered', function(name, args)
 
     local record = tracked[id]
     if record then
-        record.captureClean = false
+        Stream.dirty(id)
         if record.frozen and Placement.wake(vehicle) then
             record.frozen = false
         end
@@ -500,7 +501,7 @@ AddEventHandler('gameEventTriggered', function(name, args)
 
     local record = tracked[id]
     if record then
-        record.captureClean = false
+        Stream.dirty(id)
         if record.frozen and Placement.wake(victim) then
             record.frozen = false
         end
@@ -589,9 +590,114 @@ end
     Called when anything happens that could change it: a player entering it, damage, a wake, an
     admin action. Everything else leaves it clean.
 ]]
+--[[
+    ================================================================================================
+    A CHANGE IS SENT NOW, NOT AT THE NEXT SWEEP.
+    ================================================================================================
+
+    Marking a vehicle dirty used to mean "the next capture will notice", and the next capture is up
+    to thirty seconds away, followed by a flush up to fifteen seconds after that. Fit neons, walk
+    away, and the modification could be forty-five seconds from the database - or never in it, if
+    the vehicle despawned first.
+
+    So the moment something changes, the client offers the new state. Debounced, because a visit to
+    a mod shop changes a dozen things in a few seconds and one message at the end of it is the same
+    information as twelve.
+
+    The server re-checks everything and rate-limits by `Config.Save.triggerCooldown`, so this is a
+    hint about WHEN to look, never a claim that must be believed.
+]]
+local pushAt = {}
+local PUSH_DELAY = 1500
+
+local function pushChange(id)
+    local due = Park.ticks() + PUSH_DELAY
+    pushAt[id] = due
+
+    CreateThread(function()
+        Wait(PUSH_DELAY)
+
+        -- Something changed again while we waited; that later thread owns the send.
+        if pushAt[id] ~= due then return end
+        pushAt[id] = nil
+
+        local record = tracked[id]
+        if not record or not record.entity or not DoesEntityExist(record.entity) then return end
+
+        local snapshot = Stream.snapshot(id)
+        if snapshot then
+            TriggerServerEvent('vpark:server:changed', id, snapshot)
+        end
+    end)
+end
+
+Stream.pushChange = pushChange
+
+--[[
+    ================================================================================================
+    WHAT THIS CLIENT SEES ON THE VEHICLE, RIGHT NOW.
+    ================================================================================================
+
+    Three property bugs in three releases, and every one of them cost a round trip to work out
+    whether the value was wrong on the way IN or on the way OUT. The database settled two of them in
+    one query each; this is the other half of that question, asked of the live vehicle.
+
+    `/vparkprops` prints these beside what the server has stored, so a property that does not
+    survive is diagnosed in one reading instead of a release.
+]]
+RegisterNetEvent('vpark:client:props', function(token)
+    local ped = PlayerPedId()
+    local vehicle = GetVehiclePedIsIn(ped, false)
+
+    if not vehicle or vehicle == 0 then
+        vehicle = GetVehiclePedIsIn(ped, true)
+    end
+
+    if not vehicle or vehicle == 0 or not DoesEntityExist(vehicle) then
+        TriggerServerEvent('vpark:server:props', token, nil)
+        return
+    end
+
+    local neons = {}
+    for index = 0, 3 do
+        neons[index + 1] = IsVehicleNeonLightEnabled(vehicle, index) and 1 or 0
+    end
+
+    local windows, doors = {}, {}
+    for index = 0, 7 do
+        windows[index + 1] = IsVehicleWindowIntact(vehicle, index) and 1 or 0
+    end
+    for index = 0, 5 do
+        doors[index + 1] = IsVehicleDoorDamaged(vehicle, index) and 1 or 0
+    end
+
+    local red, green, blue = GetVehicleNeonLightsColour(vehicle)
+
+    local _, trackedId = Stream.byEntity(vehicle)
+
+    local ok, bagId = pcall(function() return Entity(vehicle).state['vpark:id'] end)
+    if not ok then bagId = nil end
+
+    TriggerServerEvent('vpark:server:props', token, {
+        id = trackedId,
+        bag = bagId,
+        model = GetDisplayNameFromVehicleModel(GetEntityModel(vehicle)),
+        plate = GetVehicleNumberPlateText(vehicle),
+        neons = neons,
+        neonColour = { red or 0, green or 0, blue or 0 },
+        windows = windows,
+        doors = doors,
+        bodyHealth = math.floor(GetVehicleBodyHealth(vehicle) + 0.5),
+        engine = IsVehicleEngineOn(vehicle) and 1 or 0,
+    })
+end)
+
 function Stream.dirty(id)
     local record = tracked[id]
-    if record then record.captureClean = false end
+    if not record then return end
+
+    record.captureClean = false
+    pushChange(id)
 end
 
 function Stream.snapshot(id)
@@ -613,9 +719,26 @@ function Stream.snapshot(id)
         `captureClean` is cleared by `Stream.dirty`, which every wake, entry and damage handler
         calls.
     ]]
-    if record.frozen and record.captureClean then
+    --[[
+        AND THE BODY HEALTH HAS NOT MOVED.
+
+        The frozen-and-clean shortcut is right about everything v-park does to a vehicle, and blind
+        to everything anything ELSE does to it. Repair a parked car with txAdmin and nothing here
+        notices: the vehicle is still frozen, still clean by our own reckoning, so it is never
+        re-captured and the old damage sits in the database waiting to be re-applied. Which is
+        exactly the report - fix it, walk away, come back, and the dents are on it again.
+
+        Body health is one native call and it moves for a repair and for damage alike, so it closes
+        both directions.
+    ]]
+    local health = GetVehicleBodyHealth(record.entity)
+    local settled = record.lastHealth == nil or math.abs(health - record.lastHealth) < 1.0
+
+    if record.frozen and record.captureClean and settled then
         return nil
     end
+
+    record.lastHealth = health
 
     --[[
         AN UNDRESSED VEHICLE HAS NOTHING TO SAY, AND MUST NOT SAY IT.

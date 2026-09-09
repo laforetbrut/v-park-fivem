@@ -150,6 +150,13 @@ Locale.register('en', {
     -- ---------------------------------------------------------------------------------
     -- /vparkstats
     -- ---------------------------------------------------------------------------------
+    ['props.none']         = 'you are not in or near a vehicle',
+    ['props.nothing_stored'] = '  stored    nothing: v-park is not keeping this vehicle',
+    ['props.header']       = 'properties on %s [%s], id %s:',
+    ['props.live_neons']   = '  live      neons %s  colour %s  engine %s',
+    ['props.stored_neons'] = '  stored    neons %s  colour %s',
+    ['props.live_damage']  = '  live      windows intact %s  doors damaged %s  body %s',
+    ['props.stored_damage'] = '  stored    windows broken %s  doors broken %s  body %s',
     ['why.header']    = 'the last %d vehicles v-park did not keep, newest first:',
     ['why.empty']     = 'v-park has refused nothing since it started',
     ['why.line']      = '  %s ago  %s [%s]  %s  %s%s',

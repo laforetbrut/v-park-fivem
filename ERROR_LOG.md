@@ -8,6 +8,44 @@ out of it.
 
 ---
 
+## [2026-09-09 21:10] - A documented mechanism that nothing called, on both sides
+
+**Context:** the tester objected to a test step that said "wait 30 seconds", on the grounds that no
+modification should ever need waiting for. He was right, and the reason was worse than a slow timer.
+
+**Error:** `Persist.touch` writes a vehicle immediately, subject to a cooldown, and
+`Config.Save.triggers` documents four events that use it. Nothing in the resource called it. On the
+client, `Stream.dirty` is described in another function's comment as the thing "every wake, entry and
+damage handler calls", and nothing called that either - the three handlers set `captureClean = false`
+by hand. Both halves of the immediate-write path were dead.
+
+Separately, two causes of a repaired vehicle coming back damaged: the frozen-and-clean capture
+shortcut never notices a repair made by another resource, and `IsVehicleWindowIntact` reports false
+for windows the model does not have, so v-park stored non-existent glass as smashed and smashed it on
+restore.
+
+**Root cause:** for the dead mechanism, a comment describing intent as though it were fact. Two
+separate comments asserted that callers existed. Nobody grepped. For the windows, a native with three
+failure modes where only two had been considered - and the third had been sitting in the stored data
+of every vehicle in the table all along.
+
+**Fix:** both halves wired; `touch` flushes rather than queueing; the client pushes a snapshot 1.5 s
+after any change, debounced and re-validated server-side. Body health breaks the capture shortcut.
+Window indices are learned per model from vehicles that report them intact.
+
+**Prevention:** two.
+
+A comment that says "X calls this" is a claim about the codebase, and a claim about the codebase can
+be checked in one grep. Any comment asserting a caller should be verified when it is written and
+whenever the function is touched - `check_local_before_declaration` in group 20 exists because of a
+similar assumption.
+
+And: read the stored data before theorising. The phantom windows were visible in every row of the
+table - indices 4 and 5 on every model - and would have been spotted the first time anybody looked,
+which was three releases into the property bugs.
+
+---
+
 ## [2026-09-09 19:40] - Two wrong guesses about the neons, and one query that settled it
 
 **Context:** neons were the last failing case after three releases of trying. 1.0.24 had added a

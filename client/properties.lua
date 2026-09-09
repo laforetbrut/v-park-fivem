@@ -140,12 +140,57 @@ end
     re-capturing a restored shape walks the damage. It used to read the deformation and then throw
     it away, which is the whole cost for none of the benefit.
 ]]
+--[[
+    ================================================================================================
+    WHICH WINDOW INDICES A MODEL ACTUALLY HAS.
+    ================================================================================================
+
+    `IsVehicleWindowIntact` answers false for a window that is smashed, for one that is rolled down,
+    and - the case nobody thinks of - FOR ONE THAT DOES NOT EXIST ON THE MODEL. Rolling the window
+    up first handles the second. Nothing handled the third.
+
+    The evidence was in the database. Every stored vehicle carried indices 4 and 5 in its broken
+    list, on every model, and one carried all eight:
+
+        windows = [0, 1, 2, 3, 4, 5, 6, 7]
+
+    Four and five are the middle side windows, which most cars do not have. So we recorded glass
+    that was never there, and then SMASHED IT on restore - which is a car that comes back with
+    broken windows nobody broke, and is the report "je fix le vehicule avec txadmin, je reviens, il
+    reprend des degats sans raison".
+
+    There is no native for "does this window exist", so this learns it: an index that has EVER been
+    reported intact on this model exists. A restored vehicle is created pristine, so the set fills
+    on the first restore of any model, and until it has, the failure is to record NOTHING rather
+    than to invent glass - which is the right way round.
+]]
+local windowsSeen = {}
+
+local function noteWindows(vehicle, model)
+    local seen = windowsSeen[model]
+    if not seen then
+        seen = {}
+        windowsSeen[model] = seen
+    end
+
+    for index = 0, 7 do
+        if IsVehicleWindowIntact(vehicle, index) then seen[index] = true end
+    end
+
+    return seen
+end
+
+Properties.noteWindows = noteWindows
+
 function Properties.capture(vehicle, options)
     if not DoesEntityExist(vehicle) then return nil end
 
     local properties = {}
 
-    properties.model = GetEntityModel(vehicle)
+    -- Read once and kept: the window-existence map below is keyed on it.
+    local model = GetEntityModel(vehicle)
+
+    properties.model = model
     properties.plate = Park.plate(GetVehicleNumberPlateText(vehicle))
     properties.plateIndex = GetVehicleNumberPlateTextIndex(vehicle)
     properties.lockState = GetVehicleDoorLockStatus(vehicle)
@@ -314,12 +359,20 @@ function Properties.capture(vehicle, options)
 
     -- -------------------------------------------------------------------- damage ---
     local windows = {}
+    local haveWindows = windowsSeen[model] or {}
+
     for index = 0, 7 do
         -- Rolling the window up first is the reference implementation's trick and it is
         -- correct: a window that is merely DOWN reads as not intact, and storing that as
         -- smashed means every car with an open window comes back with broken glass.
         RollUpWindow(vehicle, index)
-        if not IsVehicleWindowIntact(vehicle, index) then
+
+        if IsVehicleWindowIntact(vehicle, index) then
+            -- It is intact, so it exists. See `noteWindows`.
+            if not windowsSeen[model] then windowsSeen[model] = {} end
+            windowsSeen[model][index] = true
+        elseif haveWindows[index] then
+            -- Not intact, and known to be a window this model has. Genuinely smashed.
             windows[#windows + 1] = index
         end
     end
@@ -787,6 +840,13 @@ function Properties.apply(vehicle, properties, options)
     else
         SetVehicleDoorsShut(vehicle, true)
     end
+
+    --[[
+        A vehicle reaching `applyDamage` has just been created and has never been hit, so every
+        window it reports as intact is a window it HAS. This is the cheapest and most reliable
+        moment to learn the model's set - see `noteWindows`.
+    ]]
+    guard('windows', function() noteWindows(vehicle, GetEntityModel(vehicle)) end)
 
     if enabledGroup('damage') then
         guard('damage', function() applyDamage(vehicle, properties) end)

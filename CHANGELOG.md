@@ -7,6 +7,123 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.26] - 2026-09-09
+
+**Nothing waits to be saved any more, and a repaired car stops coming back damaged.**
+
+### Fixed
+
+- **The whole immediate-write mechanism was dead code, on both sides.** `Persist.touch` exists, with
+  a cooldown to collapse repeated writes, and `Config.Save.triggers` documents `onExit`, `onDamage`,
+  `onLockChange` and `onOwnerChange` as things that write a vehicle at once. **Nothing in the
+  resource called it.** All four triggers did nothing.
+
+  The client half was the same: `Stream.dirty` is described in `Stream.snapshot`'s own comment as
+  the function "every wake, entry and damage handler calls", and nothing called it either - the
+  three handlers set the field by hand instead.
+
+  So a modification waited for the capture sweep (up to 30 seconds) and then for the flush (up to
+  15 more), and if the vehicle despawned in between it never reached the database at all.
+
+  Both halves are wired now, and `Persist.touch` writes rather than queueing. The client offers the
+  new state 1.5 seconds after anything changes - debounced, because a visit to a mod shop changes a
+  dozen things and one message at the end is the same information. The server re-checks the vehicle
+  is one it holds and that the sender is standing next to it, then writes.
+
+- **A vehicle repaired by anything other than v-park kept its old damage.** The frozen-and-clean
+  shortcut in `Stream.snapshot` is right about everything v-park does to a vehicle and blind to
+  everything else. Repair a parked car with txAdmin and nothing noticed: still frozen, still clean by
+  our own reckoning, never re-captured, and the stored damage was re-applied on the next restore.
+  Body health is one native call and it moves for a repair and for damage alike, so it now breaks
+  that shortcut in both directions.
+
+- **Windows that do not exist are no longer stored as smashed.** `IsVehicleWindowIntact` answers
+  false for a smashed window, for one rolled down - which was handled - and for **one the model does
+  not have**, which was not. The database showed it plainly: every stored vehicle carried indices 4
+  and 5, on every model, and one carried all eight.
+
+  Four and five are the middle side windows, which most cars do not have. So v-park recorded glass
+  that was never there and **smashed it on restore**. Combined with the repair blindness above, that
+  is a car coming back with broken windows nobody broke.
+
+  There is no native for "does this window exist", so it is learned: an index that has ever been
+  reported intact on a model exists. A restored vehicle is created pristine, so the set fills on the
+  first restore of any model, and until it has, the failure is to record nothing rather than to
+  invent glass.
+
+### Added
+
+- **`/vparkprops`** prints what your client sees on the vehicle you are in beside what the server has
+  stored: neon state and colour, which windows are intact, which doors are damaged, body health.
+
+  Three property bugs in three releases, and each one cost a round trip to establish whether the
+  value was wrong going in or coming out. Two were settled by reading the stored row directly. This
+  is the other half of that question, asked of the live vehicle, so the next one takes a reading
+  rather than a release.
+
+### Changed
+
+- **Vehicles appear twice as quickly.** The streaming pass runs every 500 ms instead of 1000. It
+  costs 0.1 ms on average with forty vehicles in the world - measured on a live server before the
+  change - so twice as often is still nothing.
+
+113 automated checks on a real qb-core server with oxmysql and MariaDB 11.4, and 20 static check
+groups over 32 Lua files.
+
+---
+
+## [1.0.26] - 2026-09-09 (français)
+
+**Plus rien n'attend pour être enregistré, et une voiture réparée ne revient plus abîmée.**
+
+### Corrigé
+
+- **Tout le mécanisme d'écriture immédiate était du code mort, des deux côtés.**
+  `Persist.touch` existe, avec son anti-spam, et `Config.Save.triggers` documente `onExit`,
+  `onDamage`, `onLockChange` et `onOwnerChange` comme des choses qui écrivent un véhicule
+  sur-le-champ. **Rien dans la ressource ne l'appelait.** Les quatre déclencheurs ne faisaient
+  rien.
+
+  Côté client, pareil : `Stream.dirty` est décrite dans le commentaire de `Stream.snapshot` comme
+  la fonction que &laquo;&nbsp;chaque handler de réveil, d'entrée et de dégâts
+  appelle&nbsp;&raquo;, et personne ne l'appelait non plus.
+
+  Une modification attendait donc le balayage de capture (jusqu'à 30 secondes) puis le vidage
+  (jusqu'à 15 de plus), et si le véhicule disparaîssait entre-temps elle n'arrivait jamais en base.
+
+  Les deux moitiés sont branchées, et `Persist.touch` écrit au lieu de mettre en file. Le client
+  propose le nouvel état 1,5 seconde après tout changement.
+
+- **Un véhicule réparé par autre chose que v-park gardait ses vieux dégâts.** Le raccourci
+  &laquo;&nbsp;gelé et propre&nbsp;&raquo; a raison sur tout ce que v-park fait à un véhicule, et
+  est aveugle à tout le reste. La santé de la carrosserie est un seul appel natif et elle bouge
+  pour une réparation comme pour des dégâts.
+
+- **Les vitres qui n'existent pas ne sont plus enregistrées comme brisées.**
+  `IsVehicleWindowIntact` répond faux pour une vitre brisée, pour une vitre baissée - ce qui était
+  géré - et pour **une vitre que le modèle n'a pas**, ce qui ne l'était pas. La base de données
+  l'a montré : chaque véhicule portait les indices 4 et 5, sur tous les modèles, et l'un d'eux les
+  huit. On enregistrait du verre inexistant et on le **brisait** à la restauration.
+
+### Ajouté
+
+- **`/vparkprops`** affiche ce que ton client voit sur le véhicule où tu es, à côté de ce que le
+  serveur a enregistré : état et couleur des néons, vitres intactes, portières abîmées, santé.
+
+  Trois bugs de propriétés en trois versions, et chacun a coûté un aller-retour pour savoir si la
+  valeur était fausse à l'entrée ou à la sortie. Le prochain coûtera une lecture.
+
+### Modifié
+
+- **Les véhicules apparaissent deux fois plus vite.** La passe de streaming tourne toutes les
+  500 ms au lieu de 1000. Elle coûte 0,1 ms en moyenne avec quarante véhicules dans le monde -
+  mesuré avant le changement.
+
+113 vérifications automatisées sur un vrai serveur qb-core avec oxmysql et MariaDB 11.4, et 20
+groupes de vérifications statiques sur 32 fichiers Lua.
+
+---
+
 ## [1.0.25] - 2026-09-09
 
 **Neon lights are lights, and switching a vehicle's engine off puts its lights out.**

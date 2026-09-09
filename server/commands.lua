@@ -608,6 +608,84 @@ register('why', {
     replyMany(src, lines)
 end)
 
+--[[
+    Live values from the client, printed beside the stored ones.
+
+    The recurring question in this resource is "the paint / the neons / the damage does not
+    survive", and the answer is always one of three: the client never read it, the server never
+    stored it, or something wrote over it afterwards. This prints the first two side by side, which
+    eliminates two of the three in one reading.
+]]
+local propsWaiting = {}
+local propsToken = 0
+
+RegisterNetEvent('vpark:server:props', function(token, live)
+    local src = source
+    local waiting = propsWaiting[token]
+
+    if not waiting or waiting.src ~= src then return end
+    propsWaiting[token] = nil
+
+    if type(live) ~= 'table' then
+        reply(src, L('props.none'))
+        return
+    end
+
+    local id = live.bag or live.id
+    local record = id and Store.get(id) or nil
+    local stored = record and record.properties or nil
+
+    local function list(values)
+        if type(values) ~= 'table' then return '-' end
+        local out = {}
+        for _, value in ipairs(values) do out[#out + 1] = tostring(value) end
+        return table.concat(out, ',')
+    end
+
+    local lines = {
+        L('props.header', tostring(live.model or '?'), tostring(live.plate or '?'),
+            tostring(id or 'not kept by v-park')),
+        L('props.live_neons', list(live.neons), list(live.neonColour),
+            live.engine == 1 and 'on' or 'off'),
+    }
+
+    if stored then
+        local enabled = {}
+        for _, value in ipairs(stored.neonEnabled or {}) do
+            enabled[#enabled + 1] = value and 1 or 0
+        end
+
+        lines[#lines + 1] = L('props.stored_neons', list(enabled), list(stored.neonColor))
+        lines[#lines + 1] = L('props.stored_damage', list(stored.windows), list(stored.doors),
+            tostring(stored.bodyHealth or '?'))
+    else
+        lines[#lines + 1] = L('props.nothing_stored')
+    end
+
+    lines[#lines + 1] = L('props.live_damage', list(live.windows), list(live.doors),
+        tostring(live.bodyHealth or '?'))
+
+    replyMany(src, lines)
+end)
+
+register('props', {
+    description = 'Compare what the client sees on the vehicle you are in with what is stored',
+    params = {},
+}, function(src)
+    if src == 0 then
+        reply(src, L('error.in_game_only'))
+        return
+    end
+
+    propsToken = propsToken + 1
+    propsWaiting[propsToken] = { src = src, at = Park.ticks() }
+
+    local token = propsToken
+    SetTimeout(6000, function() propsWaiting[token] = nil end)
+
+    TriggerClientEvent('vpark:client:props', src, token)
+end)
+
 register('zones', {
     description = 'List the zones where nothing persists',
     params = {},
