@@ -533,6 +533,50 @@ local function applyCustomPaint(vehicle, properties)
     end
 end
 
+--[[
+    ================================================================================================
+    NEONS GO ON LAST, AND STAY ON LAST. THE ENGINE IS WHY.
+    ================================================================================================
+
+    The database settled this one. A vehicle the tester had given magenta neons was stored as:
+
+        neonColor   = [255, 0, 255]     <- the colour, captured perfectly
+        neonEnabled = [false, false, false, false]
+
+    So the capture works and the natives work. The neons were genuinely OFF at the moment the
+    vehicle was captured, and it is v-park that turns them off.
+
+    NEON LIGHTS ARE LIGHTS, and `SetVehicleEngineOn(vehicle, false, ...)` puts a vehicle's lights
+    out. That call happens twice after the neons are switched on: once at the end of
+    `Properties.apply`, because a restored car should be parked with its engine off, and again in
+    `Placement.place`, which runs after the dressing. So the restore lit the neons, the engine went
+    off, the neons went out, and the next capture wrote `false` over the stored `true` - after which
+    they were off for good, which is why they never came back even once.
+
+    The fix is an ordering one, and it has to hold in both places. This function is applied at the
+    very end of `Properties.apply`, and again by `client/stream.lua` after the placement has
+    finished with the vehicle.
+
+    Nothing else in the restore path touches lights, so last really is last.
+]]
+local function applyNeons(vehicle, properties)
+    if type(properties) ~= 'table' then return end
+
+    if type(properties.neonEnabled) == 'table' then
+        for index = 0, 3 do
+            SetVehicleNeonLightEnabled(vehicle, index, properties.neonEnabled[index + 1] == true)
+        end
+    end
+
+    local colour = properties.neonColor
+    if type(colour) == 'table' and #colour >= 3 then
+        Properties.native('SetVehicleNeonLightsColour', 'SetVehicleNeonLightsColor',
+            vehicle, colour[1], colour[2], colour[3])
+    end
+end
+
+Properties.applyNeons = applyNeons
+
 local function applyExtras(vehicle, properties)
     -- STEP 4. Before body health, because toggling an extra repairs the panel it is on.
     if type(properties.extras) ~= 'table' then return end
@@ -657,30 +701,6 @@ function Properties.apply(vehicle, properties, options)
             vehicle, properties.xenonColor)
     end
 
-    --[[
-        THROUGH `Properties.native`, LIKE THE XENON CALL FIVE LINES ABOVE.
-
-        These two were the only colour natives in this file called by one spelling with no guard,
-        and `SetVehicleNeonLightsColour` is exactly the kind CFX has under both names. It raised,
-        and because this function was one unguarded sequence it took the deformation with it.
-    ]]
-    if enabledGroup('neons') then
-        guard('neons', function()
-            if type(properties.neonEnabled) == 'table' then
-                for index = 0, 3 do
-                    SetVehicleNeonLightEnabled(vehicle, index,
-                        properties.neonEnabled[index + 1] == true)
-                end
-            end
-
-            local colour = properties.neonColor
-            if type(colour) == 'table' and #colour >= 3 then
-                Properties.native('SetVehicleNeonLightsColour', 'SetVehicleNeonLightsColor',
-                    vehicle, colour[1], colour[2], colour[3])
-            end
-        end)
-    end
-
     if enabledGroup('tyreSmoke') then
         local smoke = properties.tyreSmokeColor
         if type(smoke) == 'table' and #smoke == 3 then
@@ -776,6 +796,12 @@ function Properties.apply(vehicle, properties, options)
         guard('deformation', function()
             Deformation.write(vehicle, properties.deformation, options.version)
         end)
+    end
+
+    -- LAST, and deliberately. See `applyNeons`: the engine is switched off above, and switching a
+    -- vehicle's engine off puts its lights out - neons included.
+    if enabledGroup('neons') then
+        guard('neons', function() applyNeons(vehicle, properties) end)
     end
 
     return true

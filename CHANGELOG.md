@@ -7,6 +7,98 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.25] - 2026-09-09
+
+**Neon lights are lights, and switching a vehicle's engine off puts its lights out.**
+
+### Fixed
+
+- **Neons are applied last, and again after the placement.** Two wrong guesses went before this one,
+  and the database settled it in a single query. A vehicle the tester had given magenta neons was
+  stored as:
+
+  ```
+  neonColor   = [255, 0, 255]     -- the colour, captured perfectly
+  neonEnabled = [false, false, false, false]
+  ```
+
+  So the capture worked and the natives worked. The neons were genuinely **off** at the moment the
+  vehicle was captured, and it was v-park turning them off: `SetVehicleEngineOn(vehicle, false, ...)`
+  runs twice after the neons are switched on - once at the end of `Properties.apply`, because a
+  restored car should be parked with its engine off, and again in `Placement.place`, which runs
+  after the dressing.
+
+  So the restore lit the neons, the engine went off, the neons went out, and the next capture wrote
+  `false` over the stored `true`. After that they were off for good, which is why they never came
+  back even once.
+
+  They now go on at the very end of `Properties.apply`, and `client/stream.lua` puts them on again
+  after the placement has finished with the vehicle. Nothing else in the restore path touches
+  lights.
+
+  **Vehicles already in the database are stored with their neons off,** because that is the value
+  that was being written. Turning them on once writes the right one.
+
+### Not changed, and worth stating
+
+The tester asked whether burst tyres, torn-off doors and smashed windows are saved. **All three
+already are**, and in more detail than asked for: tyres carry three distinct states - punctured,
+completely burst, and broken off the axle - each with its own repair on the way back. A door is
+stored as REMOVED rather than hanging, because a door left hanging reads as intact to the next
+capture and the damage would be lost on the second round trip.
+
+None of it had ever been exercised by a human. It is in the test procedure now.
+
+112 automated checks on a real qb-core server with oxmysql and MariaDB 11.4, and 20 static check
+groups over 32 Lua files.
+
+---
+
+## [1.0.25] - 2026-09-09 (français)
+
+**Les néons sont des phares, et couper le moteur d'un véhicule éteint ses phares.**
+
+### Corrigé
+
+- **Les néons sont appliqués en dernier, et une seconde fois après le placement.** Deux
+  hypothèses fausses ont précédé celle-ci, et la base de données a tranché en une requête. Le
+  véhicule magenta du testeur était enregistré ainsi :
+
+  ```
+  neonColor   = [255, 0, 255]     -- la couleur, parfaitement capturée
+  neonEnabled = [false, false, false, false]
+  ```
+
+  Donc la capture fonctionne et les natives fonctionnent. Les néons étaient **vraiment éteints**
+  au moment de l'enregistrement, et c'est v-park qui les éteignait :
+  `SetVehicleEngineOn(vehicle, false, ...)` s'exécute deux fois après leur allumage - une fois à
+  la fin de `Properties.apply`, parce qu'une voiture restaurée doit être garée moteur coupé, et
+  une fois dans `Placement.place`, qui tourne après l'habillage.
+
+  La restauration allumait donc les néons, le moteur se coupait, les néons s'éteignaient, et la
+  capture suivante écrivait `false` par-dessus le `true` enregistré. Ensuite ils étaient éteints
+  pour de bon, ce qui explique qu'ils ne soient jamais revenus une seule fois.
+
+  **Les véhicules déjà en base sont enregistrés néons éteints**, puisque c'est la valeur qui
+  était écrite. Les rallumer une fois écrit la bonne.
+
+### Non modifié, et il faut le dire
+
+Le testeur a demandé si les pneus crevés, les portières arrachées et les vitres brisées sont
+enregistrés. **Les trois le sont déjà**, et plus finement que demandé : les pneus portent trois
+états distincts - crevé, complètement éclaté, et arraché de l'essieu - chacun avec sa propre
+réparation au retour. Une portière est enregistrée comme **retirée** et non comme pendante, parce
+qu'une portière qui pend se relit comme intacte à la capture suivante et les dégâts se
+perdraient au deuxième aller-retour.
+
+Rien de tout cela n'avait jamais été exercé par un humain. C'est dans la procédure de test
+maintenant.
+
+112 vérifications automatisées sur un vrai serveur qb-core avec oxmysql et MariaDB 11.4, et 20
+groupes de vérifications statiques sur 32 fichiers Lua.
+
+---
+
 ## [1.0.24] - 2026-09-09
 
 **Two reported failures, one structural cause: applying a vehicle's properties was a single

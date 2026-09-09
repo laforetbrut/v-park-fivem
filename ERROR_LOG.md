@@ -8,6 +8,36 @@ out of it.
 
 ---
 
+## [2026-09-09 19:40] - Two wrong guesses about the neons, and one query that settled it
+
+**Context:** neons were the last failing case after three releases of trying. 1.0.24 had added a
+per-group guard that proved the neon block was NOT raising, which killed the previous theory.
+
+**Error:** neons were captured with the right colour and the wrong enabled state, so they never came
+back.
+
+**Root cause:** `SetVehicleEngineOn(vehicle, false, ...)` puts a vehicle's lights out, and neon
+lights are lights. That call runs twice after the neons are switched on - at the end of
+`Properties.apply`, and again in `Placement.place`, which runs after the dressing. The restore lit
+them, the engine went off, they went out, and the next capture wrote `false` over the stored `true`.
+Self-perpetuating from then on.
+
+**Fix:** the neon block is a function now, applied at the very end of `Properties.apply` and again by
+`client/stream.lua` after the placement returns.
+
+**Prevention:** the method, not a check. THE DATABASE HAD THE ANSWER THE WHOLE TIME and two releases
+were spent guessing at code paths before anybody looked at it. `neonColor` correct and `neonEnabled`
+all-false rules out the natives, rules out the capture, rules out the transport, and points straight
+at "something turned them off between the apply and the capture" - which is one grep. When a value
+round-trips wrong, read the stored value FIRST: it partitions the problem in a single query, and no
+amount of reading code does that as fast.
+
+Second, smaller: a restore is a sequence of state changes, and any of them can undo an earlier one.
+Anything cosmetic that a later step can clear belongs at the end, and "the end" means after the
+placement too, not just after the property apply.
+
+---
+
 ## [2026-09-09 18:05] - One missing native, two bugs, and a helper that dropped two thirds of its answer
 
 **Context:** the short retest of 1.0.23 came back 10 of 12. The two failures were neons not

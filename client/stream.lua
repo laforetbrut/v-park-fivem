@@ -238,6 +238,20 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
             neighbours = data.neighbours,
         })
 
+        --[[
+            THE PLACEMENT SWITCHES THE ENGINE OFF TOO, SO THE NEONS GO BACK ON AFTER IT.
+
+            `Properties.apply` already puts them on last for the same reason, and that is not
+            enough on its own: `Placement.place` runs afterwards and ends with
+            `SetVehicleEngineOn(entity, false, ...)`, which puts the vehicle's lights out again.
+
+            Cheap - four calls and a colour, on a vehicle that has just been restored anyway - and
+            it is the difference between neons surviving a restart and never coming back at all.
+        ]]
+        if type(data.properties) == 'table' and Properties.applyNeons then
+            pcall(Properties.applyNeons, entity, data.properties)
+        end
+
         if result.ok then
             tracked[data.id] = {
                 id = data.id,
