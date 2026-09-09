@@ -514,37 +514,39 @@ function Deformation.apply(vehicle, flat, version)
                         item.done = true
                     else
                         --[[
-                            EACH CALL CARRIES THE SHORTFALL, NOT THE RUNNING TOTAL.
+                            A GROWING HIT, IN SMALL STEPS. NOT THE SHORTFALL.
 
-                            `SetVehicleDamage` adds to the deformation already there. This used
-                            to pass `item.damage + correction` - the whole accumulated figure -
-                            on every pass, so the second hit added the first one again on top of
-                            the correction, and the third added both. The dents came out deeper
-                            than the ones that were captured, which is the report: the damage
-                            looks exaggerated when the vehicle comes back.
+                            `SetVehicleDamage`'s `damage` argument is the FORCE of a blow, not an
+                            amount of deformation to add, and it does not behave linearly: a small
+                            value on bodywork that is already dented does nothing measurable at
+                            all. So the way to reach a target is to hit the same point harder and
+                            harder, measuring between blows, until the measurement gets there.
 
-                            The correction also carried `seedDamage`'s base, twenty, which is the
-                            floor for a FIRST hit on undamaged bodywork and far too much for a
-                            top-up of a few centimetres. A correction is proportional to what is
-                            missing and nothing else.
+                            1.0.23 changed this to send only the remaining shortfall, on the
+                            reasoning that the native accumulates. It does not, and the result was
+                            reported as bodywork damage not restoring AT ALL: the first blow landed
+                            and every correction after it was too weak to move anything.
+
+                            What was actually wrong before 1.0.23 is the SIZE of the step. It added
+                            a whole fresh seed each pass - base included - so it went from a blow
+                            that was slightly too weak to one far too strong in a single
+                            correction, and the dents came out deeper than the ones captured.
+
+                            A fixed small increment fixes both. It converges from underneath, which
+                            is the right side to approach from: a dent slightly too shallow reads as
+                            the same damage, and one too deep cannot be undone.
                         ]]
-                        local step
-
                         if item.damage == nil then
-                            step = seedDamage(item.target)
+                            item.damage = seedDamage(item.target)
                         else
-                            local gain = tonumber(options().seedGain) or 90.0
-                            local correction = tonumber(options().correctionFactor) or 0.35
-                            step = math.max(2.0, (item.target - current) * gain * correction)
+                            item.damage = item.damage + (tonumber(options().damageStep) or 5.0)
                         end
-
-                        item.damage = step
 
                         SetVehicleDamage(
                             vehicle,
                             item.point.x, item.point.y, item.point.z,
-                            step,
-                            step,
+                            item.damage,
+                            item.damage,
                             true
                         )
 

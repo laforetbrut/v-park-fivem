@@ -7,6 +7,90 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.24] - 2026-09-09
+
+**Two reported failures, one structural cause: applying a vehicle's properties was a single
+unguarded sequence, so one missing native silently dropped everything below it.**
+
+### Fixed
+
+- **One property group failing no longer takes every group below it.** `Properties.apply` is one
+  long sequence and its caller runs it inside a `pcall`. A native that does not exist on a given
+  build - and CFX has half of these under two spellings - raised, the pcall swallowed it, and
+  **everything after that line silently did not happen.**
+
+  Neons are applied at line 615 of that file. Deformation is applied at line 714. So a single
+  missing neon native cost the bodywork damage as well, and the two were reported as separate bugs
+  in the same test pass. Each group is now attempted on its own, and a group that fails is named in
+  the console instead of taking the rest of the car with it.
+
+- **The neon colour natives go through `Properties.native`,** like the xenon call five lines above
+  them. They were the only colour natives in the file called by one spelling with no guard.
+
+- **`Properties.native` returns every value, not the first one.** `GetVehicleNeonLightsColour`
+  answers three - red, green and blue - and the helper handed back only the red. A caller writing
+  `{ Properties.native(...) }` got a one-element table, and the apply side, which requires three,
+  quietly did nothing with it. The single-value callers are unaffected: an assignment takes the
+  first value, which is what they were already getting.
+
+- **Bodywork damage restores again, and still does not exaggerate.** 1.0.23 changed the convergence
+  to send only the remaining shortfall, on the reasoning that `SetVehicleDamage` accumulates. **It
+  does not.** Its `damage` argument is the force of a blow, and a small blow on bodywork that is
+  already dented does nothing measurable - so the first hit landed and every correction after it was
+  too weak to move anything, which is why damage stopped restoring at all.
+
+  What was actually wrong before 1.0.23 was the size of the step: it added a whole fresh seed on
+  every pass, base included, so it went from slightly too weak to far too strong in one correction
+  and the dents came out deeper than the ones captured. It hits progressively harder in small fixed
+  increments now, which converges from underneath - the right side to approach from, because a dent
+  slightly too shallow reads as the same damage and one too deep cannot be undone.
+
+112 automated checks on a real qb-core server with oxmysql and MariaDB 11.4, and 20 static check
+groups over 32 Lua files.
+
+---
+
+## [1.0.24] - 2026-09-09 (français)
+
+**Deux échecs rapportés, une seule cause de structure : l'application des propriétés était une
+longue séquence sans garde, donc un native manquant faisait silencieusement tomber tout ce qui
+suivait.**
+
+### Corrigé
+
+- **L'échec d'un groupe de propriétés n'emporte plus tous les suivants.** `Properties.apply` est
+  une seule longue séquence, et son appelant l'exécute dans un `pcall`. Un native absent de ce
+  build - et CFX en a la moitié sous deux orthographes - levait, le pcall l'avalait, et **tout ce
+  qui suivait cette ligne ne se faisait plus, en silence.**
+
+  Les néons sont appliqués ligne 615 de ce fichier. La déformation ligne 714. Un seul native
+  manquant chez les néons a donc coûté aussi les dégâts de carrosserie, et les deux ont été
+  rapportés comme deux bugs distincts dans la même passe de test. Chaque groupe est maintenant
+  tenté séparément, et celui qui échoue est nommé dans la console.
+
+- **Les natives de couleur des néons passent par `Properties.native`**, comme l'appel xenon cinq
+  lignes au-dessus. C'étaient les seules natives de couleur du fichier appelées sous un seul nom.
+
+- **`Properties.native` renvoie toutes les valeurs, plus seulement la première.**
+  `GetVehicleNeonLightsColour` en renvoie trois - rouge, vert, bleu - et le helper ne rendait que le
+  rouge. Un appelant écrivant `{ Properties.native(...) }` obtenait une table à un élément, et le
+  côté application, qui en exige trois, n'en faisait rien.
+
+- **Les dégâts de carrosserie reviennent à nouveau, et sans exagération.** La 1.0.23 avait
+  changé la convergence pour n'envoyer que ce qui manquait, en supposant que `SetVehicleDamage`
+  s'additionne. **Il ne s'additionne pas** : son argument est la <i>force d'un coup</i>, et un petit
+  coup sur une tôle déjà enfoncée ne produit rien de mesurable.
+
+  Ce qui était vraiment mauvais avant la 1.0.23, c'est la <i>taille</i> du pas : il ajoutait une
+  amorce complète à chaque passe. Il frappe maintenant de plus en plus fort par petits paliers
+  fixes, ce qui converge par en dessous - le bon côté, parce qu'une bosse un peu trop faible se lit
+  comme les mêmes dégâts alors qu'une trop profonde ne se défait pas.
+
+112 vérifications automatisées sur un vrai serveur qb-core avec oxmysql et MariaDB 11.4, et 20
+groupes de vérifications statiques sur 32 fichiers Lua.
+
+---
+
 ## [1.0.23] - 2026-09-09
 
 **Five defects from one manual test pass. Four of them were reported in the notes of cases the

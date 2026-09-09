@@ -103,9 +103,20 @@ function Properties.native(british, american, ...)
     local fn = _G[british] or _G[american]
     if not fn then return nil end
 
-    local ok, result = pcall(fn, ...)
-    if not ok then return nil end
-    return result
+    --[[
+        EVERY return value, not the first one.
+
+        `GetVehicleNeonLightsColour` answers three - red, green and blue - and this helper used to
+        hand back only the red. A caller writing `{ Properties.native(...) }` got a one-element
+        table, and the apply side, which checks for three, quietly did nothing with it.
+
+        The single-value callers are unaffected: an assignment takes the first value and discards
+        the rest, which is what they were already getting.
+    ]]
+    local packed = table.pack(pcall(fn, ...))
+    if not packed[1] then return nil end
+
+    return table.unpack(packed, 2, packed.n)
 end
 
 -- ---------------------------------------------------------------------------------------
@@ -214,7 +225,10 @@ function Properties.capture(vehicle, options)
         neonEnabled[index + 1] = IsVehicleNeonLightEnabled(vehicle, index)
     end
     properties.neonEnabled = neonEnabled
-    properties.neonColor = { GetVehicleNeonLightsColour(vehicle) }
+    -- Both spellings, for the same reason as the setter. A raise here would take the whole
+    -- capture with it and the vehicle would be saved as a stock car.
+    properties.neonColor = { Properties.native(
+        'GetVehicleNeonLightsColour', 'GetVehicleNeonLightsColor', vehicle) }
 
     -- -------------------------------------------------------------------- extras ---
     -- The game's own convention is inverted and it is worth writing down: an extra that is
@@ -585,6 +599,33 @@ function Properties.apply(vehicle, properties, options)
 
     local enabledGroup = Schema.enabled
 
+    --[[
+        ================================================================================================
+        ONE GROUP FAILING MUST NOT TAKE EVERY GROUP BELOW IT.
+        ================================================================================================
+
+        This function is one long sequence, and its caller runs it inside a `pcall`. So a native that
+        does not exist on a given build - CFX renames them, and half of these have two spellings -
+        raised, the pcall swallowed it, and EVERYTHING AFTER THAT LINE SILENTLY DID NOT HAPPEN.
+
+        That is not hypothetical. `SetVehicleNeonLightsColour` was called by its British name with no
+        guard, five lines below a xenon call that goes through `Properties.native` for exactly this
+        reason. On a build without that spelling the neons raised, and the neons are applied at line
+        615 of this file while the DEFORMATION is applied at line 714 - so a single missing native
+        cost the bodywork damage as well, and the two were reported together as separate bugs.
+
+        Each group is now attempted on its own. A group that fails is named in the log and the rest
+        still run, which turns "the car came back wrong and there is nothing in the console" into one
+        line saying which part of it went.
+    ]]
+    local function guard(name, fn)
+        local ok, err = pcall(fn)
+        if not ok then
+            Park.error('applying %s to %d raised: %s', name, vehicle, tostring(err))
+        end
+        return ok
+    end
+
     -- The vehicle must not be repairing itself underneath us while we build it. Some game
     -- builds tick a slow auto-repair on a vehicle nobody is in, which quietly undoes the
     -- damage we are about to apply.
@@ -593,15 +634,19 @@ function Properties.apply(vehicle, properties, options)
     end
 
     if enabledGroup('modifications') then
-        applyModifications(vehicle, properties)
+        guard('modifications', function() applyModifications(vehicle, properties) end)
     else
         -- Even with modifications off, the mod kit must be set or the plate index and a few
         -- other calls below behave inconsistently between builds.
         SetVehicleModKit(vehicle, 0)
     end
 
-    if enabledGroup('colours') then applyColours(vehicle, properties) end
-    if enabledGroup('customPaint') then applyCustomPaint(vehicle, properties) end
+    if enabledGroup('colours') then
+        guard('colours', function() applyColours(vehicle, properties) end)
+    end
+    if enabledGroup('customPaint') then
+        guard('customPaint', function() applyCustomPaint(vehicle, properties) end)
+    end
 
     if enabledGroup('windowTint') and type(properties.windowTint) == 'number' then
         SetVehicleWindowTint(vehicle, properties.windowTint)
@@ -612,16 +657,28 @@ function Properties.apply(vehicle, properties, options)
             vehicle, properties.xenonColor)
     end
 
+    --[[
+        THROUGH `Properties.native`, LIKE THE XENON CALL FIVE LINES ABOVE.
+
+        These two were the only colour natives in this file called by one spelling with no guard,
+        and `SetVehicleNeonLightsColour` is exactly the kind CFX has under both names. It raised,
+        and because this function was one unguarded sequence it took the deformation with it.
+    ]]
     if enabledGroup('neons') then
-        if type(properties.neonEnabled) == 'table' then
-            for index = 0, 3 do
-                SetVehicleNeonLightEnabled(vehicle, index, properties.neonEnabled[index + 1] == true)
+        guard('neons', function()
+            if type(properties.neonEnabled) == 'table' then
+                for index = 0, 3 do
+                    SetVehicleNeonLightEnabled(vehicle, index,
+                        properties.neonEnabled[index + 1] == true)
+                end
             end
-        end
-        local colour = properties.neonColor
-        if type(colour) == 'table' and #colour == 3 then
-            SetVehicleNeonLightsColour(vehicle, colour[1], colour[2], colour[3])
-        end
+
+            local colour = properties.neonColor
+            if type(colour) == 'table' and #colour >= 3 then
+                Properties.native('SetVehicleNeonLightsColour', 'SetVehicleNeonLightsColor',
+                    vehicle, colour[1], colour[2], colour[3])
+            end
+        end)
     end
 
     if enabledGroup('tyreSmoke') then
@@ -640,7 +697,9 @@ function Properties.apply(vehicle, properties, options)
         end
     end
 
-    if enabledGroup('extras') then applyExtras(vehicle, properties) end
+    if enabledGroup('extras') then
+        guard('extras', function() applyExtras(vehicle, properties) end)
+    end
 
     if enabledGroup('plate') then
         if properties.plate then
@@ -709,10 +768,14 @@ function Properties.apply(vehicle, properties, options)
         SetVehicleDoorsShut(vehicle, true)
     end
 
-    if enabledGroup('damage') then applyDamage(vehicle, properties) end
+    if enabledGroup('damage') then
+        guard('damage', function() applyDamage(vehicle, properties) end)
+    end
 
     if enabledGroup('deformation') and not options.skipDeformation then
-        Deformation.write(vehicle, properties.deformation, options.version)
+        guard('deformation', function()
+            Deformation.write(vehicle, properties.deformation, options.version)
+        end)
     end
 
     return true

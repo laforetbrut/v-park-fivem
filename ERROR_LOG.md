@@ -8,6 +8,42 @@ out of it.
 
 ---
 
+## [2026-09-09 18:05] - One missing native, two bugs, and a helper that dropped two thirds of its answer
+
+**Context:** the short retest of 1.0.23 came back 10 of 12. The two failures were neons not
+surviving and bodywork damage not restoring at all.
+
+**Error:** they were the same bug. `Properties.apply` is a single long sequence and its caller wraps
+it in a `pcall`, so a raise anywhere aborts everything below it and logs nothing. Neons are applied
+at line 615 and deformation at line 714, so a raise in the neon block cost both. The raise came from
+`SetVehicleNeonLightsColour` being called by its British name alone, five lines below a xenon call
+that goes through `Properties.native` for exactly that reason.
+
+Underneath that, `Properties.native` itself only ever returned the FIRST value of the native it
+called - `local ok, result = pcall(fn, ...)`. The neon getter returns three. So even routing the
+capture through the helper would have produced a one-element table and an apply that silently
+skipped it.
+
+Separately, the damage convergence I changed in 1.0.23 was wrong. `SetVehicleDamage`'s `damage`
+argument is the force of a blow, not an amount of deformation to add, so sending only the remaining
+shortfall sent blows too weak to move anything.
+
+**Root cause:** three failures of the same kind - a mechanism that swallows information. The pcall
+swallowed the raise, the helper swallowed two of three return values, and the changed convergence
+swallowed the force needed to make a difference. None of them produced a log line.
+
+**Fix:** every group is attempted separately and a failure is named in the console. The helper
+returns all values via `table.pack`/`table.unpack`. The convergence hits progressively harder in
+small increments, which is both what the native wants and what stops the original exaggeration.
+
+**Prevention:** when a sequence is wrapped in one pcall by its caller, that pcall is not error
+handling - it is an error *silencer*, and everything after the first failure becomes invisible.
+Either guard each step or do not guard at all. And on the 1.0.23 mistake specifically: the reference
+implementation in front of me grew the damage value in fixed increments, which was the evidence that
+the native is not additive, and I reasoned about the semantics instead of reading it.
+
+---
+
 ## [2026-09-09 17:20] - Four defects hiding in the notes of passing test cases
 
 **Context:** the first full manual pass came back 28 of 29 cases passing. The single failure was

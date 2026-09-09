@@ -829,15 +829,18 @@ Config.Deformation = {
         through a hedge reads a fraction under 1000 with nothing visible on it.
     ]]
     --[[
-        How much of the remaining shortfall a correction pass applies, when putting a stored
-        deformation back.
+        How much harder each correction pass hits, when putting a stored deformation back.
 
-        `SetVehicleDamage` ADDS to what is already there, so a correction carries the difference
-        and not the running total. Below 1.0 so the search approaches the target from underneath:
-        overshooting cannot be undone, and a dent that is slightly too shallow reads as the same
-        damage while one that is too deep does not.
+        `SetVehicleDamage`'s `damage` argument is the FORCE of a blow, not an amount of
+        deformation to add, so reaching a target means hitting the same point progressively
+        harder and measuring between blows. This is the size of each increase.
+
+        Small on purpose. The search approaches the target from underneath, which is the right
+        side to be on: a dent slightly too shallow reads as the same damage, and one too deep
+        cannot be undone. Raise it if deep dents take too many passes to converge; lower it if
+        restored damage comes back heavier than it went in.
     ]]
-    correctionFactor = 0.35,
+    damageStep = 5.0,
 
     pristineHealth = 999.0,
 
