@@ -143,6 +143,22 @@ that has been deleting data since the guards were written.**
   because that setting writes every ambient parked car a player walks past rather than every
   vehicle somebody owns.
 
+### Removed
+
+- **`Config.Persistence.lowPriorityClasses`, and the `Rules.isLowPriority` that read it.** The
+  setting described itself as the list that feeds `Config.Streaming.classRadius`, and it fed
+  nothing: `radiusFor` in `server/spawn.lua` reads `classRadius` and falls back to `spawnRadius`,
+  and never looked at the list. `Rules.isLowPriority` was its only reader and had no callers of its
+  own anywhere in the resource, the panel UI, or the integration suite.
+
+  Removed rather than documented as advisory. A setting an operator can edit with no effect at all
+  is worse than no setting: somebody adds a class to it, expects that class to stream late, and
+  nothing happens, with nothing in any log to say why. `classRadius` is now the only place a class
+  gets a different radius, which is where it was already happening.
+
+  Nothing to do on upgrade. A config that still carries the key is simply ignored, and the three
+  classes it named already have explicit `classRadius` entries.
+
 ---
 
 ## [Non publié]
@@ -250,6 +266,23 @@ atteindre, et un cinquième qui supprimait des données depuis que les garde-fou
   Les véhicules que personne n'a jamais conduits ne sont toujours pas persistés -
   `Config.Persistence.ambient` reste désactivé, parce que ce réglage écrit chaque voiture
   d'ambiance devant laquelle un joueur passe et pas chaque véhicule que quelqu'un possède.
+
+### Supprimé
+
+- **`Config.Persistence.lowPriorityClasses`, et le `Rules.isLowPriority` qui le lisait.** Le réglage
+  se décrivait comme la liste qui alimente `Config.Streaming.classRadius`, et il n'alimentait rien :
+  `radiusFor` dans `server/spawn.lua` lit `classRadius` et retombe sur `spawnRadius`, sans jamais
+  consulter cette liste. `Rules.isLowPriority` en était le seul lecteur et n'avait lui-même aucun
+  appelant, ni dans la ressource, ni dans l'interface du panneau, ni dans la suite d'intégration.
+
+  Supprimé plutôt que documenté comme purement indicatif. Un réglage qu'un opérateur peut modifier
+  sans le moindre effet est pire que pas de réglage : quelqu'un y ajoute une classe, s'attend à ce
+  que cette classe apparaisse plus tard, rien ne se passe, et aucun log ne dit pourquoi.
+  `classRadius` est maintenant le seul endroit où une classe obtient un rayon différent, ce qui est
+  déjà là que ça se jouait.
+
+  Rien à faire à la mise à jour. Une config qui garde la clé l'ignore simplement, et les trois
+  classes qu'elle nommait ont déjà une entrée explicite dans `classRadius`.
 
 ---
 

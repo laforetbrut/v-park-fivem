@@ -31,7 +31,6 @@ local function build()
 
     cache = {
         excludedClasses = Classes.setFrom(persistence.excludedClasses, 'Config.Persistence.excludedClasses'),
-        lowPriority = Classes.setFrom(persistence.lowPriorityClasses, 'Config.Persistence.lowPriorityClasses'),
         excludedModels = Park.set(persistence.excludedModels),
         includedModels = Park.set(persistence.includedModels),
         platePrefixes = {},
@@ -78,10 +77,6 @@ end
 local function rules()
     if not cache then build() end
     return cache
-end
-
-function Rules.isLowPriority(class)
-    return rules().lowPriority[class] == true
 end
 
 -- ---------------------------------------------------------------------------------------

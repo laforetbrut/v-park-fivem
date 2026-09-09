@@ -583,13 +583,6 @@ Config.Persistence = {
     -- Add a class here to exclude it. The list is the class id, from the table above.
     excludedClasses = {},
 
-    -- Classes that persist but are not restored into the world unless a player is very close.
-    -- See `Config.Streaming.classRadius` - this list is the one that feeds it.
-    --
-    -- Aircraft and boats are here because they are large, expensive to stream, and normally
-    -- parked somewhere nobody walks past by accident.
-    lowPriorityClasses = { 14, 15, 16 },
-
     -- Model names that never persist. Case-insensitive, matched against the model name and
     -- against the model hash.
     excludedModels = {
@@ -1424,8 +1417,14 @@ Config.Streaming = {
     -- second. 100 metres of gap is roughly three seconds in a fast car.
     despawnRadius = 350.0,
 
-    -- Per-class spawn radius override, for the classes in
-    -- `Config.Persistence.lowPriorityClasses` and any other class you name here.
+    -- Per-class spawn radius override. Name any class here and it is created at that distance
+    -- instead of `spawnRadius`.
+    --
+    -- THIS IS THE ONLY PLACE A CLASS GETS A DIFFERENT RADIUS. There used to be a second one -
+    -- `Config.Persistence.lowPriorityClasses`, which described itself as the list that fed this
+    -- table and fed nothing: `radiusFor` in server/spawn.lua reads this table and falls back to
+    -- `spawnRadius`, and never looked at that list. It is gone rather than documented, because a
+    -- setting an operator can edit with no effect at all is worse than no setting.
     --
     -- BOATS AND AIRCRAFT NOW USE THE SAME RADIUS AS EVERYTHING ELSE. They were 150, 150 and 200,
     -- on the reasoning that an aircraft at an airfield does not need to exist when you are 250
