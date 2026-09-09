@@ -8,6 +8,40 @@ out of it.
 
 ---
 
+## [2026-09-10 02:40] - Seven releases to notice the rule was already written
+
+**Context:** the neon state was lost on every restore cycle, and each failed restore then overwrote
+the stored value with the failure, making it permanent. Seven releases attacked it: the engine, the
+native spelling, the return arity, network control, a same-frame verification, a watchdog, a
+server-side flag, a client-side filter.
+
+**Error:** all of them were trying to work out WHY the value was being lost, and then to suppress
+the report when it had been. None of that was necessary.
+
+**Root cause of the approach, not the bug:** `Stream.snapshot` already contained the answer, written
+for positions and carrying a comment that states the principle in general terms - the stored value
+answers "what did somebody choose", and only a person in the vehicle can change that answer, so it
+is not reported until somebody has driven it. Neons are the same kind of value and the same argument
+applies unchanged. It went unnoticed for seven releases while sitting forty lines from the code being
+edited each time.
+
+**Fix:** neons are omitted from the snapshot unless the vehicle has been driven, exactly as the
+position is. And rather than diagnosing which mechanism drops the value, the tick that already walks
+every tracked vehicle re-asserts it: four native reads every couple of seconds on vehicles whose
+lights are meant to be on.
+
+**Prevention:** when a bug resists several attempts, stop looking for a better mechanism and look for
+an existing one. A codebase that has solved a class of problem once usually states the principle in a
+comment, and that comment is the cheapest thing in the repository to find. Grep for the argument, not
+the symptom.
+
+Second: there is a real difference between a value the game OWNS and a value the resource owns.
+Position, neons, mods and damage are all things the game will happily change on its own, and for
+every one of them the question is the same - who is allowed to say it changed? Answering that once
+per property is the design; detecting each way the game gets it wrong is not.
+
+---
+
 ## [2026-09-10 01:20] - A warning written on the client and looked for on the server
 
 **Context:** the neon bug had survived seven releases. Three of them added or improved a diagnostic

@@ -7,6 +7,92 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.31] - 2026-09-10
+
+**The rule for neons was already written in this file, for positions, seven releases ago.**
+
+```
+A VEHICLE NOBODY HAS DRIVEN DOES NOT REPORT WHERE IT IS.
+...
+The stored position should answer "where did somebody leave this", and only a person
+driving it can change that answer.
+```
+
+That is the neon problem exactly, and it took seven releases to notice it was the same argument.
+**Only a person in the vehicle can turn neons on or off.** Everything else that changes them - the
+engine dropping the state as ownership migrates, a restore that did not take, a client that never
+had control - is the game losing the value, not somebody choosing it.
+
+### Fixed
+
+- **Neons follow the same rule as the position: not reported until somebody has driven the
+  vehicle.** The server keeps what it has, and there is no longer any path by which a dark vehicle
+  nobody has touched can report itself dark and overwrite the player's own setting.
+
+  Every previous attempt tried to DETECT the failure and suppress the report - a verification, a
+  watchdog, a server-side flag, a handshake. This does not need to detect anything, which is why it
+  is the last one.
+
+- **The neons are held rather than hoped for.** The tick that already walks every tracked vehicle
+  now checks, every couple of seconds and only on vehicles whose stored state says the lights should
+  be on, whether they have drifted - and puts them back if they have. Four native reads.
+
+  Seven releases were spent working out *which* mechanism was dropping the value. There is more than
+  one, they fire at different moments, and holding the answer is cheaper than identifying them all.
+
+### Changed
+
+- **The watchdog added in 1.0.29 is gone**, superseded by the above. Two mechanisms writing the same
+  value would fight each other and produce confusing logs. The signal it carried is better now: a
+  vehicle that needs correcting once has had its state dropped by the engine, which is ordinary; one
+  that needs it five times is being actively fought, and that is what reaches the server log.
+
+### Not tested this release
+
+The 113-check integration suite did **not** run for 1.0.31. The test server was in use and shares its
+database. The twenty static groups pass.
+
+---
+
+## [1.0.31] - 2026-09-10 (français)
+
+**La règle pour les néons était déjà écrite dans ce fichier, pour les positions, depuis sept
+versions.**
+
+&laquo;&nbsp;La position enregistrée doit répondre à &laquo;&nbsp;où quelqu'un a-t-il laissé
+ça&nbsp;&raquo;, et seule une personne qui le conduit peut changer cette réponse.&nbsp;&raquo;
+
+C'est exactement le problème des néons, et il a fallu sept versions pour voir que c'était le même
+argument. **Seule une personne dans le véhicule peut allumer ou éteindre les néons.** Tout le reste
+- le moteur qui perd l'état quand la propriété réseau change, une restauration qui n'a pas pris,
+un client qui n'avait pas le contrôle - c'est le jeu qui perd la valeur, pas quelqu'un qui la
+choisit.
+
+### Corrigé
+
+- **Les néons suivent la même règle que la position : pas rapportés tant que personne n'a conduit
+  le véhicule.** Le serveur garde ce qu'il a, et il n'existe plus de chemin par lequel un véhicule
+  éteint que personne n'a touché puisse se déclarer éteint et écraser le réglage du joueur.
+
+  Toutes les tentatives précédentes cherchaient à **détecter** l'échec pour supprimer le rapport :
+  une vérification, un chien de garde, un drapeau serveur, une poignée de main. Celle-ci n'a rien à
+  détecter, et c'est pour ça que c'est la dernière.
+
+- **Les néons sont tenus, plus espérés.** Le tick qui parcourt déjà chaque véhicule suivi
+  vérifie, toutes les deux secondes et seulement sur ceux dont l'état enregistré dit que les
+  lumières doivent être allumées, s'ils ont dérivé - et les remet. Quatre appels natifs.
+
+  Sept versions à chercher **quel** mécanisme perdait la valeur. Il y en a plusieurs, ils se
+  déclenchent à des moments différents, et tenir la réponse coûte moins cher que de tous les
+  identifier.
+
+### Non testé cette version
+
+La suite d'intégration de 113 vérifications **n'a pas tourné** : le serveur de test était
+utilisé et partage sa base de données. Les vingt groupes statiques passent.
+
+---
+
 ## [1.0.30] - 2026-09-10
 
 **The warning nobody could see was written on the wrong side of the network, and the guard on the

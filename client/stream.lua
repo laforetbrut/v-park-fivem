@@ -256,96 +256,6 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
             neighbours = data.neighbours,
         })
 
-        --[[
-            ================================================================================================
-            THE NEON WATCHDOG, AND WHY A WATCHDOG RATHER THAN ANOTHER WRITE.
-            ================================================================================================
-
-            Five releases went at this by writing the value again in a better place. Every one of
-            them wrote it successfully - the read-back in `applyNeons` agreed every time, and the
-            warning it logs on failure never printed once. The write is not the problem.
-
-            What happens is that the value is lost AFTERWARDS, in the second or so while the entity
-            settles: ownership moves, the placement finishes, the engine goes off, and somewhere in
-            there the neons go out. A check in the same frame as the write cannot see any of that,
-            which is why the instrument said everything was fine while the tester watched it fail.
-
-            So this comes back and looks. Four times, backing off, over about eight seconds. Each
-            look re-asserts the value if it has drifted, and the vehicle is marked as NOT TO BE
-            BELIEVED for neons until one of them finds it already correct.
-
-            That second half is what stops the bug being permanent. Until a check passes, the
-            capture leaves the neon keys out of its report entirely, so a vehicle sitting there dark
-            cannot overwrite the value the player chose - which is exactly what had been happening,
-            and what made every previous attempt look like it had failed even when it had not.
-        ]]
-        if type(data.properties) == 'table' and Properties.applyNeons then
-            local id = data.id
-            local properties = data.properties
-
-            if type(properties.neonEnabled) == 'table' then
-                unverified[id] = unverified[id] or {}
-                unverified[id].neons = true
-
-                CreateThread(function()
-                    for _, wait in ipairs({ 500, 1000, 2000, 4000 }) do
-                        Wait(wait)
-
-                        if not DoesEntityExist(entity) then return end
-                        if tracked[id] == nil then return end
-
-                        local settled = true
-                        for index = 0, 3 do
-                            local wanted = properties.neonEnabled[index + 1] == true
-                            if IsVehicleNeonLightEnabled(entity, index) ~= wanted then
-                                settled = false
-                                break
-                            end
-                        end
-
-                        if settled then
-                            -- It held. Both this client and the server may believe neons again.
-                            if unverified[id] then unverified[id].neons = nil end
-                            TriggerServerEvent('vpark:server:verified', id, 'neons')
-                            return
-                        end
-
-                        pcall(Properties.applyNeons, entity, properties)
-                    end
-
-                    --[[
-                        REPORTED TO THE SERVER, BECAUSE THIS IS A CLIENT.
-
-                        The two previous attempts at this warning wrote it with `Park.warn` from
-                        here, and were then looked for in the SERVER console - where a client-side
-                        print never appears. It goes to the player's own F8 console, which nobody
-                        was reading. Twice.
-
-                        So the client sends what it found and the server logs it, which is where
-                        the person diagnosing this is actually looking.
-                    ]]
-                    local got = {}
-                    for index = 0, 3 do
-                        got[index + 1] = IsVehicleNeonLightEnabled(entity, index) and 1 or 0
-                    end
-
-                    TriggerServerEvent('vpark:server:neonFailed', id, {
-                        wanted = (function()
-                            local out = {}
-                            for index = 1, 4 do
-                                out[index] = properties.neonEnabled[index] == true and 1 or 0
-                            end
-                            return out
-                        end)(),
-                        got = got,
-                        control = NetworkHasControlOfEntity
-                            and NetworkHasControlOfEntity(entity) or false,
-                        owner = NetworkGetEntityOwner and NetworkGetEntityOwner(entity) or -1,
-                        exists = DoesEntityExist(entity),
-                    })
-                end)
-            end
-        end
 
         if result.ok then
             tracked[data.id] = {
@@ -365,6 +275,18 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
                 -- against this, which is what stops the approximation compounding over
                 -- repeated save cycles.
                 restoredHealth = GetVehicleBodyHealth(entity),
+
+                --[[
+                    What the neons are SUPPOSED to be, kept so the tick below can put them back.
+
+                    The value is lost repeatedly and for more than one reason - ownership moving,
+                    a restore that did not take, an engine state change - and seven releases were
+                    spent trying to work out which. Holding the answer and re-asserting it costs
+                    four native reads every couple of seconds on a vehicle that has neons, and does
+                    not care which of those it was.
+                ]]
+                neonsWanted = type(data.properties) == 'table' and data.properties.neonEnabled or nil,
+                neonsColour = type(data.properties) == 'table' and data.properties.neonColor or nil,
 
                 --[[
                     Whether this vehicle currently looks the way the database says it does.
@@ -528,6 +450,71 @@ CreateThread(function()
                         stick. Before this, the repair was noticed at the next sweep - up to thirty
                         seconds later, and never at all if the vehicle despawned first.
                     ]]
+                    --[[
+                        THE NEONS ARE HELD, NOT HOPED FOR.
+
+                        Checked every couple of seconds on a vehicle that is meant to have them lit,
+                        and put back when they have drifted. Four native reads, and only for
+                        vehicles whose stored state says the lights should be on.
+
+                        This is what the seven previous attempts were reaching for one mechanism at
+                        a time: the value goes out for several different reasons, at several
+                        different moments, and holding it is cheaper than identifying them.
+                    ]]
+                    if record.neonsWanted and (record.neonsAt or 0) < Park.ticks() then
+                        record.neonsAt = Park.ticks() + 2000
+
+                        local drifted = false
+                        for index = 0, 3 do
+                            if IsVehicleNeonLightEnabled(record.entity, index)
+                                ~= (record.neonsWanted[index + 1] == true) then
+                                drifted = true
+                                break
+                            end
+                        end
+
+                        if drifted and Properties.applyNeons then
+                            pcall(Properties.applyNeons, record.entity, {
+                                neonEnabled = record.neonsWanted,
+                                neonColor = record.neonsColour,
+                            })
+
+                            --[[
+                                A vehicle that needs correcting once has had its state dropped by
+                                the engine, which is ordinary. One that needs it five times is
+                                being actively fought, and that is worth a line in the SERVER log -
+                                where the operator is looking, which took three attempts to get
+                                right.
+                            ]]
+                            record.neonFixes = (record.neonFixes or 0) + 1
+
+                            if record.neonFixes == 5 then
+                                local got = {}
+                                for index = 0, 3 do
+                                    got[index + 1] =
+                                        IsVehicleNeonLightEnabled(record.entity, index) and 1 or 0
+                                end
+
+                                TriggerServerEvent('vpark:server:neonFailed', id, {
+                                    wanted = (function()
+                                        local out = {}
+                                        for index = 1, 4 do
+                                            out[index] =
+                                                record.neonsWanted[index] == true and 1 or 0
+                                        end
+                                        return out
+                                    end)(),
+                                    got = got,
+                                    control = NetworkHasControlOfEntity
+                                        and NetworkHasControlOfEntity(record.entity) or false,
+                                    owner = NetworkGetEntityOwner
+                                        and NetworkGetEntityOwner(record.entity) or -1,
+                                    exists = true,
+                                })
+                            end
+                        end
+                    end
+
                     local health = GetVehicleBodyHealth(record.entity)
 
                     if record.seenHealth == nil then
@@ -965,6 +952,28 @@ function Stream.snapshot(id)
             for _, key in ipairs(Schema.keys[group] or {}) do
                 properties[key] = nil
             end
+        end
+    end
+
+    --[[
+        AND NEITHER DOES IT REPORT WHETHER ITS NEONS ARE ON.
+
+        The same argument as the position above, and it took seven releases to notice that it was
+        the same argument. ONLY A PERSON IN THE VEHICLE CAN TURN NEONS ON OR OFF. Everything else
+        that changes them - the engine dropping the state as ownership migrates, a restore that did
+        not take, a client that never had control - is the game losing the value, not somebody
+        choosing it.
+
+        So they are left out until somebody has sat in it, and the server keeps what it has. That is
+        what makes this permanent rather than one more handshake: there is no path by which a dark
+        vehicle nobody has touched can report itself dark and overwrite the player's own setting.
+
+        Every previous attempt tried to DETECT the failure and suppress the report. This does not
+        need to detect anything, which is why it is the last one.
+    ]]
+    if not moved then
+        for _, key in ipairs(Schema.keys.neons or {}) do
+            properties[key] = nil
         end
     end
 
