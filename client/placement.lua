@@ -210,12 +210,29 @@ function Placement.beginBatch(ignore, neighbours)
     if type(neighbours) == 'table' and shot then
         local ours = {}
 
+        --[[
+            THROUGH THE STATE BAG FIRST. `NetworkGetEntityFromNetworkId` asks the object manager
+            for an object this client may not have, and it says so in the console every time:
+
+                Warning: [entity] GetNetworkObject: no object by ID 65533
+
+            A placement resolves every neighbour the server named, and most of a car park's worth
+            of neighbours are not streamed in on the client doing the placing - so the common case
+            was a burst of warnings per restore. `GetEntityFromStateBagName` answers the same
+            question quietly, and every vehicle in this list has a bag: the server set `vpark:id`
+            on it. The native stays as the fallback for a build where the bag route is empty.
+        ]]
         for _, netId in ipairs(neighbours) do
-            local ok, entity = pcall(NetworkGetEntityFromNetworkId, netId)
+            local entity = GetEntityFromStateBagName(('entity:%d'):format(netId))
+
+            if not entity or entity == 0 then
+                local ok, resolved = pcall(NetworkGetEntityFromNetworkId, netId)
+                entity = ok and resolved or nil
+            end
 
             -- Not streamed in on this client, so it is not in the pool either and there is
             -- nothing to exclude.
-            if ok and entity and entity ~= 0 then ours[entity] = true end
+            if entity and entity ~= 0 then ours[entity] = true end
         end
 
         shot.ours = ours
@@ -1205,8 +1222,23 @@ function Placement.placeInner(entity, data)
         FreezeEntityPosition(entity, true)
     end
 
+    --[[
+        THE ANCHOR GOES DOWN HERE, AFTER THE POSE IS FINAL.
+
+        `Properties.apply` runs before this function and only records what the anchor SHOULD be -
+        see the note there. This is the first moment the vehicle is where it belongs, which is the
+        only place it makes sense to moor it to.
+    ]]
+    if Anchor and Anchor.settle then Anchor.settle(entity) end
+
     SetVehicleDoorsShut(entity, true)
-    SetVehicleUndriveable(entity, false)
+
+    -- NOT on a stored wreck. A vehicle whose engine was destroyed is restored destroyed - see
+    -- `applyWreck` in `client/properties.lua` - and this line was quietly handing it back as a
+    -- working car one step later, which is half of "il respawn tout neuf".
+    if GetVehicleEngineHealth(entity) > 0 then
+        SetVehicleUndriveable(entity, false)
+    end
 
     --[[
         ============================================================================
@@ -1269,6 +1301,11 @@ end
 ]]
 function Placement.wake(entity)
     if not DoesEntityExist(entity) then return false end
+
+    -- An anchor is a deliberate instruction to stay put, so nothing here overrides it. Raising
+    -- it is a person's decision and `Anchor.raise` is the only thing that makes it.
+    if Anchor and Anchor.isAnchored and Anchor.isAnchored(entity) then return false end
+
     if not IsEntityPositionFrozen(entity) then return false end
 
     if not takeControl(entity, 1000) then return false end

@@ -8,6 +8,100 @@ out of it.
 
 ---
 
+## [2026-09-10 14:20] - A guard written on a merge that was a replacement
+
+**Context:** auditing three tester reports from a session with three players. Several complaints were
+about data not surviving a reboot: "une custom n'a pas survecu au reboot", "vehicules repare au
+reboot serveur".
+
+**Error:** `Persist.applySnapshot` ends with `record.properties = patch.properties`. That is a
+replacement, not a merge, so a key left out of a snapshot is a key deleted from the database.
+
+Three separate guards had been written on the belief that it was a merge. Each of them dropped a
+property group from a snapshot and each was commented "the server treats an absent field as no news
+and keeps what it has":
+
+  - the unverified groups, so a restore that could not apply the neons could not write its failure;
+  - the neon keys, until somebody is observed to change them;
+  - the same neon keys again, one layer down, in the server's own `unverifiedNeons` guard.
+
+All three deleted the value they were written to protect. One group escaped - deformation - because
+somebody hit this once and wrote a single line by hand to carry it across, without generalising it.
+
+**Root cause:** the comment described the intended contract and nothing enforced it. Reading the
+guard tells you it preserves the value; reading the assignment forty lines below tells you it does
+not; and nothing puts those two lines next to each other.
+
+**Fix:** a withheld group is now NAMED in the snapshot - `withheld = { neons = true }` - and
+`applySnapshot` copies the named groups from the record. The hand-written deformation line became
+the general rule. `tools/check.py` group 21 fails on any loop that nils out `Schema.keys[...]`
+without a `withheld` assignment beside it.
+
+**Prevention:** when a comment states a contract that a caller forty lines away has to honour, the
+contract needs a check, not a comment. And a guard that PRESERVES something has to be tested by
+asserting the value is still there afterwards - not by asserting the bad value did not arrive, which
+is what "it drops the keys" tests and which passes either way.
+
+---
+
+## [2026-09-10 13:40] - One client's private bookkeeping used as a fact about the world
+
+**Context:** the same three-player session. "Quand je fonce dedans avec mon nouveau vehicule parfois
+l'ancien ne bouge pas, il reste tres solide comme de la pierre."
+
+**Error:** two separate failures, both from the same mistake, and both invisible with one player.
+
+A parked vehicle was immovable: frozen on every client by `vpark:hold` and unfrozen only by the
+client nominated to place it, from its own restore table. On every other machine it stayed frozen -
+and a frozen entity on the client that OWNS it is not simulated at all, so it became a wall the
+moment ownership migrated to whoever was driving at it.
+
+And a capture nobody could answer: the sweep asks whichever client is nearest, that client had no
+restore entry, and it returned nil - which the server correctly reads as "no news". Tuning, damage
+and repairs on a car another machine had placed were never recorded.
+
+**Root cause:** `tracked` in `client/stream.lua` is one client's list of the vehicles IT placed, and
+three separate pieces of logic treated it as the list of vehicles that exist. `client/track.lua`
+had already hit this in 1.0.16 and fixed its own case by keying on the replicated `vpark:id`
+statebag, with a comment saying so. Nothing generalised it.
+
+**Fix:** a second index on every client, built from `vpark:id`, and the wake decision mirrored over
+it. Any client that can see a vehicle can be asked to capture it, with the three things such a
+client cannot know either sent by the server (the deformation reference) or refused outright (the
+neons, and whether the vehicle has been dressed - now a server-side fact).
+
+**Prevention:** anything keyed on `tracked` answers a question about THIS CLIENT, and any handler
+that fires for an action a player performs has to be keyed on the replicated statebag instead -
+because the player is on whichever machine they are on. When a file fixes this for its own case,
+check the other files for the same shape rather than fixing one call site.
+
+---
+
+## [2026-09-10 12:10] - Nil meant two different things, and the server had to guess
+
+**Context:** the tester's doubt from the 1.0.33 procedure, confirmed in 1.0.34: a vehicle repaired
+with txAdmin came back dented after a reboot.
+
+**Error:** `Deformation.read` returned nil for an undamaged vehicle, from two code paths that are
+both READINGS - the pristine-health gate and the "no grid point over the threshold" exit. Nil is
+also what a snapshot carries when the deformation was deliberately not re-read, which is the drift
+guard doing its job. The server kept what it had, which is right for one meaning and wrong for the
+other: no reading of a repaired car could ever clear the stored shape.
+
+**Root cause:** one sentinel for two facts. "I did not look" and "I looked and there is nothing"
+were both nil, and only one of them can be the fallback.
+
+**Fix:** an empty list is now the answer for "read and empty", and nil means "not read". Since an
+empty list can also come from a client looking at a car whose dents have not been applied yet, it
+is only believed from a vehicle whose reported body health says it is undamaged - the engine derives
+that number from the same damage, so a car with dents cannot read as pristine.
+
+**Prevention:** when a value has a "no news" fallback, every path that produces the absent value has
+to be checked against what the fallback assumes. Two facts sharing one sentinel is a bug waiting for
+a fallback to be added.
+
+---
+
 ## [2026-09-09 05:10] - Nine releases spent persisting something the game does not keep
 
 **Context:** neon lights were the last property that would not survive a store-and-retrieve cycle.

@@ -131,6 +131,23 @@ local stats = exports['v-park']:GetStats()
 
 What `/vparkstats` prints, as a table. Useful for a monitoring dashboard.
 
+### `SetAnchored(reference, on)`
+
+```lua
+exports['v-park']:SetAnchored('0TL49XX0197HQ', true)
+exports['v-park']:SetAnchored('62AEL793', false)
+```
+
+Drop or raise a vehicle's anchor. `reference` is an id or a plate. Returns `true` when the record
+was found and the anchor changed.
+
+No player behind it, so it skips the occupant check a player's own request goes through: the
+resource calling this has already decided who is allowed. See `Config.Anchor` for the class list -
+boats only by default, and the note there explains why.
+
+On the client there is `exports['v-park']:ToggleAnchor()`, which acts on the vehicle the player is
+in and goes through the server's own permission check.
+
 ### `GetSavedFields()`
 
 ```lua

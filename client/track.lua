@@ -204,7 +204,15 @@ local function onEnter(vehicle)
 
             Unconditional, and cheap: unfreezing an entity that is not frozen does nothing.
         ]]
-        FreezeEntityPosition(vehicle, false)
+        --[[
+            EXCEPT AN ANCHORED ONE. Getting into a moored boat does not unmoor it: the anchor is
+            what the player asked for and the command is how they take it back. The position-write
+            problem this unfreeze exists to solve is why `Config.Anchor.classes` is boats only by
+            default - the game's own boat anchor does not freeze the entity at all.
+        ]]
+        if not (Anchor and Anchor.isAnchored and Anchor.isAnchored(vehicle)) then
+            FreezeEntityPosition(vehicle, false)
+        end
 
         -- Driven, so its position becomes worth recording. See `Stream.snapshot`. Only on the
         -- client that tracks it; the others have nothing to mark and do not capture it.
@@ -491,10 +499,31 @@ RegisterNetEvent('vpark:client:capture', function(ids, token)
 
     local out = {}
 
-    for _, id in ipairs(ids) do
-        local snapshot = Stream.snapshot(id)
-        if snapshot then
-            out[#out + 1] = snapshot
+    for _, asked in ipairs(ids) do
+        --[[
+            An entry is `{ id, storedBodyHealth }`.
+
+            The second value is the reference the deformation drift guard needs. The server sends
+            it because a client that did not place the vehicle has no idea what body health it was
+            restored at, and without a reference it would re-measure the dents on every sweep and
+            walk them. See `foreignSnapshot` in `client/stream.lua`.
+
+            A bare string is still read, so nothing here depends on both halves of the resource
+            having been reloaded.
+        ]]
+        local id, reference
+
+        if type(asked) == 'table' then
+            id, reference = asked[1], tonumber(asked[2])
+        elseif type(asked) == 'string' then
+            id = asked
+        end
+
+        if type(id) == 'string' then
+            local snapshot = Stream.snapshot(id, reference)
+            if snapshot then
+                out[#out + 1] = snapshot
+            end
         end
     end
 

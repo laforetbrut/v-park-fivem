@@ -575,6 +575,9 @@ SHIPPED_DEFAULTS = [
      "handed a spawned car, which is not the same thing"),
     ('Persistence', 'allowClaimInOwnedMode', 'true',
      "without it /vpark does nothing at all on a stock install"),
+    ('Persistence', 'excludedClasses', '{}',
+     "nothing is excluded by default: a class that silently does not persist is worse than a "
+     "table with bicycles in it"),
     ('Streaming', 'reconcileInterval', '15',
      "the sweep that catches a stray vehicle; 0 disables it"),
 
@@ -1253,6 +1256,68 @@ def check_local_before_declaration():
 
 # ==============================================================================================
 
+# ==============================================================================================
+# 21. Dropping a property group from a snapshot also names it as withheld
+#
+# `Persist.applySnapshot` ends with `record.properties = patch.properties`. That is a REPLACEMENT
+# and not a merge, so a key left out of a snapshot is a key deleted from the database.
+#
+# Three separate guards were written on the belief that it was a merge, each commented "the server
+# treats an absent field as no news and keeps what it has". All three deleted the value they were
+# protecting - including the neon guard, which is part of why nine releases of neon persistence
+# could not be made to work. Deformation escaped only because somebody hit it once and wrote a
+# line by hand to carry it across.
+#
+# So: any loop that nils out `Schema.keys[<group>]` from a properties table has to name that group
+# in a `withheld` table, and `applySnapshot` has to copy the named groups back from the record.
+# This is the check that would have caught it, and the one that catches the fourth guard somebody
+# writes.
+# ==============================================================================================
+
+
+def check_withheld_groups():
+    global checks_run
+    checks_run += 1
+
+    dropper = re.compile(
+        r'for\s+_,\s*key\s+in\s+ipairs\(\s*Schema\.keys[\.\[]',
+    )
+
+    for path in lua_files():
+        source = strip_comments(read(path))
+        name = relative(path)
+
+        for found in dropper.finditer(source):
+            line = source[:found.start()].count('\n') + 1
+
+            # A window around the loop rather than only after it: the `withheld` assignment
+            # belongs beside its loop, and reads better above it than below.
+            lines = source.split('\n')
+            window = '\n'.join(lines[max(0, line - 8):line + 8])
+
+            if 'properties[key] = nil' not in window:
+                # Not a dropper - it is reading or copying, which is what the fix looks like.
+                continue
+
+            # An ASSIGNMENT, not a mention. The return table a few lines below often carries
+            # `withheld = ...`, and matching that would let a dropper with no name at all pass.
+            if not re.search(r'withheld(\.\w+|\[[^\]]+\])\s*=', window):
+                fail('withheld',
+                     f'{name}:{line} drops a property group from a snapshot without naming it '
+                     'in `withheld`. A snapshot REPLACES the stored properties, so dropping a '
+                     'key deletes it - set `withheld[<group>] = true` beside this loop, and '
+                     'Persist.applySnapshot will carry the stored value across.')
+
+    # And the other half: the server has to act on the names.
+    persist = strip_comments(read(os.path.join(ROOT, 'server', 'persist.lua')))
+
+    if 'snapshot.withheld' not in persist:
+        fail('withheld',
+             'server/persist.lua never reads `snapshot.withheld`. The client names the groups '
+             'it is withholding so that applySnapshot can copy them back from the record; '
+             'without that read, every withheld group is deleted from the database.')
+
+
 def main():
     english = check_locales()
 
@@ -1275,6 +1340,7 @@ def main():
     check_store_near()
     check_refusal_reasons(english)
     check_local_before_declaration()
+    check_withheld_groups()
 
     print(f'v-park: {checks_run} check groups run over {len(lua_files())} Lua files')
 

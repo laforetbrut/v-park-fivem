@@ -362,6 +362,102 @@ function Actions.refuel(src, reference, level)
     return true, 'notify.refuelled'
 end
 
+--[[
+    ================================================================================================
+    THE ANCHOR.
+    ================================================================================================
+
+    Stored, replicated, and applied by `client/anchor.lua`. Nothing here touches the vehicle: the
+    statebag is the instruction and every client in scope acts on it, which is what makes two
+    players see the same boat in the same place.
+
+    `reference` is a network id when the ask came from a player in the boat, and an id or a plate
+    when it came from the console or another resource. Both resolve to the same record.
+]]
+function Actions.setAnchor(src, reference, on, byNetId)
+    if Config.Anchor and Config.Anchor.enabled == false then
+        return false, 'anchor.disabled'
+    end
+
+    local record
+
+    if byNetId then
+        local netId = tonumber(reference)
+        local entity = netId and netId > 0 and NetworkGetEntityFromNetworkId(netId) or 0
+
+        if not entity or entity == 0 or not DoesEntityExist(entity) then
+            return false, 'error.no_vehicle'
+        end
+
+        local ok, id = pcall(function() return Entity(entity).state['vpark:id'] end)
+        if not ok or type(id) ~= 'string' then return false, 'anchor.not_kept' end
+
+        record = Store.get(id)
+    else
+        record = Store.resolve(reference)
+    end
+
+    if not record then return false, 'error.unknown_vehicle' end
+
+    --[[
+        WHO MAY DO IT, PROVEN ON THE SERVER.
+
+        `'occupant'` is the default and the interesting one: an anchor is a boat control, and
+        somebody at the wheel can already take the boat anywhere - so asking them to own it is
+        friction with nothing behind it. What it must NOT become is "anybody who knows the id",
+        because `vpark:id` is replicated and ids are not secret. So the occupant is the one the
+        server watched get in, which is what `nearEnoughToSpeakFor` is already for.
+    ]]
+    if src and src ~= 0 then
+        local entry = Store.live(record.id)
+        local mode = (Config.Anchor and Config.Anchor.permission) or 'occupant'
+        local allowed = Ownership.mayAct(src, record)
+
+        if not allowed and mode == 'occupant' and entry then
+            allowed = Spawn.playerIsNear and Spawn.playerIsNear(src, entry.entity, 10.0) == true
+        end
+
+        if not allowed then return false, 'error.not_yours' end
+    end
+
+    local properties = record.properties or {}
+    properties.anchored = on and true or nil
+
+    Store.update(record.id, { properties = properties, touched_at = Park.now() })
+
+    -- Replicated so every client applies it. Cleared rather than set to false: an absent bag and
+    -- a false one mean the same thing, and one of them is not replicated to everybody in scope.
+    local entry = Store.live(record.id)
+    if entry and entry.entity and DoesEntityExist(entry.entity) then
+        pcall(function()
+            Entity(entry.entity).state:set('vpark:anchored', on and true or nil, true)
+        end)
+    end
+
+    writeNow(record.id, 'onAnchorChange')
+
+    return true, on and 'anchor.dropped' or 'anchor.raised'
+end
+
+--[[
+    The anchor on whatever vehicle this player is in, resolved on the server.
+
+    `GetVehiclePedIsIn` answers server-side under OneSync, and asking it here rather than taking
+    a network id from the client is the difference between "the boat you are sitting in" and "any
+    boat whose id you know" - and `vpark:id` is replicated, so ids are known.
+]]
+function Actions.setAnchorHere(src, on)
+    local ped = GetPlayerPed(src)
+    if not ped or ped == 0 then return false, 'error.no_ped' end
+
+    local vehicle = GetVehiclePedIsIn(ped, false)
+    if not vehicle or vehicle == 0 or not DoesEntityExist(vehicle) then
+        return false, 'anchor.no_vehicle'
+    end
+
+    return Actions.setAnchor(src, NetworkGetNetworkIdFromEntity(vehicle), on, true)
+end
+
 function Actions.setLock(src, reference, locked)
     local record, err = target(src, reference, false)
     if not record then return false, err end

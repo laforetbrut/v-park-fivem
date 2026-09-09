@@ -188,6 +188,21 @@ end)
     neons is running". So the config says `'auto'` and this says what that came out as, which is
     the answer an integration actually needs before it decides to handle a group itself.
 ]]
+--[[
+    Drop or raise a vehicle's anchor.
+
+        exports['v-park']:SetAnchored('0TL49XX0197HQ', true)
+        exports['v-park']:SetAnchored('62AEL793', false)
+
+    An id or a plate, and no player behind it - so it skips the occupant check that a player's own
+    request goes through. That is the point of an export: the resource calling it has already
+    decided who is allowed.
+]]
+exports('SetAnchored', function(reference, on)
+    if type(reference) ~= 'string' then return false end
+    return (Actions.setAnchor(nil, reference, on == true, false))
+end)
+
 exports('GetSavedFields', function()
     local out = {}
 

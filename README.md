@@ -225,6 +225,7 @@ resource. Rename any of them in `Config.Commands`; set `enabled = false` to remo
 | `/vparkprobe [model]` | Run the placement probe where you stand, and print the result |
 | `/vparkwhere` | Report how far each restored vehicle near you is from where the database says it should be - per axis, plus heading, frozen, dressed and owner |
 | `/vparkdiag [id\|plate]` | What the SERVER thinks. With no argument, every vehicle in the world ordered by how far it drifted from its stored place; with one, the full record - stored pose, actual pose, drift, entity and net id, and the four flags that decide whether its position may be saved. Works from the console, unlike `/vparkwhere` |
+| `/vparkanchor` | Drop or raise a boat's anchor. With no argument it toggles; `on`/`off` are explicit. A dropped anchor is stored, so it survives a restart |
 | `/vparkneontest` | Forces neons onto the vehicle you are in and reports, in the server console, what the game does with them over the next three seconds. A test, not an inspection: it changes the vehicle |
 | `/vparkprops` | What your client sees on the vehicle you are in, beside what is stored: neons, windows, doors, body health. The answer to "this modification does not survive" |
 | `/vparkwhy` | Why the last twenty-five vehicles were not kept: model, plate, who offered it, and the reason. Every refusal in the adoption path used to be silent |
@@ -631,8 +632,11 @@ y a trouvé, et ne change rien tant que vous ne le demandez pas.
 - **La voiture d'un joueur est conservée dès qu'il monte dedans.** Aucune commande, aucune
   attente. Si le framework dit qu'elle lui appartient, **ou s'il en a simplement les clés**,
   elle est conservée : c'est justement le cas qui la faisait perdre avant, sortir sa voiture et
-  se déconnecter une minute plus tard. Le mode de persistance est `owned` par défaut pour cette
-  raison précise.
+  se déconnecter une minute plus tard.
+- **Tous les véhicules, pas seulement les voitures.** Bateaux, hélicoptères, avions, motos, vélos :
+  aucune classe n'est exclue par défaut, et les bateaux et aéronefs apparaissent au même rayon que
+  le reste. Un joueur qui a acheté un bateau a acheté un véhicule, et un véhicule qui ne réapparaît
+  pas est un ticket de support.
 - **Semi-persistance des véhicules de métier et de location.** Une voiture de police survit au
   redémarrage de 06h00 parce que l'agent est toujours en service, et disparaît 45 minutes après
   sa déconnexion. Le temps d'arrêt du serveur ne compte pas dans ce décompte.

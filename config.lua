@@ -433,7 +433,13 @@ Config.Persistence = {
     -- traffic - and with `keysGrantOwnership` in Section 10, holding the keys is enough to
     -- count, so an admin-spawned car or one handed over by another player is kept too.
     --
-    -- Set it back to 'all' if you were running 1.0.0 or 1.0.1 and want the old behaviour.
+    -- WHAT 'owned' MEANS IS "SOMEBODY'S", NOT "A CAR". Every class is in scope: a boat, a
+    -- helicopter, a plane and a bicycle are all kept when they belong to somebody, because
+    -- `Config.Persistence.excludedClasses` is empty by default. A player who bought a boat
+    -- bought a vehicle, and a vehicle that quietly does not persist is a support ticket.
+    --
+    -- Set it to 'all' for a world where stolen cars stay where they were left, or 'claimed' if
+    -- you want parking to be a deliberate act.
     mode = 'owned',
 
     --[[
@@ -562,10 +568,20 @@ Config.Persistence = {
     --  16 Planes        17 Service         18 Emergency     19 Military
     --  20 Commercial    21 Trains          22 Open Wheel
     --
-    -- 13 (bicycles) and 21 (trains) are excluded by default and you almost certainly want to
-    -- keep them that way: a bicycle is not parked, it is dropped, and a persisted train is a
-    -- support ticket.
-    excludedClasses = { 13, 21 },
+    -- NOTHING IS EXCLUDED BY DEFAULT. Every class a player can drive is kept.
+    --
+    -- 13 (bicycles) and 21 (trains) were excluded until now, on the argument that a bicycle is
+    -- not parked but dropped, and that a persisted train is a support ticket. Both are still
+    -- true and neither is worth a vehicle silently not being kept:
+    --
+    --   a bicycle   is kept and restored like anything else. It is clutter rather than a
+    --               problem, and Section 8 clears it faster than a car.
+    --   a train     is on rails and belongs to the game's own train system, so `mode = 'all'`
+    --               will essentially never see one - it only keeps what a player DRIVES. If
+    --               your server has a train script that lets players drive one, put 21 back.
+    --
+    -- Add a class here to exclude it. The list is the class id, from the table above.
+    excludedClasses = {},
 
     -- Classes that persist but are not restored into the world unless a player is very close.
     -- See `Config.Streaming.classRadius` - this list is the one that feeds it.
@@ -724,6 +740,8 @@ Config.Save = {
         roofState = true,      -- convertible roof up or down
         livery = true,
         plate = true,
+        -- Whether a dropped anchor survives a restart. See `Config.Anchor`.
+        anchor = true,
         statebags = true,      -- only the keys in `statebagKeys` below
     },
 
@@ -745,6 +763,25 @@ Config.Save = {
         installed - an absent resource simply does not match.
     ]]
     neonManagers = { 'jim-mechanic', 'jim_mechanic' },
+
+    -- Bring a wreck back as a wreck.
+    --
+    -- An engine at or below zero is a vehicle that will never start again, and the number is
+    -- stored faithfully. Putting the number back is not the same as putting the vehicle back:
+    -- the game decides a vehicle is destroyed from its own damage model, and a car it created
+    -- a second ago has none - so a burnt-out shell came back as a working car with a bad
+    -- engine reading, and drove away.
+    --
+    -- With this on, a stored wreck is restored destroyed: engine and tank at the floor the
+    -- game itself uses, body at zero, undriveable.
+    --
+    -- What it does NOT do is put the charred bodywork back. That needs the vehicle to have
+    -- actually burned, and the only way to make it burn on demand damages whatever is standing
+    -- next to it - which, on a restore, is the player who triggered it.
+    --
+    -- Off means a wreck comes back as a driveable car. It is a legitimate choice on a server
+    -- that would rather lose the evidence than strand somebody.
+    restoreWrecks = true,
 
     -- Which entity statebag keys are carried across a restart.
     --
@@ -936,6 +973,63 @@ Config.Mechanic = {
     -- from once it is gone. They are not restored, and this switch exists only so that
     -- turning it on produces a documented warning rather than silence.
     restoreEffects = false,
+}
+
+-- ===========================================================================================
+-- 6d. THE ANCHOR
+--
+-- A boat that is kept comes back exactly where it was left, and then the water moves it. That
+-- is not a persistence bug and no amount of position accuracy fixes it: a boat on water drifts,
+-- because a boat on water is meant to.
+--
+-- So there is an anchor. Dropped, the boat holds its position; raised, it behaves normally.
+-- It is a deliberate act by whoever is aboard rather than something v-park decides, and it is
+-- STORED - a boat left anchored on Friday is still anchored on Monday, which is the only
+-- version of the feature that is worth anything on a server that restarts nightly.
+--
+-- HOW IT HOLDS THE BOAT. Through the game's own anchor for anything that is a boat:
+-- `SET_BOAT_ANCHOR`, which is what the game uses for the moored boats in the world. The boat
+-- still rides the swell, it just does not go anywhere - which is what an anchor looks like.
+-- A hard position freeze is the fallback for a class that has no anchor of its own, and it is
+-- visibly not the same thing, which is why boats are the only class on by default.
+-- ===========================================================================================
+
+Config.Anchor = {
+    enabled = true,
+
+    -- Which vehicle classes may be anchored, by the game's class number.
+    --
+    -- 14 is Boats. Nothing else is on by default: every other class is held by freezing it
+    -- outright, and a frozen car IGNORES POSITION WRITES - an admin teleport, a tow script or a
+    -- `tpm` will silently fail to move it until the anchor is raised. That is a fair trade on a
+    -- boat somebody deliberately moored and a support ticket on a car.
+    classes = {
+        [14] = true,   -- Boat
+        -- [15] = true,  -- Helicopter
+        -- [16] = true,  -- Plane
+    },
+
+    --[[
+        Who may drop or raise it.
+
+        'occupant'  anybody sitting in it, proven on the server. An anchor is a boat control,
+                    and somebody in the driver's seat can already take the boat anywhere.
+        'owner'     only the character v-park has as the owner, plus staff.
+    ]]
+    permission = 'occupant',
+
+    -- Hold the boat completely still rather than letting it ride the swell.
+    --
+    -- `SET_BOAT_FROZEN_WHEN_ANCHORED`. Truer to a boat tied against a dock, wrong for one moored
+    -- in open water, and the difference is visible. Off is the safer default.
+    frozenWhenAnchored = false,
+
+    -- Drop the anchor automatically when a boat is left in the water with nobody aboard.
+    --
+    -- Off by default, and deliberately: it takes a decision away from the player and applies it
+    -- to every boat on the server, including one somebody meant to leave drifting. Turn it on if
+    -- your players keep losing boats rather than if they keep asking for an anchor.
+    automatic = false,
 }
 
 -- ===========================================================================================
@@ -1333,12 +1427,21 @@ Config.Streaming = {
     -- Per-class spawn radius override, for the classes in
     -- `Config.Persistence.lowPriorityClasses` and any other class you name here.
     --
-    -- An aircraft at an airfield does not need to exist when you are 250 metres away, and
-    -- there are usually a lot of them in one place.
+    -- BOATS AND AIRCRAFT NOW USE THE SAME RADIUS AS EVERYTHING ELSE. They were 150, 150 and 200,
+    -- on the reasoning that an aircraft at an airfield does not need to exist when you are 250
+    -- metres away and that there are usually a lot of them in one place.
+    --
+    -- Both halves of that are true and neither is what a player experiences. You can see across
+    -- a runway a great deal further than 200 metres, and a marina from further still - so the
+    -- one class of vehicle you approach with a long clear sight line was the one that appeared
+    -- late, which reads as "my plane is gone" right up until it is not.
+    --
+    -- Lower them again if an airfield full of persisted aircraft costs you entities. The class
+    -- ids are in the table above `Config.Persistence.excludedClasses`.
     classRadius = {
-        [14] = 150.0, -- Boats
-        [15] = 150.0, -- Helicopters
-        [16] = 200.0, -- Planes
+        [14] = 250.0, -- Boats
+        [15] = 250.0, -- Helicopters
+        [16] = 250.0, -- Planes
     },
 
     -- Milliseconds between streaming passes. Each pass compares the persisted set against
@@ -1925,6 +2028,8 @@ Config.Commands = {
     find       = { name = 'vparkfind',    permission = 'owner',    enabled = true },
     info       = { name = 'vparkinfo',    permission = 'everyone', enabled = true },
     lock       = { name = 'vparklock',    permission = 'owner',    enabled = true },
+    -- Drop or raise a boat's anchor. See `Config.Anchor` for what it does and who may do it.
+    anchor     = { name = 'vparkanchor',  permission = 'everyone', enabled = true },
     -- Naming a vehicle also exempts it from the Section 9c idle cleanup, because naming a car
     -- is a deliberate act and "this one matters, leave it" is the obvious reading of it.
     rename     = { name = 'vparkname',    permission = 'owner',    enabled = true },

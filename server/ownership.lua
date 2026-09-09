@@ -316,6 +316,49 @@ AddEventHandler('playerJoining', function()
 end)
 
 --[[
+    ================================================================================================
+    AND EVERYBODY WHO WAS ALREADY HERE WHEN WE STARTED.
+    ================================================================================================
+
+    Every entry in `online` came from an event that fires when a player ARRIVES: `playerJoining`,
+    or the framework's own loaded event. A player who was already connected fires none of them, so
+    a `restart v-park` - or v-park starting after the framework on a server with players on it -
+    left the map empty while the server was full.
+
+    Two things read it, and both were wrong in a way that looked like something else:
+
+      the admin panel   showed every owner as offline. That is the tester's "oui par contre le
+                        joueur apparait offline alors qu'il est connecte", and it is the harmless
+                        half.
+
+      the semi-persistence sweep   counts a vehicle towards expiry only while its owner is away.
+                        With the map empty, every owner was away, so job and semi-persistent
+                        vehicles began counting down towards deletion with their owners standing
+                        next to them.
+
+    `GetPlayers` is the answer to "who is here", it does not need an event, and `register` already
+    waits for the framework to decide who each of them is - which is exactly the wait that makes
+    this safe to run before the framework has finished loading.
+]]
+AddEventHandler('onResourceStart', function(resource)
+    if resource ~= Park.resource then return end
+
+    CreateThread(function()
+        -- One frame, so that `GetPlayers` is answered by a server that has finished starting us.
+        Wait(0)
+
+        local players = GetPlayers()
+        if #players == 0 then return end
+
+        Park.log('%d player(s) were already connected - resolving their characters', #players)
+
+        for _, src in ipairs(players) do
+            register(tonumber(src) or src)
+        end
+    end)
+end)
+
+--[[
     Every framework announces a character change differently, and a player switching characters
     without disconnecting is a real thing on every one of them. Missing it means the previous
     character stays registered as online and their job vehicle never expires.

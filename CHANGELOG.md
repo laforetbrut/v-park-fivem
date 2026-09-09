@@ -7,6 +7,252 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+**Three players testing at once found four bugs that a single player cannot reach, and a fifth
+that has been deleting data since the guards were written.**
+
+### Fixed
+
+- **A parked vehicle read as a wall.** Drive into a persistent vehicle and it did not move, did not
+  take the hit and could not be towed - "il reste tres solide comme de la piere".
+
+  `vpark:hold` freezes a restored vehicle on *every* client, because any of them may be the one
+  simulating its fall before collision arrives. Only the client that was nominated to place it ever
+  unfroze it, and only from its own restore table. On every other machine the vehicle stayed frozen
+  for good - and a frozen entity on the client that *owns* it is not simulated at all. So the moment
+  ownership migrated to the player driving towards it, the car became immovable.
+
+  Every client now mirrors the wake decision for the vehicles it can see but did not place, keyed on
+  the replicated `vpark:id` statebag rather than on one client's private bookkeeping. Damage and
+  entering a vehicle wake it on whichever machine the player is actually on. Unfreezing only:
+  re-freezing a copy this client does not own would stop it following the owner.
+
+- **A capture nobody could answer.** The save sweep asks whichever client is *nearest* a vehicle,
+  and for one being driven it asks the occupant. Neither is necessarily the client that placed it,
+  and a client with no restore entry answered nothing at all - silently, because an absent snapshot
+  means "no news". So tuning, repairs and damage done to a car somebody else's machine had placed
+  never reached the database: "une custom n'a pas survecu au reboot", "vehicules repare au reboot
+  serveur".
+
+  Any client that can see a vehicle can now be asked about it. The three things such a client cannot
+  know are handled rather than guessed: the deformation reference is sent by the server, the neons
+  are never reported, and whether the vehicle was dressed is now a server-side fact so that no
+  client can report a stock car as the truth.
+
+- **A withheld property group was deleted instead of kept.** `Persist.applySnapshot` ends with
+  `record.properties = patch.properties`, which is a replacement and not a merge - so a key left out
+  of a snapshot was a key deleted from the database.
+
+  Three guards were written on the belief that it was a merge, each commented "the server treats an
+  absent field as no news and keeps what it has". All three deleted the value they were protecting,
+  including the neon guard - which is part of why nine releases of neon persistence could not be
+  made to work. The snapshot now *names* the groups it is withholding and the server copies those
+  from the record. `tools/check.py` gained a check that fails on the next guard written the old way.
+
+- **A repaired vehicle could never lose its dents.** Repair a car with anything other than v-park -
+  txAdmin, a mechanic script - and the dents came back after a reboot, permanently.
+
+  `Deformation.read` returned nil for an undamaged vehicle, and nil is also what a snapshot carries
+  when the deformation was deliberately not re-read. The server resolved the ambiguity by keeping
+  what it had, which is right for the drift guard and wrong here: no reading of a repaired car could
+  ever clear the stored shape. An empty list is now a real answer, and it is only believed from a
+  vehicle that reads as undamaged - body health is the one number both sides already carry, and a
+  car with dents cannot read as pristine.
+
+- **Body health drifted downwards on every restart.** The stored health was applied *before* the
+  stored damage, and putting a car's own damage back lowers it: every broken window, burst tyre and
+  deformed panel. The next capture read the lower number and wrote it down, and the restore after
+  that started from there. A car parked, passed and restarted enough times walked towards zero
+  without anybody touching it. Health is now re-asserted after the damage and after the deformation
+  apply has finished converging on its own thread.
+
+- **A wreck came back as a new car.** "Quand un vehicule explose et devient epave quand on revient
+  il respawn tout neuf." The destroyed engine reading was stored faithfully and putting the number
+  back is not the same as putting the vehicle back - the game decides a vehicle is destroyed from
+  its own damage model, and a car it created a second ago has none. The placement then made it
+  driveable again. A stored wreck now comes back destroyed: engine and tank at the floor the game
+  itself uses, undriveable. `Config.Save.restoreWrecks` turns it off. It does not restore the
+  charred bodywork, which would need the vehicle to burn again and would damage whoever is standing
+  next to it.
+
+- **Every owner showed as offline after a resource restart.** The online map was built only from
+  events that fire when a player *arrives*, so a `restart v-park` on a server with players on it
+  left it empty. The panel showing "offline" was the harmless half: the semi-persistence sweep
+  counts a vehicle towards deletion only while its owner is away, so job and semi-persistent
+  vehicles began counting down with their owners standing next to them. Players already connected
+  are now resolved on start.
+
+- **A wall of `GetNetworkObject: no object by ID` warnings in F8.** Two paths asked the object
+  manager for objects the client did not have yet: the restore wait, once every 50 ms per vehicle,
+  and the placement's neighbour resolution, once per neighbour per placement. Both now resolve
+  through the entity's state bag, which answers the same question without the warning.
+
+- **A property group turned off kept its stored values.** Filtering happened when a vehicle was
+  first kept and when a client reported a change, and nowhere in between - so a row written while a
+  group was on kept those values after the group was turned off, ready to be handed back the day it
+  was turned on again. Rows are now filtered as they load.
+
+### Added
+
+- **An anchor, for boats.** A boat is restored to the exact coordinates it was left at, and then the
+  water moves it - which is not a persistence bug and no amount of placement accuracy fixes it.
+
+  Dropped, the boat holds its position; raised, it behaves normally. It is stored, so a boat moored
+  on Friday is still moored on Monday. It uses the game's own `SET_BOAT_ANCHOR`, which is what the
+  world's moored boats use, so the boat still rides the swell rather than standing unnaturally
+  still.
+
+  `/vparkanchor` toggles it. For a radial or F1 menu there is `exports['v-park']:ToggleAnchor()`
+  and a `vpark:anchor` client event, and for another resource acting on its own authority there is
+  `exports['v-park']:SetAnchored(idOrPlate, on)`. `Config.Anchor` has the class list - boats only by
+  default - and who is allowed to use it.
+
+- **`/vparkprops` reports the paint and the deformation point count.** A tester wrote "doute sur la
+  bonne couleur (lors d'un teste avec le chrome)", and a doubt like that cannot be settled by
+  reasoning: chrome is a paint *type* on one API and a colour *index* on another, v-park writes
+  both, and which one the mod shop used is not knowable from the code. All of it is now printed
+  beside what is stored.
+
+- **`exports['v-park']:SetAnchored(reference, on)`**, and a 21st static check group.
+
+### Changed
+
+- **Every category of vehicle persists, not only cars.** `Config.Persistence.excludedClasses` is
+  empty by default, and boats and aircraft use the same spawn radius as everything else.
+
+  `Config.Persistence.mode` is unchanged at `'owned'`. What changed is what `'owned'` reaches: a
+  player who bought a boat bought a vehicle, and a vehicle that quietly does not persist is a
+  support ticket rather than a saving.
+
+  Two settings were doing that quietly:
+
+  - **`excludedClasses` shipped as `{ 13, 21 }`** - bicycles and trains. Both exclusions had a real
+    argument behind them (a bicycle is dropped rather than parked, and a persisted train is a
+    support ticket) and neither is worth a vehicle silently not being kept. Add a class back if you
+    want it out; a train only ever gets kept if your server lets a player drive one.
+
+  - **`Config.Streaming.classRadius` cut boats to 150 m and aircraft to 150 and 200 m**, against
+    250 for everything else, on the reasoning that an aircraft at an airfield does not need to
+    exist when you are 250 metres away. True, and not what a player experiences: you can see
+    across a runway a great deal further than that, and a marina further still. So the one class
+    of vehicle you approach with a long clear sight line was the one that appeared late, which
+    reads as "my plane is gone" right up until it is not. All three are now 250.
+
+  Vehicles nobody has ever driven are still not persisted - `Config.Persistence.ambient` stays off,
+  because that setting writes every ambient parked car a player walks past rather than every
+  vehicle somebody owns.
+
+---
+
+## [Non publié]
+
+**Trois joueurs qui testent en même temps ont trouvé quatre bugs qu'un joueur seul ne peut pas
+atteindre, et un cinquième qui supprimait des données depuis que les garde-fous ont été écrits.**
+
+### Corrigé
+
+- **Un véhicule garé se comportait comme un mur.** Tu rentres dedans, il ne bouge pas, ne prend pas
+  les dégâts et une dépanneuse ne peut rien en faire.
+
+  `vpark:hold` gèle un véhicule restauré sur *tous* les clients, parce que n'importe lequel peut
+  être celui qui simule sa chute avant l'arrivée de la collision. Seul le client désigné pour le
+  placer le dégelait, et seulement depuis sa propre table. Sur toutes les autres machines le
+  véhicule restait gelé définitivement - et un véhicule gelé sur le client qui le *possède* n'est
+  pas simulé du tout. Donc dès que la propriété de l'entité migrait vers le joueur qui roulait vers
+  lui, la voiture devenait immobile.
+
+  Chaque client applique maintenant la même décision de réveil pour les véhicules qu'il voit sans
+  les avoir placés, en se basant sur le statebag répliqué `vpark:id` plutôt que sur la comptabilité
+  privée d'un seul client.
+
+- **Une capture que personne ne pouvait répondre.** Le balayage de sauvegarde interroge le client le
+  plus *proche*, et pour un véhicule conduit il interroge l'occupant. Ni l'un ni l'autre n'est
+  forcément le client qui l'a placé, et un client sans entrée ne répondait rien - silencieusement.
+  Donc le tuning, les réparations et les dégâts faits à une voiture placée par la machine de
+  quelqu'un d'autre n'arrivaient jamais en base.
+
+  N'importe quel client qui voit un véhicule peut maintenant en répondre. Les trois choses qu'un tel
+  client ne peut pas savoir sont traitées et non devinées.
+
+- **Un groupe de propriétés retenu était supprimé au lieu d'être conservé.** `applySnapshot` finit
+  par un remplacement et pas une fusion, donc une clé absente d'un instantané était une clé
+  supprimée de la base. Trois garde-fous écrits en croyant à une fusion supprimaient la valeur
+  qu'ils protégeaient, dont celui des néons - ce qui explique en partie pourquoi neuf versions n'ont
+  pas suffi. Les groupes retenus sont maintenant *nommés*.
+
+- **Un véhicule réparé ne pouvait jamais perdre ses bosses.** Répare une voiture avec autre chose
+  que v-park - txAdmin, un script de mécano - et les bosses revenaient après un reboot,
+  définitivement. Une liste vide est maintenant une vraie réponse, et elle n'est crue que d'un
+  véhicule qui se lit comme intact.
+
+- **La santé de carrosserie dérivait vers le bas à chaque redémarrage.** La santé stockée était
+  appliquée *avant* les dégâts stockés, et remettre ses propres dégâts sur une voiture la fait
+  baisser. La capture suivante lisait le nombre plus bas et l'écrivait.
+
+- **Une épave revenait comme une voiture neuve.** Remettre le nombre n'est pas remettre le véhicule :
+  le jeu décide qu'un véhicule est détruit d'après son propre modèle de dégâts. Une épave stockée
+  revient maintenant détruite. `Config.Save.restoreWrecks` le désactive.
+
+- **Tous les propriétaires apparaissaient hors ligne après un redémarrage de la ressource.** Le plus
+  grave n'était pas l'affichage : le balayage de semi-persistance compte un véhicule vers la
+  suppression seulement tant que son propriétaire est absent.
+
+- **Un mur d'avertissements `GetNetworkObject` en F8.** Deux chemins demandaient au gestionnaire
+  d'objets des objets que le client n'avait pas encore.
+
+- **Un groupe de propriétés désactivé gardait ses valeurs stockées.** Les lignes sont maintenant
+  filtrées au chargement.
+
+### Ajouté
+
+- **Une ancre, pour les bateaux.** Un bateau est restauré aux coordonnées exactes où il a été laissé,
+  puis l'eau le déplace - ce n'est pas un bug de persistance et aucune précision de placement ne le
+  corrige.
+
+  Jetée, le bateau tient sa position ; remontée, il se comporte normalement. C'est stocké, donc un
+  bateau amarré vendredi l'est encore lundi. Ça passe par l'ancre du jeu, `SET_BOAT_ANCHOR`, celle
+  des bateaux amarrés du monde - le bateau continue donc de suivre la houle au lieu de rester
+  anormalement immobile.
+
+  `/vparkanchor` la bascule. Pour un menu radial ou F1 : `exports['v-park']:ToggleAnchor()` et un
+  événement client `vpark:anchor`. Pour une autre ressource :
+  `exports['v-park']:SetAnchored(idOuPlaque, on)`. `Config.Anchor` contient la liste des classes -
+  bateaux uniquement par défaut - et qui a le droit de s'en servir.
+
+- **`/vparkprops` affiche la peinture et le nombre de points de déformation.**
+
+- **`exports['v-park']:SetAnchored(reference, on)`**, et un 21e groupe de vérifications statiques.
+
+### Modifié
+
+- **Toutes les catégories de véhicule sont persistantes, pas seulement les voitures.**
+  `Config.Persistence.excludedClasses` est vide par défaut, et les bateaux et aéronefs apparaissent
+  au même rayon que le reste.
+
+  `Config.Persistence.mode` reste `'owned'`. Ce qui change, c'est ce que `'owned'` atteint : un
+  joueur qui a acheté un bateau a acheté un véhicule, et un véhicule qui ne réapparaît pas est un
+  ticket de support et pas une économie.
+
+  Deux réglages faisaient ça discrètement :
+
+  - **`excludedClasses` valait `{ 13, 21 }`** - vélos et trains. Les deux exclusions avaient un vrai
+    argument derrière (un vélo est jeté plutôt que garé, un train persistant est un ticket de
+    support) et aucun ne justifie qu'un véhicule ne soit silencieusement pas conservé. Remets une
+    classe si tu la veux dehors.
+
+  - **`Config.Streaming.classRadius` limitait les bateaux à 150 m et les aéronefs à 150 et 200 m**,
+    contre 250 pour tout le reste. Vrai sur le papier, et pas ce que vit un joueur : on voit un
+    aérodrome bien au-delà de 200 mètres, et une marina plus loin encore. La seule catégorie qu'on
+    approche avec une longue ligne de vue dégagée était donc celle qui apparaissait en retard, ce
+    qui se lit « mon avion a disparu » jusqu'au moment où il apparaît. Les trois sont à 250.
+
+  Les véhicules que personne n'a jamais conduits ne sont toujours pas persistés -
+  `Config.Persistence.ambient` reste désactivé, parce que ce réglage écrit chaque voiture
+  d'ambiance devant laquelle un joueur passe et pas chaque véhicule que quelqu'un possède.
+
+---
+
 ## [1.0.34] - 2026-09-10
 
 **v-park stops persisting neon lights, and hands the job to the resources that do it well.**

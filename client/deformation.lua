@@ -597,6 +597,16 @@ function Deformation.shouldRecapture(vehicle, restoredHealth)
     return math.abs(current - restoredHealth) > delta
 end
 
+--[[
+    Is a deformation apply still running on this vehicle?
+
+    Read by `Properties.apply`, which has to put the stored body health back AFTER the apply has
+    finished knocking it down. See the note there.
+]]
+function Deformation.busy(vehicle)
+    return applying[vehicle] == true
+end
+
 function Deformation.clear(vehicle)
     appliedVersion[vehicle] = nil
     applying[vehicle] = nil
@@ -684,6 +694,31 @@ end)
     persisted by us - we store what their export reports, in their format, and hand it back to
     them on restore. Interoperating beats competing.
 ]]
+--[[
+    ================================================================================================
+    "I LOOKED AND THERE ARE NO DENTS" IS AN ANSWER. IT USED TO BE SILENCE.
+    ================================================================================================
+
+    This returned nil for an undamaged vehicle, because `Deformation.capture` returns nil from two
+    places that are both READINGS: the pristine-health gate, and the exit taken when the grid comes
+    back with nothing over the threshold.
+
+    Nil is also what a snapshot carries when the deformation was deliberately not read - see
+    `skipDeformation` and the drift guard - and the server cannot tell those apart. It resolves the
+    ambiguity in favour of keeping what it has, which is right for the drift guard and wrong here:
+
+        Repair a car with txAdmin. The capture notices, because body health moved. It re-reads the
+        deformation, finds none, and says nothing at all. The server keeps the dents. Reboot, and
+        they are applied to a car that was repaired an hour ago - permanently, because no reading
+        of a repaired car can ever clear them.
+
+    That is the tester's "je crois que avec les reboot un vehicule c'est deforme en carrosserie
+    alors qu'il avait ete fix avec le txAdmin", and it is why it was intermittent: it needed a
+    repair by something other than v-park, which is most repairs.
+
+    So an empty list is returned instead. `skipDeformation` still omits the key entirely, so "not
+    read" is still expressible, and it is now the only thing that means it.
+]]
 function Deformation.read(vehicle)
     if external() then
         local data = Park.try(function()
@@ -695,9 +730,12 @@ function Deformation.read(vehicle)
         return nil
     end
 
-    local flat = Deformation.capture(vehicle)
-    if not flat then return nil end
-    return { g = GRID_VERSION, d = flat }
+    -- Not read, as opposed to read and empty: with deformation off, or no vehicle to look at,
+    -- there is no reading and the stored value is none of our business.
+    if not enabled() then return nil end
+    if not DoesEntityExist(vehicle) then return nil end
+
+    return { g = GRID_VERSION, d = Deformation.capture(vehicle) or {} }
 end
 
 --[[

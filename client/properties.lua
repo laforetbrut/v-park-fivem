@@ -411,6 +411,23 @@ function Properties.capture(vehicle, options)
     end
     properties.doorsOpen = doorsOpen
 
+    --[[
+        THE ANCHOR, READ BACK FROM THE GAME AND NOT FROM A FLAG WE KEPT.
+
+        `IsBoatAnchoredAndFrozen` is the only read the game offers, and it answers for the frozen
+        variant only - so a boat anchored WITHOUT being frozen reads as not anchored, and the state
+        would be lost on the first capture. `Anchor.wanted` is the answer for that case: the client
+        that dropped it remembers, and the stored value stands for every client that did not.
+
+        Only ever reported as `true`. An anchor is raised by a person deciding to raise it, and
+        that path clears the stored value itself - exactly the argument the neons note makes. A
+        capture that could report `false` is a capture that can lift an anchor by accident, and a
+        boat that unmoors itself overnight is worse than one that needs the command twice.
+    ]]
+    if Anchor and Anchor.stored then
+        properties.anchored = Anchor.stored(vehicle) or nil
+    end
+
     -- --------------------------------------------------------------- deformation ---
     if not (type(options) == 'table' and options.skipDeformation) then
         properties.deformation = Deformation.read(vehicle)
@@ -901,7 +918,29 @@ function Properties.apply(vehicle, properties, options)
         SetVehicleDirtLevel(vehicle, properties.dirtLevel + 0.0)
     end
 
-    if enabledGroup('health') then
+    --[[
+        ================================================================================================
+        THE HEALTH IS SET HERE AND SET AGAIN AT THE END. THE SECOND ONE IS THE ONE THAT COUNTS.
+        ================================================================================================
+
+        Setting it once, here, was a slow leak in the wrong direction, and it compounded.
+
+        Everything below this line that reproduces damage also REDUCES body health, because that is
+        what the engine derives it from: `SmashVehicleWindow`, `SetVehicleTyreBurst`,
+        `SetVehicleDoorBroken` and every `SetVehicleDamage` the deformation apply fires. So a car
+        stored at 600 was set to 600 and then knocked down to something lower by having its own
+        stored damage put back on it. The next capture read that lower number and wrote it down, and
+        the restore after that started from there.
+
+        A car parked, passed and restarted enough times therefore walked towards zero without
+        anybody touching it - and a body health at zero is a wreck, an undriveable one on some
+        builds. That is the same class of mistake as the pose drift the placement notes describe,
+        with the same shape: a value read back after being approximated.
+
+        It is still set here as well as at the end, because some of the calls below behave
+        differently on a vehicle the engine considers destroyed.
+    ]]
+    local function setHealth()
         if type(properties.bodyHealth) == 'number' then
             SetVehicleBodyHealth(vehicle, properties.bodyHealth + 0.0)
         end
@@ -911,6 +950,10 @@ function Properties.apply(vehicle, properties, options)
         if type(properties.tankHealth) == 'number' then
             SetVehiclePetrolTankHealth(vehicle, properties.tankHealth + 0.0)
         end
+    end
+
+    if enabledGroup('health') then
+        setHealth()
     end
 
     if enabledGroup('doorsOpen') and type(properties.doorsOpen) == 'table' then
@@ -955,6 +998,88 @@ function Properties.apply(vehicle, properties, options)
                 failed.neons = true
             end
         end)
+    end
+
+    --[[
+        THE ANCHOR LAST, BECAUSE EVERYTHING ELSE MOVES THE VEHICLE.
+
+        Ordered after the properties and, by `Placement.place` calling this before it runs, before
+        the placement - which is wrong for an anchor and right for everything else. So the anchor
+        is not dropped here at all: it is remembered, and `Placement.place` drops it once the
+        vehicle is standing where it belongs. Dropping it first would anchor the boat to wherever
+        the server happened to create it.
+    ]]
+    if enabledGroup('anchor') and Anchor and Anchor.want then
+        Anchor.want(vehicle, properties.anchored == true)
+    end
+
+    --[[
+        AND THE HEALTH AGAIN, NOW THAT EVERYTHING THAT LOWERS IT HAS RUN. See `setHealth`.
+
+        Twice: once now, and once after the deformation apply has finished. That apply runs on its
+        own thread with a budget of about a tenth of a second - it has to, because it converges by
+        hitting the bodywork and measuring between blows - so the damage it does to the health
+        number lands after this function has returned.
+
+        Setting the number does not undo the shape: `SetVehicleBodyHealth` moves the counter,
+        `SetVehicleDeformationFixed` is what smooths panels, and it is not called here. So the car
+        looks exactly as dented as it was stored and reads exactly as damaged as it was stored,
+        which had not been true of both at once before.
+    ]]
+    --[[
+        ================================================================================================
+        A WRECK COMES BACK A WRECK.
+        ================================================================================================
+
+        "Quand un vehicule explose et devient epave quand on revient il respawn tout neuf."
+
+        The state was being stored: an engine at or below zero is what `wrecked` in the database is
+        derived from, and the capture reads the real number. What was missing is that putting the
+        number back is not the same as putting the vehicle back.
+
+        `SetVehicleEngineHealth` on a freshly created vehicle does not make the game treat it as
+        destroyed. The engine decides that from its own damage model, and a car it created a second
+        ago has none - so the number sat there while the vehicle drove, started and behaved like a
+        new one. Then the placement made it driveable again for good measure.
+
+        THE FLOOR MATTERS. -4000 is the value the game itself uses for a destroyed engine, and
+        anything above it is a badly hurt engine that still turns over. A stored -1 is a wreck the
+        player watched burn and would come back as a car with a rough idle.
+
+        The petrol tank goes with it: a tank above zero on a burnt-out shell is what lets somebody
+        drive away from an explosion. What is deliberately NOT here is a second explosion to get the
+        charred bodywork back - `NetworkExplodeVehicle` damages whatever is standing next to it, and
+        the thing standing next to a restoring vehicle is the player who triggered the restore.
+    ]]
+    local function applyWreck()
+        if not (Config.Save and Config.Save.restoreWrecks ~= false) then return end
+        if type(properties.engineHealth) ~= 'number' or properties.engineHealth > 0 then return end
+
+        SetVehicleEngineHealth(vehicle, -4000.0)
+        SetVehiclePetrolTankHealth(vehicle, -4000.0)
+        SetVehicleBodyHealth(vehicle, 0.0)
+        SetVehicleEngineOn(vehicle, false, true, true)
+        SetVehicleUndriveable(vehicle, true)
+    end
+
+    if enabledGroup('health') then
+        setHealth()
+        applyWreck()
+
+        if Deformation and Deformation.busy and Deformation.busy(vehicle) then
+            CreateThread(function()
+                local deadline = Park.ticks() + 3000
+
+                while Deformation.busy(vehicle) and Park.ticks() < deadline do
+                    Wait(25)
+                end
+
+                if DoesEntityExist(vehicle) then
+                    setHealth()
+                    applyWreck()
+                end
+            end)
+        end
     end
 
     return true, failed

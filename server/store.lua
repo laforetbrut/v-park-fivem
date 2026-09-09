@@ -175,7 +175,22 @@ function Store.fromRow(row)
         bucket = tonumber(row.bucket) or 0,
         interior = tonumber(row.interior) or 0,
         room = tonumber(row.room) or 0,
-        properties = Park.decode(row.properties) or {},
+        --[[
+            FILTERED ON THE WAY IN, NOT ONLY ON THE WAY OUT.
+
+            A group being off was enforced when a vehicle was first kept and when a client
+            reported a change, and nowhere in between - so a row written while a group was ON
+            kept its values for good once the group was turned off.
+
+            That is not inert. Turning a group off is what an operator does to stop a group
+            misbehaving, and the stale value sits in the row waiting to be handed back the day
+            it is turned on again - a value the player never chose, restored months later. It
+            also counts towards the row's size budget, and shows up in `/vparkprops` as
+            something stored, which reads as the setting not having taken.
+
+            One pass over a table of at most two dozen keys, once per row, at load.
+        ]]
+        properties = Schema.filter(Park.decode(row.properties) or {}),
         statebags = Park.decode(row.statebags),
         trailer_id = row.trailer_id,
         body_health = tonumber(row.body_health) or 1000.0,
@@ -621,6 +636,16 @@ end
                   here rather than on the client because the capture is asked of whichever client is
                   nearest, and only the server has one view of that.
 
+    undressed     Set when a restore is sent, and cleared when the placing client reports that the
+                  properties actually went on. While it is set, `Persist.applySnapshot` ignores the
+                  properties in EVERY snapshot, whoever sent it - a vehicle that has been created
+                  but not yet dressed is a stock car, and a capture of it would overwrite the
+                  modifications it is about to be given. Same argument as `unverifiedNeons` and the
+                  same reason for living here: the capture is asked of whichever client is nearest,
+                  and only that client's own restore book knows what it has dressed. A restore that
+                  reports `dressed = false` leaves it set, because the vehicle really is stock and
+                  the next restore is what fixes that, not a capture.
+
     occupant      The player the server watched get into it, set by `vpark:server:touched` only
                   after reading, on the server, that their ped was within ten metres of the
                   entity. It is the fallback proof for a parked report that arrives after every
@@ -634,7 +659,7 @@ Store.liveFields = {
     ready = true, seen = true, restoreAt = true, restoreTries = true,
     frozen = true, driven = true, parked = true, nudged = true,
     occupant = true,
-    unverifiedNeons = true,
+    unverifiedNeons = true, undressed = true,
 }
 
 function Store.setLive(id, entry)

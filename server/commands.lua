@@ -320,6 +320,32 @@ register('rename', {
     end)
 end)
 
+register('anchor', {
+    description = "Drop or raise a boat's anchor",
+    params = { { name = 'on|off', help = 'omit to toggle' } },
+}, function(src, args)
+    local wanted = args[1] and args[1]:lower() or nil
+
+    Database.thread(function()
+        local on
+
+        if wanted == 'on' or wanted == 'down' then
+            on = true
+        elseif wanted == 'off' or wanted == 'up' then
+            on = false
+        end
+
+        -- No argument means toggle, and only the client knows which vehicle the player means.
+        if on == nil then
+            TriggerClientEvent('vpark:client:anchorToggle', src)
+            return
+        end
+
+        local ok, message = Actions.setAnchorHere(src, on)
+        reply(src, L(message))
+    end)
+end)
+
 register('lock', {
     description = 'Lock or unlock one of your parked vehicles',
     params = { { name = 'id|plate', help = 'the vehicle' }, { name = 'on|off', help = 'lock state' } },
@@ -625,6 +651,29 @@ end)
 local propsWaiting = {}
 local propsToken = 0
 
+--[[
+    A player asking for the anchor, from the command or from a menu.
+
+    The network id is a hint about WHICH vehicle and nothing more: `Actions.setAnchor` re-reads
+    who is in it on the server before it agrees to anything. See the note there.
+]]
+RegisterNetEvent('vpark:server:anchor', function(netId, on)
+    local src = source
+
+    if type(netId) ~= 'number' then return end
+    if not Runtime.ready() then return end
+
+    Database.thread(function()
+        local ok, message = Actions.setAnchor(src, netId, on == true, true)
+
+        if ok then
+            TriggerClientEvent('vpark:client:anchored', src, on == true)
+        else
+            reply(src, L(message))
+        end
+    end)
+end)
+
 RegisterNetEvent('vpark:server:props', function(token, live)
     local src = source
     local waiting = propsWaiting[token]
@@ -671,12 +720,37 @@ RegisterNetEvent('vpark:server:props', function(token, live)
         end
         lines[#lines + 1] = L('props.stored_damage', list(stored.windows), list(stored.doors),
             tostring(stored.bodyHealth or '?'))
+        lines[#lines + 1] = L('props.stored_paint',
+            ('%s/%s'):format(tostring(stored.color1 or '?'), tostring(stored.color2 or '?')),
+            list(stored.modColor1), list(stored.modColor2),
+            ('%s/%s'):format(tostring(stored.pearlescentColor or '?'),
+                tostring(stored.wheelColor or '?')),
+            stored.customPrimary and list(stored.customPrimary) or '-')
+
+        -- How many deformation points are stored. An empty list is a real answer since 1.0.35 -
+        -- it is how a repair clears the dents - and telling it apart from "nothing stored at all"
+        -- is the whole question behind "elle redevient fix".
+        local deformation = stored.deformation
+        local points = '-'
+        if type(deformation) == 'table' then
+            if type(deformation.d) == 'table' then
+                points = tostring(math.floor(#deformation.d / 2))
+            elseif deformation.external then
+                points = 'external'
+            end
+        end
+        lines[#lines + 1] = L('props.stored_deformation', points)
     else
         lines[#lines + 1] = L('props.nothing_stored')
     end
 
     lines[#lines + 1] = L('props.live_damage', list(live.windows), list(live.doors),
         tostring(live.bodyHealth or '?'))
+    lines[#lines + 1] = L('props.live_paint',
+        list(live.colours), list(live.modColor1), list(live.modColor2),
+        list(live.extraColours),
+        live.customPrimary and list(live.customPrimary) or '-')
+    lines[#lines + 1] = L('props.live_engine', tostring(live.engineHealth or '?'))
 
     replyMany(src, lines)
 end)

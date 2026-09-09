@@ -57,6 +57,11 @@ client_scripts {
     -- Bodywork deformation. Before properties.lua, which captures and applies through it.
     'client/deformation.lua',
 
+    -- The anchor. Before properties.lua and placement.lua, both of which call into it: the
+    -- properties record what it should be and the placement is what drops it, because an anchor
+    -- put down before the vehicle is placed moors it to the wrong spot.
+    'client/anchor.lua',
+
     -- Reading everything off a vehicle and putting it all back.
     'client/properties.lua',
 

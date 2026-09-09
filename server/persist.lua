@@ -655,7 +655,25 @@ function Persist.applySnapshot(id, snapshot, proven)
         patch.vehicle_type = snapshot.vehicleType
     end
 
-    if type(snapshot.properties) == 'table' then
+    --[[
+        NOTHING IS ACCEPTED ABOUT A VEHICLE THAT HAS NOT BEEN DRESSED YET. See `sendRestore`.
+
+        The window is normally a second or two, between the entity being created and the client
+        that was nominated for it reporting back. It becomes permanent only when the apply actually
+        failed, which is the case where a capture would be writing the failure into the database -
+        the state this guard exists to keep out.
+
+        Position and rotation are still taken from the snapshot above: where a vehicle is has
+        nothing to do with whether its paint went on.
+    ]]
+    local liveEntry = Store.live(id)
+    local dressed = not (liveEntry and liveEntry.undressed)
+
+    if not dressed and snapshot.properties ~= nil then
+        Park.trace('%s is not dressed yet - ignoring the properties in this snapshot', id)
+    end
+
+    if dressed and type(snapshot.properties) == 'table' then
         local properties = Schema.filter(snapshot.properties)
 
         --[[
@@ -677,19 +695,87 @@ function Persist.applySnapshot(id, snapshot, proven)
             what stops a vehicle that came back dark from writing its own failure into the database,
             which is what made this bug permanent rather than intermittent.
         ]]
+        --[[
+            WITHHELD, THEN CARRIED ACROSS. The two halves have to happen in that order and both
+            have to happen, because the assignment at the bottom of this block REPLACES the stored
+            property table rather than merging into it. Dropping a key here without putting the
+            stored one back is deleting it - see the note on `withheld` in `Stream.snapshot`, which
+            is the bug this shape was written to fix.
+        ]]
+        local withheld = type(snapshot.withheld) == 'table' and snapshot.withheld or {}
+
         local live = Store.live(id)
 
         if live and live.unverifiedNeons then
             for _, key in ipairs(Schema.keys.neons or {}) do
                 properties[key] = nil
             end
+            withheld.neons = true
         end
 
-        -- A snapshot with no deformation means "not re-read", not "no damage". Keeping the
-        -- stored one is what makes `Deformation.shouldRecapture` work: without this line the
-        -- drift guard would silently erase every dent it declined to re-measure.
+        if record.properties then
+            for group in pairs(withheld) do
+                for _, key in ipairs(Schema.keys[group] or {}) do
+                    properties[key] = record.properties[key]
+                end
+            end
+        end
+
+        --[[
+            A snapshot with no deformation means "not re-read", not "no damage". Keeping the stored
+            one is what makes `Deformation.shouldRecapture` work: without this line the drift guard
+            would silently erase every dent it declined to re-measure.
+        ]]
         if properties.deformation == nil and record.properties then
             properties.deformation = record.properties.deformation
+        end
+
+        --[[
+            ================================================================================================
+            AND A DEFORMATION OF NO POINTS IS ONLY BELIEVED FROM A CAR THAT READS AS UNDAMAGED.
+            ================================================================================================
+
+            An empty list is now a real answer - it is how a repair clears the dents, see
+            `Deformation.read` - and that makes it something worth being careful about, because it is
+            also what a client reports when it looks at a damaged car whose dents have not been put
+            back yet.
+
+            That window exists. The deformation apply converges on its own thread over about a tenth
+            of a second, and since the capture sweep asks whichever client is NEAREST rather than the
+            one that placed the vehicle, a second player standing next to a car being restored can be
+            asked about it in exactly that window. Believing them would erase the dents for good.
+
+            Body health settles it without needing to know any of that. The engine derives it from
+            the same damage this data describes, so a car with dents cannot read as pristine, and a
+            car that reads as pristine cannot have any. The one number both sides already carry is
+            therefore the whole guard: no dents is accepted from a car at full health and from
+            nothing else.
+        ]]
+        local deformation = properties.deformation
+
+        if type(deformation) == 'table' and type(deformation.d) == 'table' and #deformation.d == 0
+            and record.properties and record.properties.deformation then
+
+            local pristine = tonumber(Config.Deformation and Config.Deformation.pristineHealth) or 999.0
+            local reported = tonumber(properties.bodyHealth)
+
+            if reported and reported < pristine then
+                properties.deformation = record.properties.deformation
+                Park.trace('%s reported no dents at %.1f body health - keeping the stored ones',
+                    id, reported)
+            end
+        end
+
+        --[[
+            An empty deformation is stored as an absence. They restore identically - no points to
+            apply either way - and one of them is not a key in every row of the table. What matters
+            is that this runs AFTER the two rules above: an empty list first does its job of
+            replacing the stored dents, and is only then tidied away.
+        ]]
+        if type(properties.deformation) == 'table'
+            and type(properties.deformation.d) == 'table'
+            and #properties.deformation.d == 0 then
+            properties.deformation = nil
         end
 
         patch.properties = properties
@@ -786,6 +872,14 @@ end)
     One message per client per tick, carrying every id that client is nearest to. The token
     ties the answer back to the question and bounds what the answer may talk about.
 ]]
+--[[
+    Each entry is `{ id, storedBodyHealth }` rather than a bare id.
+
+    The body health is the reference the client's deformation drift guard measures against. The
+    client that PLACED a vehicle remembers what it was restored at; every other client does not,
+    and this sweep asks whichever client is nearest. Sending the number is what lets any of them
+    answer without re-measuring - and re-measuring an approximation is what walks the dents.
+]]
 local function requestCapture(src, ids)
     if #ids == 0 then return end
 
@@ -793,7 +887,7 @@ local function requestCapture(src, ids)
     local token = nextToken
 
     local allowed = {}
-    for _, id in ipairs(ids) do allowed[id] = true end
+    for _, asked in ipairs(ids) do allowed[asked[1]] = true end
 
     requests[token] = { src = src, ids = ids, allowed = allowed, sentAt = Park.ticks() }
 
@@ -874,7 +968,7 @@ local function sweep()
                         list = {}
                         perClient[best] = list
                     end
-                    list[#list + 1] = id
+                    list[#list + 1] = { id, record.body_health }
                 end
             end
         end

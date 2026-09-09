@@ -55,7 +55,13 @@ The single most consequential setting in the file.
 
 **The default changed in 1.0.2**, from `'all'` to `'owned'`. `'all'` persists every car anybody
 drives, and on a busy server that is a table full of stolen taxis nobody will ever look for
-again. Set it back to `'all'` if you were running 1.0.0 or 1.0.1 and want the old behaviour.
+again. Set it to `'all'` if you want stolen cars to stay where they were left.
+
+**`'owned'` means "somebody's", not "a car".** `Config.Persistence.excludedClasses` is empty by
+default, so every class is in scope: a boat, a helicopter, a plane and a bicycle are all kept when
+they belong to somebody. Boats and aircraft also use the same 250 m spawn radius as everything
+else - see `Config.Streaming.classRadius`, which used to cut them to 150 and made the one class of
+vehicle you approach with a long clear sight line the one that appeared late.
 
 Two settings keep `'owned'` from being uselessly strict, and both are on by default:
 
@@ -112,6 +118,20 @@ oldest is dropped and they are told which.
 
 ---
 
+### `Config.Save.restoreWrecks`
+
+An engine at or below zero is a vehicle that will never start again, and the number is stored
+faithfully. Putting the number back is not the same as putting the vehicle back: the game decides
+a vehicle is destroyed from its own damage model, and a car it created a second ago has none - so
+a burnt-out shell came back as a working car with a bad engine reading, and drove away.
+
+With this on, a stored wreck is restored destroyed: engine and petrol tank at the floor the game
+itself uses, body at zero, undriveable.
+
+What it does **not** do is put the charred bodywork back. That needs the vehicle to have actually
+burned, and the only way to make it burn on demand damages whatever is standing next to it -
+which, on a restore, is the player who triggered it.
+
 ### `Config.Save.fields.neons` and `Config.Save.neonManagers`
 
 `fields.neons` is the one field that does not default to a boolean. It defaults to `'auto'`, which
@@ -138,6 +158,53 @@ absent resource simply does not match.
 
 Which way it resolved is printed at boot and in `/vparkinfo`, and available to other resources
 through the `GetSavedFields` export.
+
+## Section 6d: the anchor
+
+A boat is restored to the exact coordinates it was left at, and then the water moves it. That is
+not a persistence bug and no amount of placement accuracy fixes it: the vehicle is where the
+database says it is, and the water moves it afterwards.
+
+```lua
+Config.Anchor = {
+    enabled = true,
+    classes = { [14] = true },      -- 14 is Boats
+    permission = 'occupant',        -- or 'owner'
+    frozenWhenAnchored = false,
+    automatic = false,
+}
+```
+
+`classes` is why boats are the interesting case and the only one on by default. A boat has an
+anchor of its own - `SET_BOAT_ANCHOR`, what the world's moored boats use - so it holds position
+while still riding the swell. Every other class is held by freezing the entity outright, and a
+frozen entity **ignores position writes**: an admin teleport, a tow script or a `tpm` will
+silently fail on it until the anchor comes up.
+
+`permission` decides who may drop or raise it. `'occupant'` is anybody the server watched get
+into it, on the argument that somebody at the wheel can already take the boat anywhere;
+`'owner'` restricts it to the owning character plus staff.
+
+`frozenWhenAnchored` holds the boat completely still. Truer to a boat tied against a dock, wrong
+for one moored in open water, and the difference is visible.
+
+Whether a dropped anchor survives a restart is `Config.Save.fields.anchor`.
+
+### Using it from a menu
+
+```lua
+-- client, from a radial or F1 menu
+exports['v-park']:ToggleAnchor()
+TriggerEvent('vpark:anchor')          -- the same thing
+TriggerEvent('vpark:anchor', true)    -- drop it, explicitly
+
+-- server, on your own authority
+exports['v-park']:SetAnchored('62AEL793', true)
+```
+
+The client only ever *asks*. The server checks who is asking, stores the answer and replicates it,
+and every client applies the replicated value - which is what makes two players see the same boat
+in the same place.
 
 ## Section 7: placement
 

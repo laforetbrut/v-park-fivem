@@ -53,6 +53,191 @@ local byNet = {}
 ]]
 local unverified = {}
 
+--[[
+    ================================================================================================
+    EVERY CLIENT KNOWS ABOUT EVERY VEHICLE, NOT JUST THE ONE THAT PLACED IT.
+    ================================================================================================
+
+    `tracked` above is this client's own restore book: it holds only the vehicles THIS client was
+    nominated to dress and place. That is correct for placing one, and it was quietly wrong for
+    everything else, in two ways that both showed up in testing with three players.
+
+    1. A CAR THAT READS AS A WALL. `vpark:hold` freezes a restored vehicle on EVERY client, because
+       any of them may be the one simulating its fall. Only the nominated client ever unfreezes it,
+       and only from `tracked`. So on every other machine the vehicle stayed frozen for good - and
+       a frozen entity on the client that OWNS it is not simulated at all. Drive into a parked car
+       whose entity has migrated to you and it does not move, does not take the hit and cannot be
+       towed: "il reste tres solide comme de la piere". Nothing in any log, because nothing failed.
+
+    2. A CAPTURE NOBODY COULD ANSWER. The save sweep asks the client NEAREST a vehicle, and for a
+       vehicle being driven it asks the occupant. Neither is necessarily the client that placed it,
+       and a client with no `tracked` entry answered nothing at all - silently, since an absent
+       snapshot means "no news". So on a busy server, tuning, damage and repairs done to a car
+       somebody else's client had placed never reached the database: "une custom n'a pas survecu au
+       reboot", "vehicules repare au reboot serveur".
+
+    So this second index exists, on every client, built from the REPLICATED `vpark:id` statebag -
+    the same source `client/track.lua` uses, and for the same reason. It carries no per-vehicle
+    knowledge, because a client that did not place a vehicle has none: what it can do is unfreeze
+    what it can see, and read the entity when asked.
+]]
+local foreign = {}
+local foreignCount = 0
+
+--[[
+    Foreign vehicles somebody has actually sat in on this machine.
+
+    The reason position is withheld from a snapshot is that only a person driving a vehicle can
+    change where it is parked - see `Stream.snapshot`. On a tracked vehicle that fact lives on
+    the record; a foreign one has no record, and without this the position of a car driven by
+    anybody other than the client that placed it was never written down at all.
+]]
+local foreignDriven = {}
+
+-- id -> the body health this client last saw, so a repair or a collision done to a vehicle
+-- somebody else's machine placed is noticed here too. One native call per vehicle per tick,
+-- which is what the tracked pass already pays for the same reason.
+local foreignHealth = {}
+
+local function forgetForeign(id)
+    if foreign[id] == nil then return end
+    foreign[id] = nil
+    foreignCount = foreignCount - 1
+end
+
+AddStateBagChangeHandler('vpark:id', '', function(bagName, _, value)
+    if type(value) ~= 'string' then
+        -- The server cleared it: the vehicle is no longer one of ours. Which id it was is not
+        -- in the message, so the entry is left for the tick to prune when the handle goes.
+        return
+    end
+
+    CreateThread(function()
+        --[[
+            The bag can land before the entity does, exactly as in `waitForEntity`. Polled
+            through `GetEntityFromStateBagName` rather than the network id, so this costs no
+            object-manager warnings.
+        ]]
+        local entity
+        local deadline = Park.ticks() + 10000
+
+        repeat
+            entity = GetEntityFromStateBagName(bagName)
+            if entity and entity > 0 and DoesEntityExist(entity) then break end
+            Wait(100)
+        until Park.ticks() > deadline
+
+        if not entity or entity == 0 or not DoesEntityExist(entity) then return end
+
+        if foreign[value] == nil then foreignCount = foreignCount + 1 end
+        foreign[value] = entity
+    end)
+end)
+
+--[[
+    Hand physics back, whatever it takes.
+
+    `Placement.wake` asks for network control first, which is right for the client that placed
+    the vehicle: it wants to own it, hold the pose and watch for an ejection. It is also allowed
+    to fail, and a failure there used to mean the entity stayed frozen.
+
+    Freezing is a per-client flag, so a client that keeps it frozen is the whole of bug 1 above.
+    Control refused is a reason to unfreeze locally anyway, not a reason to give up: the worst
+    case is that this client's copy is simulated by somebody else, which is the normal state of
+    every other vehicle in the game.
+]]
+local function ensureAwake(entity)
+    if not DoesEntityExist(entity) then return false end
+
+    -- Moored on purpose. See `client/anchor.lua`.
+    if Anchor and Anchor.isAnchored and Anchor.isAnchored(entity) then return false end
+
+    -- Already ours to push around. The common case by a wide margin, and it is why the state bag
+    -- read below costs nothing on a busy pass.
+    if not IsEntityPositionFrozen(entity) then return true end
+
+    --[[
+        NOT WHILE THE SERVER IS STILL HOLDING IT.
+
+        `vpark:hold` means "this vehicle has been created and not yet placed", and the freeze it
+        asks for is the one thing standing between a server-created entity and the ground it has
+        not streamed in yet. Unfreezing during that window is how a car parked on a driveway comes
+        back under the map - the failure the hold was written for in 1.0.7.
+
+        The server clears the bag the moment the placement finishes, on both the success and the
+        gave-up paths, so this is a window of a few seconds and never a permanent refusal.
+    ]]
+    local ok, hold = pcall(function() return Entity(entity).state['vpark:hold'] end)
+    if ok and hold == true then return false end
+
+    if Placement.wake(entity) then return true end
+
+    FreezeEntityPosition(entity, false)
+    return true
+end
+
+Stream.ensureAwake = ensureAwake
+
+--[[
+    The same wake decision as the tracked pass, for a vehicle this client did not place.
+
+    UNFREEZING ONLY, AND DELIBERATELY. Re-freezing is left to the client that placed it, because
+    a frozen entity IGNORES POSITION WRITES - so a client that freezes a copy it does not own
+    stops following the owner and shows the car where it used to be. The one exception is a
+    vehicle this client actually owns, which is the only case where freezing it is the same
+    decision the placer would make.
+]]
+local function mirrorPass(playerPosition)
+    local wakeRadius = tonumber(Config.Placement and Config.Placement.wakeRadius) or 30.0
+    local refreezeAfter = tonumber(Config.Placement and Config.Placement.refreezeAfter) or 0
+    local nearest = math.huge
+
+    for id, entity in pairs(foreign) do
+        if not DoesEntityExist(entity) then
+            forgetForeign(id)
+            foreignDriven[id] = nil
+            foreignHealth[id] = nil
+        elseif tracked[id] then
+            -- This client placed it after all. Its own record is the authority.
+            forgetForeign(id)
+            foreignDriven[id] = nil
+            foreignHealth[id] = nil
+        else
+            local distance = #(GetEntityCoords(entity) - playerPosition)
+            if distance < nearest then nearest = distance end
+
+            --[[
+                A REPAIR OR A COLLISION HANDLED BY ANYTHING ELSE, NOTICED HERE TOO.
+
+                The tracked pass does this for the vehicles this client placed, and until now a
+                txAdmin repair on a car placed by another machine reached the database only when
+                the sweep next happened to ask this client - up to thirty seconds, and never if
+                the vehicle despawned first. Body health is one native call and it moves for a
+                repair and for damage alike.
+            ]]
+            local health = GetVehicleBodyHealth(entity)
+
+            if foreignHealth[id] == nil then
+                foreignHealth[id] = health
+            elseif math.abs(health - foreignHealth[id]) >= 1.0 then
+                foreignHealth[id] = health
+                Stream.dirty(id)
+            end
+
+            if distance < wakeRadius then
+                ensureAwake(entity)
+            elseif refreezeAfter > 0 and distance > wakeRadius * 1.5
+                and NetworkHasControlOfEntity and NetworkHasControlOfEntity(entity) then
+                -- Ours to simulate and nobody near it, so it costs simulation for nothing.
+                -- `Placement.sleep` refuses a vehicle that is moving or occupied.
+                Placement.sleep(entity)
+            end
+        end
+    end
+
+    return nearest
+end
+
 
 local nearestDistance = math.huge
 
@@ -71,16 +256,43 @@ end
     the same tick, and the entity replicates on its own schedule. Giving up quietly after the
     timeout is correct - the server re-elects somebody else when no answer comes back.
 ]]
+--[[
+    THROUGH THE STATE BAG, NOT THROUGH THE NETWORK ID.
+
+    `NetworkDoesNetworkIdExist` asks the object manager for an object that is not there yet,
+    and the object manager says so in the client console:
+
+        Warning: [entity] GetNetworkObject: no object by ID 65533
+
+    Once per poll, every 50 ms, per vehicle being restored - which is a wall of yellow in F8
+    for as long as three vehicles are waiting on collision. The warning is harmless and it is
+    not ours to silence, so the answer is not to ask that question.
+
+    `GetEntityFromStateBagName` answers the same one without touching the object manager, and
+    the bag we need is already there: the server sets `vpark:hold` and `vpark:id` on the entity
+    in the same replicated write that carries it. The native is kept as a fallback for a build
+    where the bag route comes back empty, but only every second rather than every 50 ms.
+]]
 local function waitForEntity(netId, timeoutMs)
     local deadline = Park.ticks() + (timeoutMs or 10000)
+    local bagName = ('entity:%d'):format(netId)
+    local nextNativeAsk = 0
 
     while Park.ticks() < deadline do
-        if NetworkDoesNetworkIdExist(netId) then
-            local entity = NetToVeh(netId)
-            if entity and entity ~= 0 and DoesEntityExist(entity) then
-                return entity
+        local entity = GetEntityFromStateBagName(bagName)
+
+        if (not entity or entity == 0) and Park.ticks() >= nextNativeAsk then
+            nextNativeAsk = Park.ticks() + 1000
+
+            if NetworkDoesNetworkIdExist(netId) then
+                entity = NetToVeh(netId)
             end
         end
+
+        if entity and entity ~= 0 and DoesEntityExist(entity) then
+            return entity
+        end
+
         Wait(50)
     end
 
@@ -257,6 +469,11 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
         })
 
 
+        -- Told to the server as well as remembered here. `record.dressed` stops THIS client
+        -- reporting a stock car as the truth; `entry.undressed` on the server stops every other
+        -- client doing it, which matters now that any of them can be asked. See `applySnapshot`.
+        result.dressed = dressed
+
         if result.ok then
             tracked[data.id] = {
                 id = data.id,
@@ -271,10 +488,21 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
                 -- only number that matters when they are not. Read by `Stream.audit`.
                 saved = data.position,
                 savedRotation = data.rotation,
-                -- What body health was at restore. `Deformation.shouldRecapture` compares
-                -- against this, which is what stops the approximation compounding over
-                -- repeated save cycles.
-                restoredHealth = GetVehicleBodyHealth(entity),
+                --[[
+                    What body health was at restore. `Deformation.shouldRecapture` compares against
+                    this, which is what stops the approximation compounding over repeated save
+                    cycles.
+
+                    THE STORED NUMBER, NOT A READ OF THE VEHICLE. A read here is taken while the
+                    deformation apply may still be converging on its own thread, and every blow it
+                    lands lowers body health - so the reference could be a value the vehicle held
+                    for a tenth of a second on the way to its real one. `Properties.apply` puts the
+                    stored number back once that thread has finished, and this is that number
+                    without the race. The read stays as the fallback for a row that has no health
+                    stored at all.
+                ]]
+                restoredHealth = tonumber(data.properties and data.properties.bodyHealth)
+                    or GetVehicleBodyHealth(entity),
 
                 --[[
                     What the neons are SUPPOSED to be, kept so the tick below can put them back.
@@ -330,6 +558,7 @@ RegisterNetEvent('vpark:client:forget', function(id)
     ]]
     if record.entity then
         Deformation.clear(record.entity)
+        if Anchor and Anchor.forget then Anchor.forget(record.entity) end
     end
 
     if record.netId then byNet[record.netId] = nil end
@@ -438,6 +667,7 @@ CreateThread(function()
                     -- can hand to an entirely different vehicle.
                     if record.entity then
                         Deformation.clear(record.entity)
+                        if Anchor and Anchor.forget then Anchor.forget(record.entity) end
                     end
 
                     if record.netId then byNet[record.netId] = nil end
@@ -610,6 +840,18 @@ CreateThread(function()
         else
             nearestDistance = math.huge
         end
+
+        --[[
+            And then the vehicles this client can see but did not place. Separate from the pass
+            above because it shares none of its per-vehicle state - see `foreign`.
+
+            It also contributes to `nearestDistance`, so a player standing in a car park somebody
+            else's client filled ticks at the car-park rate rather than the empty-field one.
+        ]]
+        if foreignCount > 0 then
+            local nearest = mirrorPass(GetEntityCoords(PlayerPedId()))
+            if nearest < nearestDistance then nearestDistance = nearest end
+        end
     end
 end)
 
@@ -634,21 +876,33 @@ AddEventHandler('gameEventTriggered', function(name, args)
     local vehicle = args and args[2]
     if not vehicle or not DoesEntityExist(vehicle) then return end
 
-    local netId = NetworkGetNetworkIdFromEntity(vehicle)
-    local id = byNet[netId]
-    if not id then return end
+    --[[
+        THE STATE BAG, NOT `byNet`.
+
+        `byNet` only knows the vehicles this client placed, and the player getting into a car is
+        very often not that client. Keyed on the replicated bag this runs on whichever machine
+        the driver is on, which is the same correction `client/track.lua` made in 1.0.16 and the
+        same one the damage handler below needed.
+
+        It also removes a nil index that had been sitting one line below a guard that existed
+        precisely because the record can be absent.
+    ]]
+    local ok, id = pcall(function() return Entity(vehicle).state['vpark:id'] end)
+    if not ok or type(id) ~= 'string' then return end
+
+    ensureAwake(vehicle)
 
     local record = tracked[id]
-    if record then
-        Stream.dirty(id)
-        if record.frozen and Placement.wake(vehicle) then
-            record.frozen = false
-        end
-    end
 
-    -- Somebody got in. From here on this vehicle's position is worth recording: see the note
-    -- in `Stream.snapshot` about why a merely WOKEN vehicle's position is not.
-    record.driven = true
+    if record then
+        record.frozen = false
+        -- Somebody got in. From here on this vehicle's position is worth recording: see the
+        -- note in `Stream.snapshot` about why a merely WOKEN vehicle's position is not.
+        record.driven = true
+        Stream.dirty(id)
+    else
+        foreignDriven[id] = true
+    end
 
     -- Being entered is also the moment a vehicle stops being parked, so the server is told
     -- immediately rather than on the next sweep. The `true` marks it as USED rather than
@@ -659,6 +913,18 @@ end)
 --[[
     Damage. A frozen car that is rammed should move, or the collision reads as hitting a wall.
 ]]
+--[[
+    KEYED ON THE STATE BAG, NOT ON THIS CLIENT'S RESTORE BOOK.
+
+    `byNet` is only populated on the client that placed the vehicle, and the client that rams a
+    parked car is whichever one is driving. So on every other machine this handler used to find
+    nothing and return - which is the moment the report describes: you drive into a persistent
+    vehicle and it does not move, because it is still frozen on your machine and your machine is
+    the one simulating it.
+
+    The unfreeze is unconditional and comes first. Whether we are also tracking it decides
+    whether there is anything to mark dirty, and that is a separate question.
+]]
 AddEventHandler('gameEventTriggered', function(name, args)
     if name ~= 'CEventNetworkEntityDamage' then return end
 
@@ -666,16 +932,15 @@ AddEventHandler('gameEventTriggered', function(name, args)
     if not victim or not DoesEntityExist(victim) then return end
     if GetEntityType(victim) ~= 2 then return end
 
-    local netId = NetworkGetNetworkIdFromEntity(victim)
-    local id = byNet[netId]
-    if not id then return end
+    local ok, bagId = pcall(function() return Entity(victim).state['vpark:id'] end)
+    if not ok or type(bagId) ~= 'string' then return end
 
-    local record = tracked[id]
+    ensureAwake(victim)
+
+    local record = tracked[bagId]
     if record then
-        Stream.dirty(id)
-        if record.frozen and Placement.wake(victim) then
-            record.frozen = false
-        end
+        record.frozen = false
+        Stream.dirty(bagId)
     end
 end)
 
@@ -786,10 +1051,18 @@ local trailing = {}
 -- own. NOT a delay before the first send: see below.
 local PUSH_WINDOW = 1500
 
-local function sendNow(id)
-    local record = tracked[id]
-    if not record or not record.entity or not DoesEntityExist(record.entity) then return end
+--[[
+    A vehicle this client did not place is sent the same way.
 
+    `Stream.snapshot` decides which of the two paths applies, so the only thing needed here is
+    to stop requiring a tracked record. Without this a repair or a respray on a car somebody
+    else's machine placed waited for the sweep - which is the promise this whole section exists
+    to keep, made to half the vehicles on the server.
+
+    No reference health is passed, deliberately: this send happens because something is known to
+    have changed, which is exactly when the dents are worth re-measuring.
+]]
+local function sendNow(id)
     local snapshot = Stream.snapshot(id)
     if not snapshot then return end
 
@@ -953,6 +1226,18 @@ RegisterNetEvent('vpark:client:props', function(token)
 
     local red, green, blue = GetVehicleNeonLightsColour(vehicle)
 
+    --[[
+        THE PAINT, BECAUSE A COLOUR REPORT WITHOUT IT IS UNFALSIFIABLE.
+
+        A tester wrote "doute sur la bonne couleur (lors d'un teste avec le chrome)", and there is
+        no way to turn a doubt like that into a yes or a no by reasoning: chrome is a paint TYPE on
+        one API and a colour INDEX on another, v-park writes both, and which of them the mod shop
+        used is not knowable from here. So all of it is reported side by side with what is stored,
+        and one reading settles which of the two is wrong.
+    ]]
+    local primary, secondary = GetVehicleColours(vehicle)
+    local pearlescent, wheelColour = GetVehicleExtraColours(vehicle)
+
     local _, trackedId = Stream.byEntity(vehicle)
 
     local ok, bagId = pcall(function() return Entity(vehicle).state['vpark:id'] end)
@@ -968,21 +1253,109 @@ RegisterNetEvent('vpark:client:props', function(token)
         windows = windows,
         doors = doors,
         bodyHealth = math.floor(GetVehicleBodyHealth(vehicle) + 0.5),
+        engineHealth = math.floor(GetVehicleEngineHealth(vehicle) + 0.5),
         engine = IsVehicleEngineOn(vehicle) and 1 or 0,
+
+        colours = { primary or -1, secondary or -1 },
+        modColor1 = { GetVehicleModColor_1(vehicle) },
+        modColor2 = { GetVehicleModColor_2(vehicle) },
+        extraColours = { pearlescent or -1, wheelColour or -1 },
+        customPrimary = GetIsVehiclePrimaryColourCustom(vehicle)
+            and { GetVehicleCustomPrimaryColour(vehicle) } or nil,
+        customSecondary = GetIsVehicleSecondaryColourCustom(vehicle)
+            and { GetVehicleCustomSecondaryColour(vehicle) } or nil,
     })
 end)
 
 function Stream.dirty(id)
     local record = tracked[id]
-    if not record then return end
 
-    record.captureClean = false
+    -- A foreign vehicle has no `captureClean` to clear, because it has no frozen-and-clean
+    -- shortcut to be let through: `foreignSnapshot` always reads the vehicle.
+    if record then record.captureClean = false end
+
     pushChange(id)
 end
 
-function Stream.snapshot(id)
+--[[
+    ================================================================================================
+    WHAT A CLIENT THAT DID NOT PLACE THIS VEHICLE CAN HONESTLY SAY ABOUT IT.
+    ================================================================================================
+
+    The save sweep asks whichever client is NEAREST a vehicle, and for one being driven it asks the
+    occupant. Neither is necessarily the client that placed it, and until now a client with no
+    `tracked` entry answered nothing - silently, because an absent snapshot means "no news". Every
+    modification, repair and dent on a car placed by somebody else's machine went unrecorded.
+
+    Modifications, colours and damage are part of the network sync tree, so this client is looking at
+    the real vehicle and not a local guess: what it reads is what the owner has. Three things it
+    genuinely cannot know, and each is left out rather than guessed:
+
+      the deformation reference   Whether the dents are worth re-measuring depends on what body
+                                  health was when the vehicle was restored, which only the placing
+                                  client saw. THE SERVER SENDS IT: `reference` is the stored body
+                                  health, and comparing live health against that is the same
+                                  question `Deformation.shouldRecapture` asks, asked with the one
+                                  number this client is missing.
+
+      the neons                   Only a person in the vehicle can choose them, and this client has
+                                  no record of anybody having done so. Reporting them would be the
+                                  1.0.29 mistake with a different table underneath it.
+
+      whether it was dressed      A restore that could not apply its properties leaves a stock car,
+                                  and reporting that would overwrite the real one. Only the placing
+                                  client knows. So a vehicle that IS being tracked somewhere else
+                                  and failed to dress can still be reported here - which is the one
+                                  case this path is weaker than the other, and it is bounded: the
+                                  placing client is the nearest client for the whole of a failed
+                                  restore, because it was chosen for being nearest.
+]]
+local function foreignSnapshot(id, reference)
+    local entity = foreign[id]
+    if not entity or not DoesEntityExist(entity) then return nil end
+
+    local recapture = Deformation.shouldRecapture(entity, tonumber(reference))
+
+    local properties = Properties.capture(entity, { skipDeformation = not recapture })
+    if not properties then return nil end
+
+    -- Named rather than merely absent: a snapshot REPLACES the stored properties, so a group
+    -- dropped without being named is a group deleted. See the note in `Stream.snapshot`, which
+    -- also explains why the anchor is in here.
+    local withheld = { neons = true }
+    if not recapture then withheld.deformation = true end
+    if properties.anchored ~= true then withheld.anchor = true end
+
+    for _, key in ipairs(Schema.keys.neons or {}) do
+        properties[key] = nil
+    end
+
+    local moved = foreignDriven[id] == true
+    local position = moved and GetEntityCoords(entity) or nil
+    local rotation = moved and GetEntityRotation(entity, 2) or nil
+
+    return {
+        id = id,
+        properties = properties,
+        withheld = withheld,
+        statebags = Properties.captureStatebags(entity),
+        position = position and
+            { x = Park.coord(position.x), y = Park.coord(position.y), z = Park.coord(position.z) } or nil,
+        rotation = rotation and
+            { x = Park.angle(rotation.x), y = Park.angle(rotation.y), z = Park.angle(rotation.z) } or nil,
+        interior = GetInteriorFromEntity(entity),
+        room = GetRoomKeyFromEntity(entity),
+        vehicleType = GetVehicleType and GetVehicleType(entity) or nil,
+    }
+end
+
+function Stream.snapshot(id, reference)
     local record = tracked[id]
-    if not record or not record.entity or not DoesEntityExist(record.entity) then return nil end
+
+    -- Not one this client placed. It can still be looked at: see `foreignSnapshot`.
+    if not record then return foreignSnapshot(id, reference) end
+
+    if not record.entity or not DoesEntityExist(record.entity) then return nil end
 
     --[[
         THE BIGGEST SAVING IN THE RESOURCE, AND THE SIMPLEST.
@@ -1084,6 +1457,58 @@ function Stream.snapshot(id)
         Dropping the keys means the server keeps what it has, and the next restore tries again with
         the value the player actually chose.
     ]]
+    --[[
+        ================================================================================================
+        A WITHHELD GROUP IS NAMED, BECAUSE LEAVING IT OUT DELETES IT.
+        ================================================================================================
+
+        Three places in this function drop keys from a report, and all three are commented as "the
+        server treats an absent field as no news and keeps what it has". That was the intention and
+        it was not what happened. `Persist.applySnapshot` assigns the snapshot's property table over
+        the stored one - `record.properties = patch.properties`, a replacement and not a merge - so a
+        key that was left out was a key deleted from the database.
+
+        Which means every guard written to PROTECT a value was quietly destroying it:
+
+          the unverified groups   A restore that could not apply the neons dropped them from the
+                                  next report so the failure could not be written down. The failure
+                                  was not written down; the value was deleted instead.
+
+          the neons              Withheld until somebody is seen to change them, so that a car
+                                  nobody has touched cannot report itself dark. It reported nothing,
+                                  and nothing overwrote the player's own setting anyway.
+
+          the server's own guard  `unverifiedNeons` in `applySnapshot` does the same thing to the
+                                  same keys, one layer down, with the same result.
+
+        Deformation escaped it because somebody hit this once and wrote a single line by hand to
+        carry it across. That line is the correct behaviour for all of them, and this is that line
+        generalised: the groups being withheld are NAMED in the snapshot, and the server copies them
+        from what it already has.
+
+        Naming them rather than merging everything absent, because absence genuinely means "gone"
+        for some keys - `customPrimary` is not sent by a car that is no longer custom-painted, and
+        merging it back would repaint the car on its next restore.
+    ]]
+    local withheld = {}
+
+    if not recapture then withheld.deformation = true end
+
+    --[[
+        AND AN ANCHOR IS NEVER RAISED BY A CAPTURE.
+
+        `Anchor.stored` reports `true` or nothing, never `false` - see the note at the top of
+        `client/anchor.lua`. Nothing is what a boat reports when it is genuinely not anchored AND
+        what it reports when this client simply cannot tell: not streamed in far enough, ownership
+        somewhere else, or `IsBoatAnchoredAndFrozen` answering only for the frozen variant.
+
+        Since a snapshot REPLACES the stored properties, nothing would delete the anchor - so a
+        boat moored on Friday would come up by itself on the first capture that could not see it.
+        Naming the group instead means the stored value stands, and the only thing that raises an
+        anchor is a person asking for it, which goes straight to `Actions.setAnchor`.
+    ]]
+    if properties.anchored ~= true then withheld.anchor = true end
+
     local doubtful = unverified[id]
 
     if doubtful then
@@ -1091,6 +1516,7 @@ function Stream.snapshot(id)
             for _, key in ipairs(Schema.keys[group] or {}) do
                 properties[key] = nil
             end
+            withheld[group] = true
         end
     end
 
@@ -1129,11 +1555,13 @@ function Stream.snapshot(id)
         for _, key in ipairs(Schema.keys.neons or {}) do
             properties[key] = nil
         end
+        withheld.neons = true
     end
 
     return {
         id = id,
         properties = properties,
+        withheld = next(withheld) and withheld or nil,
         statebags = Properties.captureStatebags(entity),
         position = moved and { x = Park.coord(position.x), y = Park.coord(position.y), z = Park.coord(position.z) } or nil,
         rotation = moved and { x = Park.angle(rotation.x), y = Park.angle(rotation.y), z = Park.angle(rotation.z) } or nil,

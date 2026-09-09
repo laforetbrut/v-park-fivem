@@ -191,6 +191,23 @@ local function sendRestore(record, src, netId)
     local entry = Store.live(record.id)
     if entry and hasNeonsOn(record) then entry.unverifiedNeons = true end
 
+    --[[
+        AND NOT TO BE BELIEVED ABOUT ANYTHING ELSE UNTIL SOMEBODY HAS DRESSED IT.
+
+        A vehicle that has been created but not yet had its properties applied is a STOCK car
+        standing where a modified one belongs. The client doing the dressing knows that and says
+        nothing until it has finished - `record.dressed` in `client/stream.lua`.
+
+        Every OTHER client's idea of what has been dressed is empty, and since the capture sweep
+        asks whichever client is nearest, one of them can be asked about a vehicle in exactly that
+        window. It would read a stock car and report it in good faith, and the modifications would
+        be gone from the database for good.
+
+        So the fact lives here, where there is one of it, exactly as the neon guard does and for
+        exactly the same reason. Cleared by the placing client reporting that the apply worked.
+    ]]
+    if entry then entry.undressed = true end
+
     TriggerClientEvent('vpark:client:restore', src, netId, {
         neighbours = neighboursOf(record),
         id = record.id,
@@ -648,8 +665,17 @@ local function configure(entity, record)
 
         -- Deformation is applied by EVERY client, locally, which is what makes two players see
         -- the same dents. Hence a replicated bag rather than a targeted event.
+        --[[
+            An empty `d` is a real answer - "this car has no dents" - and it is stored as one so
+            that a repair can clear the dents at all. See `Deformation.read`. There is still
+            nothing to replicate for it: every client would receive a list of no points and apply
+            none of them.
+        ]]
         local deformation = record.properties and record.properties.deformation
-        if deformation and Config.Deformation and Config.Deformation.enabled ~= false then
+        local hasPoints = type(deformation) == 'table'
+            and ((type(deformation.d) == 'table' and #deformation.d > 0) or deformation.external == true)
+
+        if deformation and hasPoints and Config.Deformation and Config.Deformation.enabled ~= false then
             state:set('vpark:deform', {
                 v = record.updated_at,
                 d = deformation.d,
@@ -1336,6 +1362,15 @@ RegisterNetEvent('vpark:server:restored', function(id, result)
         message - and ids are not secret.
     ]]
     pending[id] = nil
+
+    --[[
+        The properties are believable again once the client that applied them says they went on.
+        `dressed == false` leaves the guard up: the vehicle IS a stock car, and the next restore is
+        what will fix it, not a capture of the wrong state.
+    ]]
+    if result.ok and result.dressed ~= false then
+        entry.undressed = nil
+    end
 
     if not result.ok then
         --[[
