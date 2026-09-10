@@ -290,7 +290,11 @@ function whereCell(row) {
     if (typeof row.distance === 'number') sub.push(`${row.distance} m`);
     if (row.interior) sub.push('interior');
     if (row.bucket) sub.push(`bucket ${row.bucket}`);
-    if (row.lastGarage) sub.push(row.lastGarage);
+    // Labelled. Unlabelled beside the coordinates it read as where the vehicle IS, and a tester
+    // reported exactly that: "les vehicules sont indiques a pillboxgarage alors qu'ils sont
+    // dehors". It is the garage it last came out of, and the one the cleanup sweep would send it
+    // back to - never where it is standing.
+    if (row.lastGarage) sub.push(`${t('panel.last_garage')}: ${row.lastGarage}`);
 
     cell.appendChild(el('span', 'v-sub', sub.join('  ·  ')));
     return cell;
@@ -869,7 +873,7 @@ function renderDetail(detail) {
     line(timing, t('panel.detail_touched'), detail.touchedAgo);
     line(timing, t('panel.detail_used'), detail.usedAgo || t('panel.never_used'));
     if (row.graceText) line(timing, t('panel.grace'), row.graceText);
-    if (row.lastGarage) line(timing, t('panel.act_garage'), row.lastGarage);
+    if (row.lastGarage) line(timing, t('panel.last_garage'), row.lastGarage);
 }
 
 function openDetail(id) {

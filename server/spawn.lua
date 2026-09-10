@@ -330,6 +330,66 @@ local function poseIfFresh(entry)
     return position, safeRotation(entry.entity)
 end
 
+--[[
+    ================================================================================================
+    HAS SOMETHING MOVED THIS VEHICLE, WITHOUT ANYBODY DRIVING IT?
+    ================================================================================================
+
+    A tow truck, a cargobob, a forklift, another car shoving it, a player pushing it out of a
+    doorway. All of them move a vehicle nobody is sitting in, all of them are deliberate, and until
+    now all of them were undone at the next restart because only a DRIVEN vehicle could change
+    where it lived. Three testers reported the same case in the same words.
+
+    The distance is what tells a tow from a roll. `poseIfFresh` already refuses a reading that has
+    not moved from where the server created the entity, which is what makes a stale server-side
+    read safe: an entity nobody is simulating answers with its spawn position, and that answer is
+    refused rather than believed.
+
+    Returns the pose, or nil - and nil is the common case by a very wide margin.
+]]
+local function poseIfMoved(entry, record)
+    if not entry or not record then return nil end
+    if entry.nudged then return nil end
+
+    -- Being driven has its own, better path: the client that is driving reports where it stops.
+    if entry.occupant then return nil end
+
+    local threshold = tonumber((Config.Streaming or {}).movedThreshold) or 3.0
+    if threshold <= 0 then return nil end
+
+    local position, rotation = poseIfFresh(entry)
+    if not position or not rotation then return nil end
+
+    local dx = position.x - (tonumber(record.pos_x) or 0.0)
+    local dy = position.y - (tonumber(record.pos_y) or 0.0)
+    local dz = position.z - (tonumber(record.pos_z) or 0.0)
+
+    if (dx * dx + dy * dy + dz * dz) < (threshold * threshold) then return nil end
+
+    --[[
+        AND IT HAS TO HAVE STOPPED.
+
+        A vehicle halfway through being towed is moving, and writing its position then records a
+        point on the journey rather than where it was put down. Reading the speed is one native
+        and it is only reached by a vehicle that has already moved further than the threshold,
+        which is rare.
+    ]]
+    local ok, speed = pcall(GetEntitySpeed, entry.entity)
+    if ok and type(speed) == 'number' and speed > 0.5 then return nil end
+
+    return position, rotation
+end
+
+Spawn.poseIfMoved = poseIfMoved
+
+-- Where a player's ped is, best effort. Used by `/vparkwhere` to send only the stored poses
+-- that are anywhere near them rather than the whole live set.
+function Spawn.playerPosition(src)
+    local ped = GetPlayerPed(src)
+    if not ped or ped == 0 then return nil end
+    return safeCoords(ped)
+end
+
 local function safeExists(entity)
     if not entity or entity == 0 then return false end
     local ok, exists = pcall(DoesEntityExist, entity)
@@ -1017,6 +1077,28 @@ function Spawn.despawn(id, reason)
     local couldHaveMoved = entry.driven == true and entry.seen == true
         and not entry.nudged and not entry.parked
 
+    --[[
+        OR SOMETHING MOVED IT WITHOUT DRIVING IT. See `poseIfMoved`, and the tow truck it is for.
+
+        Checked before the flags above rather than after, because a towed vehicle has none of them
+        set: nobody sat in it, so `driven` is false and `parked` was never reported.
+    ]]
+    if record and not couldHaveMoved and safeExists(entity) then
+        local moved, movedRotation = poseIfMoved(entry, record)
+
+        if moved and movedRotation then
+            Park.debug('%s moved without being driven - writing where it ended up', id)
+            Store.update(id, {
+                pos_x = Park.coord(moved.x),
+                pos_y = Park.coord(moved.y),
+                pos_z = Park.coord(moved.z),
+                rot_x = Park.angle(movedRotation.x),
+                rot_y = Park.angle(movedRotation.y),
+                rot_z = Park.angle(movedRotation.z),
+            })
+        end
+    end
+
     if record and couldHaveMoved and safeExists(entity) then
         -- `poseIfFresh` rather than a bare read: see its note. The flags above say who MIGHT
         -- have moved it; this says whether the number actually moved.
@@ -1370,6 +1452,16 @@ RegisterNetEvent('vpark:server:restored', function(id, result)
     ]]
     if result.ok and result.dressed ~= false then
         entry.undressed = nil
+    end
+
+    --[[
+        What the body health settled at once the restore had put the stored damage back.
+
+        Kept here because the capture sweep asks whichever client is NEAREST, and only the client
+        that placed the vehicle watched this happen. See `restoredHealth` in Store.liveFields.
+    ]]
+    if result.ok and type(result.health) == 'number' then
+        entry.restoredHealth = result.health
     end
 
     if not result.ok then
@@ -2035,10 +2127,63 @@ end)
     vehicle list, a statebag read each. On a server with four hundred vehicles that is four
     hundred reads every thirty seconds.
 ]]
+--[[
+    Write down every live vehicle that has been moved without being driven.
+
+    The despawn path catches one that is towed away and then goes out of scope. This catches the
+    far more common case: it is towed twenty metres, put down, and everybody stays standing next
+    to it until the nightly restart - at which point it would come back where it started, which is
+    exactly what the three reports describe.
+
+    One `safeCoords` per live vehicle, on the reconcile interval rather than the streaming pass,
+    because this is a sweep and the streaming pass has a millisecond budget.
+]]
+local function sweepMoved()
+    local threshold = tonumber((Config.Streaming or {}).movedThreshold) or 3.0
+    if threshold <= 0 then return 0 end
+
+    local written = 0
+
+    for id, entry in pairs(Store.allLive()) do
+        if entry.entity and safeExists(entry.entity) then
+            local record = Store.get(id)
+            local position, rotation = poseIfMoved(entry, record)
+
+            if position and rotation then
+                Park.debug('%s was moved without being driven - writing where it ended up', id)
+
+                Store.update(id, {
+                    pos_x = Park.coord(position.x),
+                    pos_y = Park.coord(position.y),
+                    pos_z = Park.coord(position.z),
+                    rot_x = Park.angle(rotation.x),
+                    rot_y = Park.angle(rotation.y),
+                    rot_z = Park.angle(rotation.z),
+                })
+
+                --[[
+                    The spawn position moves with it, or every later pass would measure against
+                    the old one and write the same row again on every sweep for the life of the
+                    entity. `poseIfFresh` reads it too, so leaving it stale would also make the
+                    freshness test permanently true.
+                ]]
+                entry.spawnX, entry.spawnY, entry.spawnZ = position.x, position.y, position.z
+
+                written = written + 1
+            end
+        end
+    end
+
+    return written
+end
+
 function Spawn.reconcile()
     if not GetAllVehicles then return 0 end
 
     local startedAt = Park.ticks()
+
+    -- Before the orphan sweep below, which does not touch positions and does not care.
+    pcall(sweepMoved)
 
     local ok, all = pcall(GetAllVehicles)
     if not ok or type(all) ~= 'table' then return 0 end

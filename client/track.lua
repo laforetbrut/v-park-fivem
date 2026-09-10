@@ -537,8 +537,27 @@ end)
     Used by `/vpark`, by the admin panel and by the API: all three can name a vehicle the
     client has never been told about.
 ]]
+--[[
+    Resolved through the state bag first, exactly as `waitForEntity` in `client/stream.lua` is
+    and for the same reason: `NetworkDoesNetworkIdExist` asks the object manager for an object
+    this client may not have, and says so in the console every time it does not.
+]]
+local function entityFor(netId)
+    if type(netId) ~= 'number' or netId <= 0 then return 0 end
+
+    local entity = GetEntityFromStateBagName(('entity:%d'):format(netId))
+    if entity and entity ~= 0 and DoesEntityExist(entity) then return entity end
+
+    if NetworkDoesNetworkIdExist(netId) then
+        entity = NetToVeh(netId)
+        if entity and entity ~= 0 and DoesEntityExist(entity) then return entity end
+    end
+
+    return 0
+end
+
 RegisterNetEvent('vpark:client:captureEntity', function(netId, token)
-    local entity = NetworkDoesNetworkIdExist(netId) and NetToVeh(netId) or 0
+    local entity = entityFor(netId)
 
     if entity == 0 or not DoesEntityExist(entity) then
         TriggerServerEvent('vpark:server:capturedEntity', nil, token)
@@ -556,7 +575,7 @@ end)
     natives.
 ]]
 RegisterNetEvent('vpark:client:mutate', function(netId, action, value)
-    local entity = NetworkDoesNetworkIdExist(netId) and NetToVeh(netId) or 0
+    local entity = entityFor(netId)
     if entity == 0 or not DoesEntityExist(entity) then return end
 
     if not Placement.takeControl(entity, 2000) then return end

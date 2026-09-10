@@ -1215,6 +1215,35 @@ function Placement.placeInner(entity, data)
     -- cannot drift out of a tight space over twenty minutes of being nudged by traffic.
     local keepFrozen = options().freezeUntilTouched ~= false or data.frozen == true
 
+    --[[
+        EXCEPT IN MID-AIR, WHERE FREEZING IT IS THE BUG.
+
+        A vehicle stored while it was not on the ground - a helicopter somebody left hovering
+        being the usual one - comes back at those coordinates and, frozen, hangs there for good.
+        `Placement.groundCorrect` will not pull it down because aircraft are exempt from that
+        check, and rightly so: a helicopter on a rooftop helipad is sixty metres above "the
+        ground" and exactly where it belongs.
+
+        So the check is on the freeze rather than the position. Handed its physics back, the
+        vehicle falls and lands or crashes, which is what would happen with no persistence
+        resource running at all.
+
+        A failed ground probe leaves the freeze alone. The map may simply not be streamed here
+        yet, and guessing in that state is how vehicles end up under it.
+    ]]
+    local tolerance = tonumber(options().airborneTolerance) or 5.0
+
+    if keepFrozen and tolerance > 0 and not Classes.aquatic[data.class] then
+        local at = GetEntityCoords(entity)
+        local found, groundZ = GetGroundZFor_3dCoord(at.x, at.y, at.z, false)
+
+        if found and (at.z - groundZ) > tolerance then
+            Park.debug('%s is %.1f m above the ground - not freezing it there',
+                tostring(data.id), at.z - groundZ)
+            keepFrozen = false
+        end
+    end
+
     if collisionLoaded and not keepFrozen then
         FreezeEntityPosition(entity, false)
         watchForEjection(entity, target)

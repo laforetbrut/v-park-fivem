@@ -8,6 +8,59 @@ out of it.
 
 ---
 
+## [2026-09-11 02:30] - Fixing a number by writing it back onto the thing it describes
+
+**Context:** body health drifted downwards on every restart, because applying a car's own stored
+damage lowers the number the engine derives from that damage. The fix was to re-assert the stored
+health at the end of `Properties.apply`, after the deformation had converged.
+
+**Error:** the number was then correct and the car came back visibly less dented. A tester: "la
+deformation est bien moins presente".
+
+**Root cause:** `SET_VEHICLE_BODY_HEALTH` does not only move a counter. Raising it smooths the
+bodywork back out. `shared/schema.lua` says exactly that in the note over the `deformation` group -
+"Deforming a panel first and then setting body health smooths the dent back out, which looks
+exactly like the deformation never being restored at all" - and the whole group ordering exists
+because of it. The note was three lines above the group I was reasoning about and I did not connect
+it to the change.
+
+**Fix:** the vehicle is not touched after the deformation. The drift is fixed on the way OUT: the
+capture withholds the health group while the vehicle is still at the health the restore left it,
+which is the same drift guard the deformation has always had, applied to the number they share. The
+reference is what the health settled at after the restore, measured by the placing client and sent
+by the server to whichever client the sweep asks.
+
+**Prevention:** a value that describes a thing and a value that CHANGES it are not the same value,
+and a setter that looks like bookkeeping may not be. Before writing a stored number back onto a
+live entity to correct a drift, check whether the drift can be corrected in the report instead -
+the report has no side effects and the entity does. And when a file already carries a note about
+the ordering of the thing being changed, that note is the review.
+
+---
+
+## [2026-09-11 02:10] - A rule that was right about the case it was written for
+
+**Context:** "only a person driving a vehicle can change where it is parked" - the rule that stops
+a woken vehicle rolling on a camber and having the roll written down as where its owner left it.
+
+**Error:** all three testers reported the same failure in the same words: a tow truck moves a
+vehicle, puts it down, and the next restart returns it to where it was picked up.
+
+**Root cause:** the rule is a proxy. What it means is "a deliberate act by a person moved this",
+and it tests for the only such act that existed when it was written. A tow truck, a cargobob, a
+forklift, another car shoving it and a player pushing it out of a doorway are all deliberate and
+none of them involve sitting in the vehicle.
+
+**Fix:** a distance rather than a flag. Three metres is far above what a roll produces and far
+below what a tow does, and the pose is only read from a vehicle that is empty and at rest.
+
+**Prevention:** when a rule is a proxy for an intention, write down what the intention is next to
+it, and revisit the proxy whenever somebody reports the intention being ignored. The reports that
+matter here all had the same shape - "I did something deliberate and it was undone" - and that
+shape is what identifies a proxy that has stopped covering its case.
+
+---
+
 ## [2026-09-10 14:20] - A guard written on a merge that was a replacement
 
 **Context:** auditing three tester reports from a session with three players. Several complaints were

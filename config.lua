@@ -1081,6 +1081,32 @@ Config.Placement = {
     -- costs nothing and looks like a parked car.
     settleDelay = 250,
 
+    --[[
+        Metres above whatever is beneath it before a restored vehicle is handed back to physics
+        instead of being frozen. 0 switches the check off.
+
+        A frozen vehicle is not simulated, which is the whole performance story and is exactly
+        wrong for one that was stored while it was NOT on the ground. A tester put it in one line:
+        "un helicoptere qui est decharge dans les airs reste bloque dans les airs".
+
+        It is a helicopter far more often than anything else, because a helicopter is the vehicle
+        people leave hovering, and because `Placement.groundCorrect` deliberately exempts aircraft
+        from being pulled down - a helicopter on a rooftop helipad is sixty metres above "the
+        ground" and entirely where it should be. That exemption is right and it left the genuinely
+        airborne case with nothing to catch it.
+
+        So the position is still not corrected, and the FREEZE is what changes: a vehicle this far
+        up is given its physics back and falls, lands or crashes exactly as it would with no
+        persistence resource running at all. Which is the honest answer, and a great deal better
+        than a helicopter hanging in the sky like scenery.
+
+        Generous on purpose. A helipad, a multi-storey roof or a ramp puts a vehicle a metre or two
+        above the surface the probe finds; five metres is not parked anywhere.
+
+        Boats are exempt: the ground under a boat is the seabed.
+    ]]
+    airborneTolerance = 5.0,
+
     -- Keep a restored vehicle frozen until a player interacts with it.
     --
     -- THIS IS THE BIG ONE, for both fidelity and performance.
@@ -1403,6 +1429,35 @@ Config.Placement = {
 -- ===========================================================================================
 
 Config.Streaming = {
+    --[[
+        ================================================================================================
+        HOW FAR A VEHICLE HAS TO MOVE, WITH NOBODY DRIVING IT, BEFORE THAT COUNTS AS ITS NEW HOME.
+        ================================================================================================
+
+        Metres, from where the server last wrote it down. 0 switches the whole idea off.
+
+        The rule everywhere else is that ONLY A PERSON DRIVING A VEHICLE CAN CHANGE WHERE IT IS
+        PARKED. That rule exists for a good reason - a woken vehicle is simulated, and one sitting
+        on a camber rolls, so reading its position back would record the roll as the place its
+        owner left it - and it is wrong about one case that turned up in testing with three
+        players, reported by all three of them:
+
+            "la depanneuse a deplace le vehicule mais la position du vehicule au chargement a
+             rollback"
+
+        A tow truck moves a vehicle without anybody sitting in it. So does a forklift, a cargobob,
+        a push from another car, and a player shoving it out of a doorway. Every one of those is a
+        deliberate act by a person, and every one of them was undone at the next restart.
+
+        A distance tells the two apart without needing to know which happened. A car that rolled on
+        a camber moves centimetres; a car that was towed moves the length of a street. Three metres
+        is far above the first and far below the second.
+
+        Only ever read when the vehicle is at REST and empty, so a vehicle mid-tow is not written
+        down halfway through the journey.
+    ]]
+    movedThreshold = 3.0,
+
     -- Metres. A persisted vehicle within this distance of any player is created.
     --
     -- 250 is comfortably beyond the distance a vehicle becomes visible, so a player never

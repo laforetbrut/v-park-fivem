@@ -920,25 +920,28 @@ function Properties.apply(vehicle, properties, options)
 
     --[[
         ================================================================================================
-        THE HEALTH IS SET HERE AND SET AGAIN AT THE END. THE SECOND ONE IS THE ONE THAT COUNTS.
+        THE HEALTH IS SET HERE, ONCE, AND NEVER AFTER THE DEFORMATION.
         ================================================================================================
 
-        Setting it once, here, was a slow leak in the wrong direction, and it compounded.
+        `SET_VEHICLE_BODY_HEALTH` does not only move a counter. Raising it SMOOTHS THE BODYWORK BACK
+        OUT, which `shared/schema.lua` says in the note over the `deformation` group and which the
+        group ordering has been built around since the beginning: health, then damage, then
+        deformation, and nothing touches the health again.
 
-        Everything below this line that reproduces damage also REDUCES body health, because that is
-        what the engine derives it from: `SmashVehicleWindow`, `SetVehicleTyreBurst`,
-        `SetVehicleDoorBroken` and every `SetVehicleDamage` the deformation apply fires. So a car
-        stored at 600 was set to 600 and then knocked down to something lower by having its own
-        stored damage put back on it. The next capture read that lower number and wrote it down, and
-        the restore after that started from there.
+        A previous attempt at the drift below re-asserted the stored health at the end of this
+        function, after the deformation had converged. It fixed the number and flattened the dents,
+        and a tester reported it in one line: "la deformation est bien moins presente".
 
-        A car parked, passed and restarted enough times therefore walked towards zero without
-        anybody touching it - and a body health at zero is a wreck, an undriveable one on some
-        builds. That is the same class of mistake as the pose drift the placement notes describe,
-        with the same shape: a value read back after being approximated.
+        THE DRIFT IS REAL AND IT IS FIXED ON THE WAY OUT INSTEAD. Everything below this line that
+        reproduces damage also reduces body health, because that is what the engine derives it from:
+        `SmashVehicleWindow`, `SetVehicleTyreBurst`, `SetVehicleDoorBroken` and every
+        `SetVehicleDamage` the deformation fires. So a car stored at 600 ends this function somewhere
+        below 600, and capturing that number would write it down and start the next restore lower.
 
-        It is still set here as well as at the end, because some of the calls below behave
-        differently on a vehicle the engine considers destroyed.
+        So the capture does not write it down. `Stream.snapshot` withholds the whole health group
+        until the vehicle has taken damage the restore did not put there, measured against what the
+        health actually settled at - which is the same drift guard the deformation has always had,
+        applied to the number it shares. See `restoredHealth`.
     ]]
     local function setHealth()
         if type(properties.bodyHealth) == 'number' then
@@ -1014,19 +1017,6 @@ function Properties.apply(vehicle, properties, options)
     end
 
     --[[
-        AND THE HEALTH AGAIN, NOW THAT EVERYTHING THAT LOWERS IT HAS RUN. See `setHealth`.
-
-        Twice: once now, and once after the deformation apply has finished. That apply runs on its
-        own thread with a budget of about a tenth of a second - it has to, because it converges by
-        hitting the bodywork and measuring between blows - so the damage it does to the health
-        number lands after this function has returned.
-
-        Setting the number does not undo the shape: `SetVehicleBodyHealth` moves the counter,
-        `SetVehicleDeformationFixed` is what smooths panels, and it is not called here. So the car
-        looks exactly as dented as it was stored and reads exactly as damaged as it was stored,
-        which had not been true of both at once before.
-    ]]
-    --[[
         ================================================================================================
         A WRECK COMES BACK A WRECK.
         ================================================================================================
@@ -1062,8 +1052,20 @@ function Properties.apply(vehicle, properties, options)
         SetVehicleUndriveable(vehicle, true)
     end
 
+    --[[
+        THE WRECK, AND ONLY THE WRECK, AFTER THE DEFORMATION.
+
+        `applyWreck` only ever drives the numbers DOWN - engine and tank to the floor the game uses
+        for a destroyed vehicle, body to zero - so it cannot smooth anything: the note above is
+        about raising body health, and zero is not a raise. It has to run after the damage for the
+        opposite reason to everything else, which is that some of those calls behave differently on
+        a vehicle the engine considers destroyed and would otherwise revive it.
+
+        It runs on a thread when the deformation is still converging, because that apply lands its
+        blows over about a tenth of a second and a wreck restored to zero would be knocked below it
+        and then read back as something else.
+    ]]
     if enabledGroup('health') then
-        setHealth()
         applyWreck()
 
         if Deformation and Deformation.busy and Deformation.busy(vehicle) then
@@ -1074,10 +1076,7 @@ function Properties.apply(vehicle, properties, options)
                     Wait(25)
                 end
 
-                if DoesEntityExist(vehicle) then
-                    setHealth()
-                    applyWreck()
-                end
+                if DoesEntityExist(vehicle) then applyWreck() end
             end)
         end
     end

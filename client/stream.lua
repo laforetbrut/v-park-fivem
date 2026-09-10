@@ -469,10 +469,39 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
         })
 
 
+        --[[
+            WAIT FOR THE BODYWORK TO STOP MOVING, THEN READ WHAT IT SETTLED AT.
+
+            The deformation apply converges by hitting the panels and measuring between blows, on
+            its own thread, over about a tenth of a second. Every blow lowers body health. So the
+            number this vehicle will sit at is not known when `Properties.apply` returns, and a
+            reference taken then is a value the car held on the way past.
+
+            The placement above already took longer than the deformation's budget in almost every
+            case, so this normally does not wait at all.
+        ]]
+        if Deformation and Deformation.busy then
+            local settleBy = Park.ticks() + 3000
+            while Deformation.busy(entity) and Park.ticks() < settleBy do Wait(25) end
+        end
+
+        local settledHealth = GetVehicleBodyHealth(entity)
+
         -- Told to the server as well as remembered here. `record.dressed` stops THIS client
         -- reporting a stock car as the truth; `entry.undressed` on the server stops every other
         -- client doing it, which matters now that any of them can be asked. See `applySnapshot`.
         result.dressed = dressed
+
+        --[[
+            And the settled health goes with it, because every OTHER client needs it too.
+
+            The capture sweep asks whichever client is nearest, and only this one watched the
+            restore happen. Without the number, another client comparing the live health against
+            the STORED one would see the gap the restore itself opened - stored 600, live 560
+            because its own dents were put back on it - decide the car had taken new damage, and
+            write 560 down. The row would walk towards zero one restore at a time.
+        ]]
+        result.health = Park.round(settledHealth, 1)
 
         if result.ok then
             tracked[data.id] = {
@@ -489,20 +518,22 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
                 saved = data.position,
                 savedRotation = data.rotation,
                 --[[
-                    What body health was at restore. `Deformation.shouldRecapture` compares against
-                    this, which is what stops the approximation compounding over repeated save
-                    cycles.
+                    WHAT THE BODY HEALTH SETTLED AT, once the restore had finished putting the
+                    stored damage back on it.
 
-                    THE STORED NUMBER, NOT A READ OF THE VEHICLE. A read here is taken while the
-                    deformation apply may still be converging on its own thread, and every blow it
-                    lands lowers body health - so the reference could be a value the vehicle held
-                    for a tenth of a second on the way to its real one. `Properties.apply` puts the
-                    stored number back once that thread has finished, and this is that number
-                    without the race. The read stays as the fallback for a row that has no health
-                    stored at all.
+                    Not the stored number: applying a car's own damage lowers its health below what
+                    was stored, and that is correct rather than a fault - the stored 600 describes a
+                    dented car, and a dented car reads lower than 600 the moment the dents exist.
+
+                    Not a read taken before the deformation had converged either, which is what the
+                    `settledHealth` wait above is for.
+
+                    Everything measures against this. `Deformation.shouldRecapture` asks whether the
+                    car has taken damage the restore did not put there, and so does the health group
+                    in `Stream.snapshot` - which is what stops both the dents and the number walking
+                    over repeated save cycles.
                 ]]
-                restoredHealth = tonumber(data.properties and data.properties.bodyHealth)
-                    or GetVehicleBodyHealth(entity),
+                restoredHealth = settledHealth,
 
                 --[[
                     What the neons are SUPPOSED to be, kept so the tick below can put them back.
@@ -957,31 +988,63 @@ end)
 
     Returns a list, worst first. `/vparkwhere` prints it.
 ]]
-function Stream.audit()
+--[[
+    ================================================================================================
+    IT ANSWERS FOR EVERYTHING IN FRONT OF YOU, NOT ONLY WHAT THIS CLIENT PLACED.
+    ================================================================================================
+
+    `tracked` is this client's own restore book, and it was the only thing this walked. With three
+    players each client had placed a fraction of what it could see, so the command answered "no
+    restored vehicles are being tracked on this client" to a player standing in a car park full of
+    them - which two testers reported as the command simply not working.
+
+    `wanted` is the stored pose per id, sent by the server with the question. A vehicle this client
+    placed still uses its own copy, because that is the pose the placement was actually given and
+    it cannot have been changed since by anything the server did not also see.
+]]
+function Stream.audit(wanted)
     local out = {}
     local count = 0
+    local seen = {}
+
+    local function add(id, entity, want, wantHeading, frozen, dressed, placedHere)
+        if not entity or not DoesEntityExist(entity) or not want then return end
+
+        local at = GetEntityCoords(entity)
+        local target = vector3(want.x, want.y, want.z)
+        local rotation = GetEntityRotation(entity, 2)
+
+        count = count + 1
+        seen[id] = true
+        out[count] = {
+            id = id,
+            model = GetDisplayNameFromVehicleModel(GetEntityModel(entity)),
+            delta = #(at - target),
+            dx = at.x - target.x,
+            dy = at.y - target.y,
+            dz = at.z - target.z,
+            dHeading = Park.angleDelta(rotation.z, wantHeading or 0.0),
+            frozen = frozen,
+            dressed = dressed,
+            mine = NetworkGetEntityOwner(entity) == PlayerId(),
+            placedHere = placedHere,
+        }
+    end
 
     for id, record in pairs(tracked) do
-        if record.entity and DoesEntityExist(record.entity) and record.saved then
-            local at = GetEntityCoords(record.entity)
-            local want = vector3(record.saved.x, record.saved.y, record.saved.z)
+        add(id, record.entity, record.saved, (record.savedRotation or {}).z,
+            record.frozen == true, record.dressed ~= false, true)
+    end
 
-            local rotation = GetEntityRotation(record.entity, 2)
-            local wantRotation = record.savedRotation or {}
-
-            count = count + 1
-            out[count] = {
-                id = id,
-                model = GetDisplayNameFromVehicleModel(record.model or 0),
-                delta = #(at - want),
-                dx = at.x - want.x,
-                dy = at.y - want.y,
-                dz = at.z - want.z,
-                dHeading = Park.angleDelta(rotation.z, wantRotation.z or 0.0),
-                frozen = record.frozen == true,
-                dressed = record.dressed ~= false,
-                mine = NetworkGetEntityOwner(record.entity) == PlayerId(),
-            }
+    if type(wanted) == 'table' then
+        for id, entity in pairs(foreign) do
+            if not seen[id] then
+                -- `dressed` is unknowable from here: only the client that applied the properties
+                -- knows whether they went on. Reported as yes rather than as a doubt, because a
+                -- doubt on every foreign vehicle would drown the ones that are really undressed.
+                add(id, entity, wanted[id], (wanted[id] or {}).h,
+                    IsEntityPositionFrozen(entity), true, false)
+            end
         end
     end
 
@@ -1256,6 +1319,21 @@ RegisterNetEvent('vpark:client:props', function(token)
         engineHealth = math.floor(GetVehicleEngineHealth(vehicle) + 0.5),
         engine = IsVehicleEngineOn(vehicle) and 1 or 0,
 
+        --[[
+            THE TYRE SMOKE, BECAUSE A TESTER SAYS IT DOES NOT SURVIVE AND THE CODE SAYS IT SHOULD.
+
+            "au reboot la fumee des pneus ne survit pas". Reading the apply path says otherwise:
+            the mod kit is set, `ToggleVehicleMod(20, ...)` runs with the modifications, and
+            `SetVehicleTyreSmokeColor` runs after it, which is the order every implementation in
+            the ecosystem uses.
+
+            Reasoning further would be doing what nine releases of neon fixes did. The two values
+            are printed side by side with what is stored instead, and one reading says whether the
+            toggle, the colour, or the capture of either is what goes.
+        ]]
+        smokeOn = IsToggleModOn(vehicle, 20) and 1 or 0,
+        smokeColour = { GetVehicleTyreSmokeColor(vehicle) },
+
         colours = { primary or -1, secondary or -1 },
         modColor1 = { GetVehicleModColor_1(vehicle) },
         modColor2 = { GetVehicleModColor_2(vehicle) },
@@ -1323,7 +1401,10 @@ local function foreignSnapshot(id, reference)
     -- dropped without being named is a group deleted. See the note in `Stream.snapshot`, which
     -- also explains why the anchor is in here.
     local withheld = { neons = true }
-    if not recapture then withheld.deformation = true end
+    if not recapture then
+        withheld.deformation = true
+        withheld.health = true
+    end
     if properties.anchored ~= true then withheld.anchor = true end
 
     for _, key in ipairs(Schema.keys.neons or {}) do
@@ -1492,7 +1573,27 @@ function Stream.snapshot(id, reference)
     ]]
     local withheld = {}
 
-    if not recapture then withheld.deformation = true end
+    --[[
+        THE HEALTH IS WITHHELD BY THE SAME TEST AS THE DENTS, BECAUSE IT IS THE SAME NUMBER.
+
+        `recapture` is false while the vehicle's body health is where the restore left it, which
+        means nothing has hit it since. Reporting the health then would write down the value the
+        restore itself produced - lower than what is stored, because putting a car's own dents,
+        broken windows and burst tyres back on it lowers the number - and the next restore would
+        start from there. A car parked, passed and restarted often enough walked towards zero.
+
+        The previous attempt at this wrote the stored health back onto the vehicle at the end of
+        `Properties.apply`. It flattened the dents, because raising body health smooths bodywork,
+        which is the one thing `shared/schema.lua` has said about this group from the start.
+
+        So the vehicle is left alone and the REPORT is what changes. A repair or a real collision
+        moves the health by far more than `recaptureDelta` and is reported at once, which is what
+        the "a repair is noticed immediately" case tests.
+    ]]
+    if not recapture then
+        withheld.deformation = true
+        withheld.health = true
+    end
 
     --[[
         AND AN ANCHOR IS NEVER RAISED BY A CAPTURE.

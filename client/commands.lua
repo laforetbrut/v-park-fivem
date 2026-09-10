@@ -124,8 +124,8 @@ end)
     rotation; and `frozen = no` on a vehicle nobody is driving points at the freeze never
     having taken.
 ]]
-RegisterNetEvent('vpark:client:where', function()
-    local rows = Stream.audit()
+RegisterNetEvent('vpark:client:where', function(wanted)
+    local rows = Stream.audit(wanted)
 
     if #rows == 0 then
         print('^3[v-park]^7 no restored vehicles are being tracked on this client')
@@ -140,10 +140,11 @@ RegisterNetEvent('vpark:client:where', function()
         print(('^2[v-park]^7   %-14s %-16s off by %6.3f m   dx %+.3f  dy %+.3f  dz %+.3f  heading %+.2f')
             :format(row.id, tostring(row.model), row.delta, row.dx, row.dy, row.dz, row.dHeading))
 
-        print(('^2[v-park]^7                  frozen %s   dressed %s   owned by me %s')
+        print(('^2[v-park]^7                  frozen %s   dressed %s   owned by me %s   placed here %s')
             :format(row.frozen and 'yes' or '^1NO^7',
                     row.dressed and 'yes' or '^1NO^7',
-                    row.mine and 'yes' or 'no'))
+                    row.mine and 'yes' or 'no',
+                    row.placedHere and 'yes' or 'no'))
     end
 
     if #rows > 15 then

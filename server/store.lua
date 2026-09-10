@@ -636,6 +636,18 @@ end
                   here rather than on the client because the capture is asked of whichever client is
                   nearest, and only the server has one view of that.
 
+    restoredHealth
+                  What body health the vehicle settled at after the restore had put its stored
+                  damage back on it, reported by the placing client and sent to whichever client
+                  the capture sweep asks. It is LOWER than the stored number by design: broken
+                  windows, burst tyres and deformed panels are what the engine derives body health
+                  from, so a car stored at 600 reads below 600 once its own damage exists again.
+                  Both drift guards measure against it - the deformation's and the health group's -
+                  because a client comparing live health against the STORED number would see the
+                  gap the restore itself opened, call it new damage, and write the lower value
+                  down. Absent until a restore reports one, and `record.body_health` is the
+                  fallback.
+
     undressed     Set when a restore is sent, and cleared when the placing client reports that the
                   properties actually went on. While it is set, `Persist.applySnapshot` ignores the
                   properties in EVERY snapshot, whoever sent it - a vehicle that has been created
@@ -659,7 +671,7 @@ Store.liveFields = {
     ready = true, seen = true, restoreAt = true, restoreTries = true,
     frozen = true, driven = true, parked = true, nudged = true,
     occupant = true,
-    unverifiedNeons = true, undressed = true,
+    unverifiedNeons = true, undressed = true, restoredHealth = true,
 }
 
 function Store.setLive(id, entry)

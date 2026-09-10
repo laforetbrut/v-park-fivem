@@ -751,6 +751,12 @@ RegisterNetEvent('vpark:server:props', function(token, live)
         list(live.extraColours),
         live.customPrimary and list(live.customPrimary) or '-')
     lines[#lines + 1] = L('props.live_engine', tostring(live.engineHealth or '?'))
+    lines[#lines + 1] = L('props.live_smoke', tostring(live.smokeOn or '?'), list(live.smokeColour))
+
+    if stored then
+        lines[#lines + 1] = L('props.stored_smoke',
+            stored.modSmokeEnabled == true and '1' or '0', list(stored.tyreSmokeColor))
+    end
 
     replyMany(src, lines)
 end)
@@ -1040,7 +1046,44 @@ register('where', {
         return
     end
 
-    TriggerClientEvent('vpark:client:where', src)
+    --[[
+        THE STORED POSES GO WITH THE QUESTION.
+
+        `/vparkwhere` compares where a vehicle IS against where the database says it should be,
+        and until now it could only do that for vehicles the asking client had placed itself -
+        those are the only ones its own restore book has a saved pose for. With three players,
+        each client had placed a fraction of what it could see, so two testers got "no restored
+        vehicles are being tracked on this client" while standing in a car park full of them.
+
+        The server has every stored pose. Sending the ones near the player costs one message and
+        makes the command answer for everything in front of them.
+    ]]
+    local wanted = {}
+    local origin = Spawn.playerPosition and Spawn.playerPosition(src) or nil
+
+    for id, entry in pairs(Store.allLive()) do
+        if entry.entity then
+            local record = Store.get(id)
+
+            if record then
+                local near = true
+
+                if origin then
+                    local dx, dy = record.pos_x - origin.x, record.pos_y - origin.y
+                    near = (dx * dx + dy * dy) < (250.0 * 250.0)
+                end
+
+                if near then
+                    wanted[id] = {
+                        x = record.pos_x, y = record.pos_y, z = record.pos_z,
+                        h = record.rot_z,
+                    }
+                end
+            end
+        end
+    end
+
+    TriggerClientEvent('vpark:client:where', src, wanted)
 end)
 
 register('probe', {

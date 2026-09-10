@@ -116,6 +116,12 @@ that has been deleting data since the guards were written.**
 
 - **`exports['v-park']:SetAnchored(reference, on)`**, and a 21st static check group.
 
+- **`/vparkprops` reports the tyre smoke**, live and stored, because one tester says it does not
+  survive a restart and reading the apply path says it should: the mod kit is set, the toggle runs
+  with the modifications and the colour runs after it, which is the order every implementation in
+  the ecosystem uses. Reasoning further would be what nine releases of neon fixes did, so the two
+  values are printed instead.
+
 ### Changed
 
 - **Every category of vehicle persists, not only cars.** `Config.Persistence.excludedClasses` is
@@ -142,6 +148,60 @@ that has been deleting data since the guards were written.**
   Vehicles nobody has ever driven are still not persisted - `Config.Persistence.ambient` stays off,
   because that setting writes every ambient parked car a player walks past rather than every
   vehicle somebody owns.
+
+- **A vehicle moved without being driven went back where it started.** All three testers
+  reported the same case: "la depanneuse a deplace le vehicule mais la position du vehicule au
+  chargement a rollback".
+
+  The rule everywhere in this resource is that only a person DRIVING a vehicle can change where it
+  is parked, and that rule exists for a good reason - a woken vehicle is simulated, one sitting on
+  a camber rolls, and reading its position back would record the roll as the place its owner left
+  it. It is wrong about a tow truck, a cargobob, a forklift, another car shoving it, and a player
+  pushing it out of a doorway. Every one of those is deliberate and every one was undone at the
+  next restart.
+
+  A distance tells them apart. `Config.Streaming.movedThreshold` (3 m) is far above the roll and
+  far below the tow, and the pose is only read from a vehicle that is empty and at rest, so one
+  mid-tow is not written down halfway through the journey. Checked on the reconcile sweep as well
+  as on despawn, because a vehicle towed twenty metres and left there never despawns before the
+  nightly restart.
+
+- **`/vparkwhere` answered nothing while standing in a car park full of vehicles.** It compares
+  where a vehicle is against where the database says it should be, and it could only do that for
+  vehicles the asking client had placed itself - the only ones its own restore book has a saved
+  pose for. With three players each client had placed a fraction of what it could see. The server
+  now sends the stored poses near the player with the question, and the command reports on
+  everything in front of them, saying for each whether this client is the one that placed it.
+
+- **A helicopter left hovering came back frozen in mid-air.** A frozen vehicle is not simulated,
+  which is the whole performance story and exactly wrong for one stored while it was not on the
+  ground. `Placement.groundCorrect` deliberately exempts aircraft from being pulled down, because
+  a helicopter on a rooftop helipad is sixty metres above "the ground" and entirely where it should
+  be, and that exemption left the genuinely airborne case with nothing to catch it. The freeze is
+  what changes rather than the position: above `Config.Placement.airborneTolerance` (5 m) the
+  vehicle gets its physics back and falls, lands or crashes as it would with no persistence
+  resource running. Boats are exempt, because the ground under a boat is the seabed.
+
+- **A restored vehicle's dents came back shallower than they were stored.** Introduced by the
+  previous release's fix for body health drifting downwards, which re-asserted the stored health
+  at the end of the property apply. Raising body health SMOOTHS THE BODYWORK BACK OUT - which
+  `shared/schema.lua` has said in the note over the deformation group from the start - so the
+  number was right and the car was visibly less damaged. A tester put it in one line: "la
+  deformation est bien moins presente".
+
+  The drift is real and is now fixed on the way out instead: the capture WITHHOLDS the health group
+  while the vehicle is still at the health the restore left it, the same drift guard the
+  deformation has always had, applied to the number it shares. The vehicle itself is not touched
+  after the deformation. The reference both guards measure against is what the health settled at
+  after the restore, reported by the placing client and sent to whichever client the sweep asks.
+
+- **The last `GetNetworkObject` warnings.** Two one-shot paths in `client/track.lua` still asked
+  the object manager directly; both resolve through the entity's state bag now.
+
+- **The panel read as though a vehicle were inside a garage.** `lastGarage` was printed beside the
+  coordinates with no label: "les vehicules sont indiques a pillboxgarage alors qu'ils sont
+  dehors". It is the garage the vehicle last came out of and the one the cleanup sweep would send
+  it back to, never where it is standing, and it now says so.
 
 ### Removed
 
@@ -266,6 +326,33 @@ atteindre, et un cinquième qui supprimait des données depuis que les garde-fou
   Les véhicules que personne n'a jamais conduits ne sont toujours pas persistés -
   `Config.Persistence.ambient` reste désactivé, parce que ce réglage écrit chaque voiture
   d'ambiance devant laquelle un joueur passe et pas chaque véhicule que quelqu'un possède.
+
+- **Un véhicule déplacé sans être conduit revenait à son point de départ.** Les trois testeurs ont
+  rapporté le même cas : « la dépanneuse a déplacé le véhicule mais la position du véhicule au
+  chargement a rollback ».
+
+  La règle partout ailleurs est que seule une personne qui CONDUIT un véhicule peut changer où il
+  est garé, et cette règle existe pour une bonne raison. Elle a tort sur la dépanneuse, le
+  cargobob, le chariot élévateur, une autre voiture qui pousse, et un joueur qui dégage un véhicule
+  d'une porte. Une distance les distingue : `Config.Streaming.movedThreshold` (3 m) est très
+  au-dessus du roulement et très en dessous du remorquage, et la pose n'est lue que d'un véhicule
+  vide et à l'arrêt.
+
+- **`/vparkwhere` ne répondait rien** au milieu d'un parking plein de véhicules : il ne pouvait
+  répondre que pour ceux que le client demandeur avait placés lui-même. Le serveur envoie
+  maintenant les poses stockées proches du joueur avec la question.
+
+- **Un hélicoptère laissé en vol stationnaire revenait gelé en plein ciel.** C'est le gel qui
+  change et pas la position : au-dessus de `Config.Placement.airborneTolerance` (5 m), le véhicule
+  récupère sa physique et retombe comme il le ferait sans ressource de persistance.
+
+- **Les bosses d'un véhicule restauré revenaient moins marquées.** C'est moi qui l'ai introduit à
+  la version précédente : remonter la santé de carrosserie LISSE la tôle, ce que
+  `shared/schema.lua` dit depuis le début. La dérive est maintenant corrigée à la sortie, en
+  retenant le groupe santé tant que le véhicule est à la santé où la restauration l'a laissé.
+
+- **Les derniers avertissements `GetNetworkObject`**, et **le panneau qui laissait croire qu'un
+  véhicule était dans un garage** alors que c'est son dernier garage connu.
 
 ### Supprimé
 

@@ -206,6 +206,34 @@ The client only ever *asks*. The server checks who is asking, stores the answer 
 and every client applies the replicated value - which is what makes two players see the same boat
 in the same place.
 
+### `Config.Streaming.movedThreshold`
+
+Metres, from where the server last wrote a vehicle down, before moving it without driving it
+counts as its new home. 0 switches it off.
+
+Everywhere else in this resource, only a person **driving** a vehicle can change where it is
+parked, because a woken vehicle is simulated and one on a camber rolls. That rule is wrong about a
+tow truck, a cargobob, a forklift, another car shoving it, and a player pushing it out of a
+doorway. A distance tells them apart without needing to know which happened: a roll is
+centimetres, a tow is the length of a street.
+
+Only read from a vehicle that is empty and at rest, so one mid-tow is never written down halfway
+through the journey.
+
+### `Config.Placement.airborneTolerance`
+
+Metres above whatever is beneath it before a restored vehicle is handed back to physics instead of
+being frozen. 0 switches it off.
+
+A frozen vehicle is not simulated, which is the whole performance story and exactly wrong for one
+stored while it was not on the ground - a helicopter somebody left hovering being the usual case.
+`Placement.groundCorrect` deliberately exempts aircraft from being pulled down, because a
+helicopter on a rooftop helipad is sixty metres above "the ground" and entirely where it should be,
+so the freeze is what changes rather than the position. Above the tolerance the vehicle falls,
+lands or crashes exactly as it would with no persistence resource running.
+
+Boats are exempt: the ground under a boat is the seabed.
+
 ## Section 7: placement
 
 **Read the header in `config.lua`.** It states the four mechanisms that move a restored vehicle

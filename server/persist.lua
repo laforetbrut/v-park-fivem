@@ -968,7 +968,10 @@ local function sweep()
                         list = {}
                         perClient[best] = list
                     end
-                    list[#list + 1] = { id, record.body_health }
+                    -- The reference the client's drift guards measure against: what the health
+                    -- SETTLED at after the restore, not what is stored. See `restoredHealth` in
+                    -- Store.liveFields for why those are different on purpose.
+                    list[#list + 1] = { id, entry.restoredHealth or record.body_health }
                 end
             end
         end
