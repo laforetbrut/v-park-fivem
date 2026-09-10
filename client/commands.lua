@@ -152,6 +152,52 @@ RegisterNetEvent('vpark:client:where', function(wanted)
     end
 end)
 
+--[[
+    Go there.
+
+    The server asks rather than doing it itself: a ped moved by `SetEntityCoords` from the server
+    arrives, but the position the server holds for that player does not follow - and v-park
+    nominates a client, measures despawn distances and checks reports against exactly that value.
+    See `Actions.teleportTo`.
+
+    The collision wait is what stops the player falling through the map at the far end, which is
+    the ordinary hazard of arriving somewhere that has not streamed in yet.
+]]
+RegisterNetEvent('vpark:client:teleport', function(target)
+    if type(target) ~= 'table' then return end
+
+    local x = tonumber(target.x)
+    local y = tonumber(target.y)
+    local z = tonumber(target.z)
+    if not x or not y or not z then return end
+
+    CreateThread(function()
+        local ped = PlayerPedId()
+
+        DoScreenFadeOut(200)
+        local fading = GetGameTimer() + 2000
+        while not IsScreenFadedOut() and GetGameTimer() < fading do Wait(0) end
+
+        SetEntityCoordsNoOffset(ped, x, y, z, false, false, false)
+
+        if tonumber(target.heading) then
+            SetEntityHeading(ped, tonumber(target.heading) % 360.0)
+        end
+
+        -- Hold the ped still until the ground under it exists, or it falls through the world
+        -- while the map streams in.
+        local deadline = GetGameTimer() + 8000
+        FreezeEntityPosition(ped, true)
+
+        while not HasCollisionLoadedAroundEntity(ped) and GetGameTimer() < deadline do
+            Wait(50)
+        end
+
+        FreezeEntityPosition(ped, false)
+        DoScreenFadeIn(400)
+    end)
+end)
+
 RegisterNetEvent('vpark:client:probe', function(modelName)
     local ped = PlayerPedId()
     local position = GetEntityCoords(ped)

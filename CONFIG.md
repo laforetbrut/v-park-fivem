@@ -220,6 +220,18 @@ centimetres, a tow is the length of a street.
 Only read from a vehicle that is empty and at rest, so one mid-tow is never written down halfway
 through the journey.
 
+### `Config.Streaming.despawnGrace`
+
+Seconds after a vehicle is created before the streaming pass may collect it again.
+
+Every distance in that pass is measured from a player's position as the server reads it off their
+ped, and that value lags a teleport. For that moment the player still reads as being where they
+came from, so a vehicle created for them on arrival is judged out of range and deleted - which is
+the "it appears, then vanishes when I reach for the door" report.
+
+No legitimate case wants a vehicle created and deleted inside the same few seconds. That pattern is
+churn whatever produced it, and this is the floor under it.
+
 ### `Config.Placement.airborneTolerance`
 
 Metres above whatever is beneath it before a restored vehicle is handed back to physics instead of

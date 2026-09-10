@@ -183,13 +183,42 @@ function Actions.teleportTo(src, reference)
     local offsetX = math.cos(heading) * 2.5
     local offsetY = math.sin(heading) * 2.5
 
-    SetEntityCoords(ped, record.pos_x + offsetX, record.pos_y + offsetY, record.pos_z + 0.5,
-        false, false, false, false)
+    --[[
+        ================================================================================================
+        THE CLIENT MOVES ITS OWN PED. THE SERVER ASKING DIRECTLY IS THE BUG.
+        ================================================================================================
 
-    -- The vehicle is almost certainly not in the world yet: the player has just arrived from
-    -- somewhere else and the streaming pass has not run. Creating it immediately means it is
-    -- already there when their screen fades in.
+        This called `SetEntityCoords` on the ped from the server. The player does arrive - which is
+        why this looked like it worked - but the position the SERVER holds for them is not updated
+        by it, and every decision v-park makes afterwards is measured from that value:
+
+          `nominate`      picks the client nearest the vehicle, and finds nobody near it.
+          the despawn pass measures every distance from it, judges the vehicle out of range, and
+                          collects it.
+          `playerIsNear`  refuses the reports that would have fixed any of the above.
+
+        Which is the report, and the shape of it is the giveaway: "le bug est present seulement si
+        on ce tp via le vparkadmin". Every other way of arriving somewhere is the client moving its
+        own ped, and the server learns the new position from the normal replication that follows.
+
+        So the client is asked to do it. It moves its own ped, waits for the collision under it, and
+        the server learns where they are the same way it learns where every other player is.
+
+        The vehicle is created after a short pause rather than immediately, for the same reason:
+        creating it needs a client near it to nominate, and that is not true until the arrival has
+        been replicated.
+    ]]
+    TriggerClientEvent('vpark:client:teleport', src, {
+        x = record.pos_x + offsetX,
+        y = record.pos_y + offsetY,
+        z = record.pos_z + 0.5,
+        heading = (record.rot_z or 0.0) + 180.0,
+    })
+
     Database.thread(function()
+        -- Long enough for the arrival to have reached the server, short enough that the vehicle
+        -- is there as the screen fades in.
+        Wait(600)
         ensureLive(record, 5000)
     end)
 

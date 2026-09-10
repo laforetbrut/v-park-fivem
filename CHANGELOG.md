@@ -7,7 +7,7 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased]
+## [1.1.0] - 2026-09-10
 
 **Three players testing at once found four bugs that a single player cannot reach, and a fifth
 that has been deleting data since the guards were written.**
@@ -221,6 +221,17 @@ that has been deleting data since the guards were written.**
   after the deformation. The reference both guards measure against is what the health settled at
   after the restore, reported by the placing client and sent to whichever client the sweep asks.
 
+- **The admin panel's teleport made the vehicle vanish as you reached for the door.** It moved
+  the player's ped with `SetEntityCoords` from the server. The player does arrive, which is why it
+  looked like it worked, and the position the SERVER holds for them is not updated by it - so
+  `nominate` found nobody near the vehicle, the despawn pass measured every distance from a stale
+  point and collected it, and `playerIsNear` refused the reports that would have corrected any of
+  it. The shape of the report was the giveaway: "le bug est present seulement si on ce tp via le
+  vparkadmin", because every other way of arriving somewhere is the client moving its own ped.
+
+  The client is asked to move it now, fades the screen, and holds the ped still until the collision
+  under it exists.
+
 - **The last `GetNetworkObject` warnings.** Two one-shot paths in `client/track.lua` still asked
   the object manager directly; both resolve through the entity's state bag now.
 
@@ -247,7 +258,7 @@ that has been deleting data since the guards were written.**
 
 ---
 
-## [Non publié]
+## [1.1.0] - 2026-09-10 (français)
 
 **Trois joueurs qui testent en même temps ont trouvé quatre bugs qu'un joueur seul ne peut pas
 atteindre, et un cinquième qui supprimait des données depuis que les garde-fous ont été écrits.**
@@ -391,6 +402,11 @@ atteindre, et un cinquième qui supprimait des données depuis que les garde-fou
   la version précédente : remonter la santé de carrosserie LISSE la tôle, ce que
   `shared/schema.lua` dit depuis le début. La dérive est maintenant corrigée à la sortie, en
   retenant le groupe santé tant que le véhicule est à la santé où la restauration l'a laissé.
+
+- **Le téléport du panneau admin faisait disparaître le véhicule au moment d'ouvrir la portière.**
+  Il déplaçait le ped depuis le serveur, et la position que le serveur garde du joueur ne suit pas :
+  la nomination ne trouvait personne près du véhicule, le balayage de suppression mesurait depuis un
+  point périmé et le ramassait. C'est le client qui déplace son propre ped maintenant.
 
 - **Les derniers avertissements `GetNetworkObject`**, et **le panneau qui laissait croire qu'un
   véhicule était dans un garage** alors que c'est son dernier garage connu.
