@@ -160,11 +160,19 @@ that has been deleting data since the guards were written.**
   pushing it out of a doorway. Every one of those is deliberate and every one was undone at the
   next restart.
 
-  A distance tells them apart. `Config.Streaming.movedThreshold` (3 m) is far above the roll and
-  far below the tow, and the pose is only read from a vehicle that is empty and at rest, so one
-  mid-tow is not written down halfway through the journey. Checked on the reconcile sweep as well
-  as on despawn, because a vehicle towed twenty metres and left there never despawns before the
-  nightly restart.
+  A distance tells them apart, and `Config.Streaming.movedThreshold` is it: 10 m, far above what a
+  roll produces and below what a tow does. Reported only from a vehicle that is empty and has
+  stopped, so one mid-tow is never written down at a point on the journey.
+
+  THE READING COMES FROM THE CLIENT. The first attempt read the position on the server, which is
+  the one place it cannot be read: a server-side entity's position is maintained by its network
+  owner, so once nobody is simulating the vehicle the value comes back as the position the server
+  created it at. The note over `poseIfFresh` has said so since 1.0.15, which is why the parked
+  report has always come from a client, and the first attempt failed the retest for exactly that
+  reason. The client reports where it is standing, the server compares that against what it has
+  stored, applies the threshold, and checks that the player sending it is actually standing near
+  the place they are describing - so the worst an edited client can do is move a car it is next to,
+  to where it is standing.
 
 - **`/vparkwhere` answered nothing while standing in a car park full of vehicles.** It compares
   where a vehicle is against where the database says it should be, and it could only do that for
@@ -181,6 +189,24 @@ that has been deleting data since the guards were written.**
   what changes rather than the position: above `Config.Placement.airborneTolerance` (5 m) the
   vehicle gets its physics back and falls, lands or crashes as it would with no persistence
   resource running. Boats are exempt, because the ground under a boat is the seabed.
+
+  THE PROBE IS ASKED AGAIN UNTIL IT ANSWERS. A vehicle placed at the far edge of the streaming
+  radius is placed over a map the client has not loaded, so `GetGroundZFor_3dCoord` answers nothing
+  and the check cannot run - and asking once left the helicopter hanging until a player reached the
+  wake radius: "il reste bloquer dans le ciel jusqu'a temps qu'on s'en approche de tres pres". The
+  tick asks again for as long as the answer is unknown, on every client rather than only the one
+  that placed it, because freezing is a per-client flag and a frozen copy ignores the position
+  updates the owner is sending.
+
+- **A vehicle appeared, then vanished when you tried to get into it.** Teleport to one from the
+  admin panel, watch it appear, reach for the door, and it is gone until you teleport again.
+
+  Every distance in the despawn pass is measured from a player's position as the server reads it
+  off their ped, and after a teleport that value takes a moment to catch up. For that moment the
+  player still reads as being where they came from, so a vehicle created for them on arrival is
+  judged out of range and collected. `Config.Streaming.despawnGrace` (10 s) is the floor under it:
+  no legitimate case wants a vehicle created and deleted inside the same few seconds, and that
+  pattern is churn whatever produced it.
 
 - **A restored vehicle's dents came back shallower than they were stored.** Introduced by the
   previous release's fix for body health drifting downwards, which re-asserted the stored health
@@ -334,9 +360,15 @@ atteindre, et un cinquième qui supprimait des données depuis que les garde-fou
   La règle partout ailleurs est que seule une personne qui CONDUIT un véhicule peut changer où il
   est garé, et cette règle existe pour une bonne raison. Elle a tort sur la dépanneuse, le
   cargobob, le chariot élévateur, une autre voiture qui pousse, et un joueur qui dégage un véhicule
-  d'une porte. Une distance les distingue : `Config.Streaming.movedThreshold` (3 m) est très
-  au-dessus du roulement et très en dessous du remorquage, et la pose n'est lue que d'un véhicule
-  vide et à l'arrêt.
+  d'une porte. Une distance les distingue : `Config.Streaming.movedThreshold`, 10 m.
+
+  LA LECTURE VIENT DU CLIENT. La première tentative lisait la position sur le serveur, le seul
+  endroit où elle ne peut pas être lue : la position d'une entité serveur est maintenue par son
+  propriétaire réseau, donc dès que personne ne la simule, la valeur revient à celle où le serveur
+  l'a créée. C'est pour ça que le rapport de stationnement a toujours été envoyé par un client, et
+  c'est exactement pourquoi la première tentative a échoué au retest. Le client rapporte où le
+  véhicule est posé, le serveur compare à ce qu'il a stocké, applique le seuil, et vérifie que le
+  joueur qui envoie est bien à l'endroit qu'il décrit.
 
 - **`/vparkwhere` ne répondait rien** au milieu d'un parking plein de véhicules : il ne pouvait
   répondre que pour ceux que le client demandeur avait placés lui-même. Le serveur envoie
@@ -344,7 +376,16 @@ atteindre, et un cinquième qui supprimait des données depuis que les garde-fou
 
 - **Un hélicoptère laissé en vol stationnaire revenait gelé en plein ciel.** C'est le gel qui
   change et pas la position : au-dessus de `Config.Placement.airborneTolerance` (5 m), le véhicule
-  récupère sa physique et retombe comme il le ferait sans ressource de persistance.
+  récupère sa physique et retombe comme il le ferait sans ressource de persistance. La sonde de sol
+  est redemandée tant qu'elle ne répond pas, sur tous les clients : à 250 m la carte sous
+  l'hélicoptère n'est pas chargée, donc une seule question le laissait accroché au ciel « jusqu'à
+  temps qu'on s'en approche de très près ».
+
+- **Un véhicule apparaissait puis disparaissait quand on essayait de monter dedans.** Toutes les
+  distances du balayage de suppression sont mesurées depuis la position du ped d'un joueur lue sur
+  le serveur, et après un téléport cette valeur met un instant à suivre. `despawnGrace` (10 s) est
+  le plancher : aucun cas légitime ne veut qu'un véhicule soit créé puis supprimé dans les mêmes
+  secondes.
 
 - **Les bosses d'un véhicule restauré revenaient moins marquées.** C'est moi qui l'ai introduit à
   la version précédente : remonter la santé de carrosserie LISSE la tôle, ce que

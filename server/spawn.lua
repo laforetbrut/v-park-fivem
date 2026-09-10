@@ -382,6 +382,27 @@ end
 
 Spawn.poseIfMoved = poseIfMoved
 
+--[[
+    Is this player standing near a POSITION, as read on the server?
+
+    The counterpart to `playerIsNear`, which measures to an entity. A resting report describes a
+    place rather than a thing, and the only way to bound what a modified client can do with one is
+    to require that the player is actually there - which is a fact the server reads off their ped
+    and a client cannot dress up.
+]]
+function Spawn.playerIsNearPosition(src, position, radius)
+    if not position then return false end
+
+    local ped = GetPlayerPed(src)
+    if not ped or ped == 0 then return false end
+
+    local where = safeCoords(ped)
+    if not where then return false end
+
+    local dx, dy = where.x - position.x, where.y - position.y
+    return (dx * dx + dy * dy) <= (radius * radius)
+end
+
 -- Where a player's ped is, best effort. Used by `/vparkwhere` to send only the stored poses
 -- that are anywhere near them rather than the whole live set.
 function Spawn.playerPosition(src)
@@ -1277,6 +1298,31 @@ local function pass()
                     distance says.
                 ]]
                 if entry.occupant and Bridge.playerName(entry.occupant) then
+                    goto nextDespawn
+                end
+
+                --[[
+                    ================================================================================
+                    AND NOT ONE THAT WAS CREATED A MOMENT AGO.
+                    ================================================================================
+
+                    A player's position is read on the server from their ped, and after a teleport
+                    that value takes a moment to catch up. Every distance in this loop is measured
+                    against it, so for that moment a player who has just arrived somewhere reads as
+                    still being where they came from - and a vehicle created for them on arrival is
+                    immediately judged out of range and collected.
+
+                    Which is the report: teleport to a vehicle from the admin panel, watch it
+                    appear, try to get in, and it vanishes until you teleport to it again.
+
+                    A vehicle created seconds ago is never out of range. Nothing else in this pass
+                    needs to know why, and no legitimate case wants a vehicle created and deleted
+                    inside the same few seconds - that pattern is churn whatever produced it.
+                ]]
+                local grace = tonumber(streaming().despawnGrace) or 10
+
+                if grace > 0 and entry.placedAt
+                    and (Park.ticks() - entry.placedAt) < (grace * 1000) then
                     goto nextDespawn
                 end
 

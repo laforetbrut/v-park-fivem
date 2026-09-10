@@ -99,6 +99,16 @@ local foreignDriven = {}
 -- which is what the tracked pass already pays for the same reason.
 local foreignHealth = {}
 
+--[[
+    id -> true once the ground probe under this vehicle has answered.
+
+    Freezing is a PER-CLIENT flag, so a helicopter dropped back into physics by the client that
+    placed it stays frozen on every other machine - and a frozen copy ignores the position updates
+    the owner is sending, so those players watch it hang in the sky while it is really on the
+    ground. The same probe therefore runs here, once per vehicle, until it answers.
+]]
+local foreignGround = {}
+
 local function forgetForeign(id)
     if foreign[id] == nil then return end
     foreign[id] = nil
@@ -197,11 +207,13 @@ local function mirrorPass(playerPosition)
             forgetForeign(id)
             foreignDriven[id] = nil
             foreignHealth[id] = nil
+            foreignGround[id] = nil
         elseif tracked[id] then
             -- This client placed it after all. Its own record is the authority.
             forgetForeign(id)
             foreignDriven[id] = nil
             foreignHealth[id] = nil
+            foreignGround[id] = nil
         else
             local distance = #(GetEntityCoords(entity) - playerPosition)
             if distance < nearest then nearest = distance end
@@ -222,6 +234,16 @@ local function mirrorPass(playerPosition)
             elseif math.abs(health - foreignHealth[id]) >= 1.0 then
                 foreignHealth[id] = health
                 Stream.dirty(id)
+            end
+
+            -- Frozen in mid-air on this client. See `foreignGround`.
+            if not foreignGround[id] and IsEntityPositionFrozen(entity) then
+                local up = Placement.airborne(entity)
+
+                if up ~= nil then
+                    foreignGround[id] = true
+                    if up then ensureAwake(entity) end
+                end
             end
 
             if distance < wakeRadius then
@@ -510,6 +532,11 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
                 netId = netId,
                 model = GetEntityModel(entity),
                 frozen = result.frozen,
+
+                -- The ground probe could not answer during the placement, so the tick asks
+                -- again. See `groundUnknown` in `Placement.place`.
+                groundUnknown = result.groundUnknown == true,
+
                 position = result.position,
 
                 -- What the DATABASE asked for, kept alongside where the placement actually
@@ -849,6 +876,33 @@ CreateThread(function()
                     elseif math.abs(health - record.seenHealth) >= 1.0 then
                         record.seenHealth = health
                         Stream.dirty(id)
+                    end
+
+                    --[[
+                        THE GROUND PROBE, ASKED AGAIN UNTIL IT ANSWERS.
+
+                        A vehicle placed at the far edge of the streaming radius is placed over a
+                        map this client has not loaded, so `GetGroundZFor_3dCoord` answers nothing
+                        and the airborne check at placement time cannot run. A helicopter left
+                        hovering then stayed frozen in the sky until a player walked into the wake
+                        radius, which is exactly what was reported: "il reste bloquer dans le ciel
+                        jusqu'a temps qu'on s'en approche de tres pres".
+
+                        One probe per tick per vehicle, and only while the answer is unknown -
+                        which stops being true the first time the map underneath exists.
+                    ]]
+                    if record.groundUnknown and record.frozen then
+                        local airborne = Placement.airborne(record.entity)
+
+                        if airborne ~= nil then
+                            record.groundUnknown = false
+
+                            if airborne and ensureAwake(record.entity) then
+                                Park.debug('%s was frozen in mid-air - handing it back to physics',
+                                    tostring(id))
+                                record.frozen = false
+                            end
+                        end
                     end
 
                     if shouldWake(record, playerPosition) then
@@ -1415,6 +1469,18 @@ local function foreignSnapshot(id, reference)
     local position = moved and GetEntityCoords(entity) or nil
     local rotation = moved and GetEntityRotation(entity, 2) or nil
 
+    -- Where it is standing while nobody is driving it. Same rule and same reason as the one in
+    -- `Stream.snapshot`: this is the client a tow truck's driver is on far more often than the
+    -- one that placed the vehicle.
+    local resting, restingRotation
+
+    if not moved
+        and IsVehicleSeatFree(entity, -1)
+        and GetEntitySpeed(entity) < 0.5 then
+        resting = GetEntityCoords(entity)
+        restingRotation = GetEntityRotation(entity, 2)
+    end
+
     return {
         id = id,
         properties = properties,
@@ -1424,6 +1490,11 @@ local function foreignSnapshot(id, reference)
             { x = Park.coord(position.x), y = Park.coord(position.y), z = Park.coord(position.z) } or nil,
         rotation = rotation and
             { x = Park.angle(rotation.x), y = Park.angle(rotation.y), z = Park.angle(rotation.z) } or nil,
+        resting = resting and
+            { x = Park.coord(resting.x), y = Park.coord(resting.y), z = Park.coord(resting.z) } or nil,
+        restingRotation = restingRotation and
+            { x = Park.angle(restingRotation.x), y = Park.angle(restingRotation.y),
+              z = Park.angle(restingRotation.z) } or nil,
         interior = GetInteriorFromEntity(entity),
         room = GetRoomKeyFromEntity(entity),
         vehicleType = GetVehicleType and GetVehicleType(entity) or nil,
@@ -1526,6 +1597,38 @@ function Stream.snapshot(id, reference)
         all change without anybody getting in.
     ]]
     local moved = record.driven == true
+
+    --[[
+        ================================================================================================
+        AND WHERE IT IS STANDING, WHEN SOMETHING HAS CLEARLY CARRIED IT SOMEWHERE ELSE.
+        ================================================================================================
+
+        A tow truck moves a vehicle without anybody sitting in it. So does a cargobob, a forklift,
+        another car shoving it, and a player pushing it out of a doorway. All three testers reported
+        the same result: the vehicle goes back where it was picked up at the next restart.
+
+        The first attempt at this read the position on the SERVER, and that is the one read that
+        cannot answer: a server-side entity's position is maintained by its network owner, so once
+        nobody is simulating it the value comes back as the position the server created it at. The
+        note over `poseIfFresh` has said so since 1.0.15, which is why the parked report has always
+        come from the client.
+
+        So it comes from the client too. This is a REPORT, not a decision: the server compares it
+        against what it has stored, applies the threshold, and checks that the player sending it is
+        actually standing near the position they are describing. See `applySnapshot`.
+
+        Only from a vehicle that is empty and has stopped. One mid-tow would otherwise be written
+        down at a point on the journey rather than where it was put down.
+    ]]
+    local resting
+    local restingRotation
+
+    if not moved
+        and IsVehicleSeatFree(entity, -1)
+        and GetEntitySpeed(entity) < 0.5 then
+        resting = position
+        restingRotation = rotation
+    end
 
     --[[
         A GROUP THE RESTORE COULD NOT APPLY IS NOT REPORTED AS TRUTH.
@@ -1666,6 +1769,13 @@ function Stream.snapshot(id, reference)
         statebags = Properties.captureStatebags(entity),
         position = moved and { x = Park.coord(position.x), y = Park.coord(position.y), z = Park.coord(position.z) } or nil,
         rotation = moved and { x = Park.angle(rotation.x), y = Park.angle(rotation.y), z = Park.angle(rotation.z) } or nil,
+
+        -- Where it is standing while nobody is driving it. See the note above.
+        resting = resting and
+            { x = Park.coord(resting.x), y = Park.coord(resting.y), z = Park.coord(resting.z) } or nil,
+        restingRotation = restingRotation and
+            { x = Park.angle(restingRotation.x), y = Park.angle(restingRotation.y),
+              z = Park.angle(restingRotation.z) } or nil,
         interior = GetInteriorFromEntity(entity),
         room = GetRoomKeyFromEntity(entity),
         frozen = record.frozen == true,

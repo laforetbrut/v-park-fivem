@@ -1232,14 +1232,14 @@ function Placement.placeInner(entity, data)
         yet, and guessing in that state is how vehicles end up under it.
     ]]
     local tolerance = tonumber(options().airborneTolerance) or 5.0
+    local airborne = nil
 
     if keepFrozen and tolerance > 0 and not Classes.aquatic[data.class] then
-        local at = GetEntityCoords(entity)
-        local found, groundZ = GetGroundZFor_3dCoord(at.x, at.y, at.z, false)
+        airborne = Placement.airborne(entity, tolerance)
 
-        if found and (at.z - groundZ) > tolerance then
-            Park.debug('%s is %.1f m above the ground - not freezing it there',
-                tostring(data.id), at.z - groundZ)
+        if airborne == true then
+            Park.debug('%s is more than %.1f m above the ground - not freezing it there',
+                tostring(data.id), tolerance)
             keepFrozen = false
         end
     end
@@ -1314,6 +1314,17 @@ function Placement.placeInner(entity, data)
     return {
         ok = true,
         outcome = outcome,
+        --[[
+            `nil` means the ground probe could not answer, which is the common case when the
+            vehicle is placed at the far edge of the streaming radius: the map under it is not
+            loaded on this client yet, so there is nothing to measure against.
+
+            That was the whole of the helicopter report. The probe failed at 250 m, the vehicle
+            stayed frozen, and nothing ever asked again - so it hung in the sky "jusqu'a temps
+            qu'on s'en approche de tres pres", which is where the wake radius finally reached it.
+            The tick asks again for as long as the answer is unknown. See `groundUnknown`.
+        ]]
+        groundUnknown = (airborne == nil),
         frozen = keepFrozen or not collisionLoaded,
         collision = collisionLoaded,
         position = { x = Park.coord(target.x), y = Park.coord(target.y), z = Park.coord(target.z) },
@@ -1328,6 +1339,28 @@ end
     Called when a player gets close and looks at it, opens a door, or shoots it. Separate from
     `place` because it is the cheap common case and must not re-run any of the above.
 ]]
+--[[
+    Is this vehicle more than `tolerance` metres above whatever is beneath it?
+
+    `true`, `false`, or `nil` when the probe could not answer at all - which is not a detail. A
+    failed probe usually means the map under the vehicle is not streamed in on this client yet,
+    and treating that as "it is on the ground" is how a helicopter ends up frozen in the sky at
+    the edge of the streaming radius with nothing left to ask the question again.
+]]
+function Placement.airborne(entity, tolerance)
+    if not DoesEntityExist(entity) then return nil end
+
+    tolerance = tonumber(tolerance) or tonumber(options().airborneTolerance) or 5.0
+    if tolerance <= 0 then return false end
+
+    local at = GetEntityCoords(entity)
+    local found, groundZ = GetGroundZFor_3dCoord(at.x, at.y, at.z, false)
+
+    if not found then return nil end
+
+    return (at.z - groundZ) > tolerance
+end
+
 function Placement.wake(entity)
     if not DoesEntityExist(entity) then return false end
 

@@ -8,6 +8,34 @@ out of it.
 
 ---
 
+## [2026-09-11 04:15] - Reading a value from the one place it cannot be read
+
+**Context:** a tow truck moves a vehicle, puts it down, and the next restart returns it to where it
+was picked up. Reported by all three testers. The fix compared the entity's position, read on the
+SERVER, against what was stored.
+
+**Error:** it failed the retest with the same words as the original report: "ca ne fonctionne pas
+le vehicule deplacee revient toujours a ce place".
+
+**Root cause:** a server-side entity's position is maintained by its network owner. Once nobody is
+simulating the vehicle, the value the server reads back is the position it created the entity at -
+which is exactly what `poseIfFresh` in the same file has documented since 1.0.15, and exactly why
+the parked report has always been sent by a client. I wrote a new reader of that value without
+reading the note attached to the existing one, three hundred lines above.
+
+**Fix:** the client reports where the vehicle is standing, the server decides. The server compares
+the report against what it has stored, applies the threshold, and requires the reporting player to
+be standing near the place they describe - a fact read off their own ped, which a modified client
+cannot dress up.
+
+**Prevention:** before adding a second reader of a value, read what the first one says about it.
+When a codebase has gone to the trouble of routing something through the client, the reason is
+usually written down next to the thing it avoids. And a fix that cannot be exercised by the
+integration suite has not been tested until somebody plays it - this one passed 127 checks and did
+nothing at all.
+
+---
+
 ## [2026-09-11 02:30] - Fixing a number by writing it back onto the thing it describes
 
 **Context:** body health drifted downwards on every restart, because applying a car's own stored

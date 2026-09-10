@@ -585,8 +585,11 @@ end
                   when telling that client to forget the vehicle.
     placedAt      When it was created. Diagnostics only.
     spawnX        Where the server created it, which is the value a stale server-side read
-    spawnY        returns - so it is what makes a stale read detectable. Written once by
-    spawnZ        `Spawn.create` and read only by `poseIfFresh`. Absent on an adopted vehicle,
+    spawnY        returns - so it is what makes a stale read detectable. Written by
+    spawnZ        `Spawn.create`, and again whenever a vehicle is recorded as having been moved
+                  without being driven, because otherwise `poseIfFresh` keeps measuring against
+                  the original spot and every later sweep rewrites the same row. Read only by
+                  `poseIfFresh`. Absent on an adopted vehicle,
                   because the server did not place that one.
     adopted       True when the vehicle already existed and we took it over, rather than having
                   created it. Distinguishes the two paths in the panel and the logs.

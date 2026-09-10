@@ -1455,8 +1455,28 @@ Config.Streaming = {
 
         Only ever read when the vehicle is at REST and empty, so a vehicle mid-tow is not written
         down halfway through the journey.
+
+        TEN METRES RATHER THAN THREE, at a tester's request and for a good reason: "si une
+        depanneuse vient elle la bougera forcement de plus de 10m". The cost of being too generous
+        is a vehicle that was genuinely shoved a short distance going back where it was, which is
+        the old behaviour. The cost of being too tight is a parked car that creeps, which is a
+        complaint that builds rather than appears.
     ]]
-    movedThreshold = 3.0,
+    movedThreshold = 10.0,
+
+    --[[
+        Seconds after a vehicle is created before the pass is allowed to collect it again.
+
+        A player's position is read on the server from their ped, and after a teleport that value
+        takes a moment to catch up - so a player who has just arrived somewhere still reads as
+        being where they came from, and a vehicle created for them on arrival is judged out of
+        range and deleted. Teleport to a vehicle from the admin panel, watch it appear, try to get
+        in, and it vanishes until you teleport to it again.
+
+        No legitimate case wants a vehicle created and deleted within the same few seconds. That
+        pattern is churn whatever produced it, and this is the floor under it.
+    ]]
+    despawnGrace = 10,
 
     -- Metres. A persisted vehicle within this distance of any player is created.
     --

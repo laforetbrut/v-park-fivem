@@ -538,7 +538,7 @@ end
     Everything else leaves it out, and then the position is accepted ONLY for a vehicle the server
     itself believes somebody has driven. See the note over the position below for why that matters.
 ]]
-function Persist.applySnapshot(id, snapshot, proven)
+function Persist.applySnapshot(id, snapshot, proven, src)
     local record = Store.get(id)
     if not record or type(snapshot) ~= 'table' then return false end
 
@@ -635,6 +635,72 @@ function Persist.applySnapshot(id, snapshot, proven)
             patch.rot_x = Park.angle(tonumber(rotation.x) or record.rot_x)
             patch.rot_y = Park.angle(tonumber(rotation.y) or record.rot_y)
             patch.rot_z = Park.angle(tonumber(rotation.z) or record.rot_z)
+        end
+    end
+
+    --[[
+        ================================================================================================
+        SOMETHING CARRIED IT SOMEWHERE ELSE WITHOUT ANYBODY DRIVING IT.
+        ================================================================================================
+
+        A tow truck, a cargobob, a forklift, another car shoving it, a player pushing it out of a
+        doorway. All deliberate, none of them involves sitting in the vehicle, and all of them were
+        undone at the next restart because `mayMove` above is the only door a position had.
+
+        The rule `mayMove` protects is worth keeping: a woken vehicle is simulated, one on a camber
+        rolls, and a stored position should answer "where did somebody leave this". A DISTANCE tells
+        a roll from a tow without needing to know which happened - centimetres against the length of
+        a street - and it is checked here, on the side that decides, against what is stored.
+
+        Two things bound what a modified client can do with this. The reporter has already been
+        proven to be near the ENTITY by the caller, and the position they describe has to be
+        somewhere they are actually standing, which the server reads off their own ped. So the worst
+        available abuse is moving a car you are standing next to, to where you are standing - which
+        is what driving it would achieve anyway, and slower.
+    ]]
+    local resting = snapshot.resting
+
+    if not patch.pos_x and type(resting) == 'table'
+        and type(resting.x) == 'number' and type(resting.y) == 'number'
+        and type(resting.z) == 'number' then
+
+        local threshold = tonumber((Config.Streaming or {}).movedThreshold) or 10.0
+
+        if threshold > 0 then
+            local dx = resting.x - (record.pos_x or 0.0)
+            local dy = resting.y - (record.pos_y or 0.0)
+            local dz = resting.z - (record.pos_z or 0.0)
+
+            if (dx * dx + dy * dy + dz * dz) >= (threshold * threshold) then
+                local here = proven == true or src == nil
+                    or (Spawn.playerIsNearPosition
+                        and Spawn.playerIsNearPosition(src, resting, 60.0) == true)
+
+                if here then
+                    Park.log('%s was moved %.1f m without being driven - writing where it now is',
+                        id, math.sqrt(dx * dx + dy * dy + dz * dz))
+
+                    patch.pos_x = Park.coord(resting.x)
+                    patch.pos_y = Park.coord(resting.y)
+                    patch.pos_z = Park.coord(resting.z)
+
+                    local turn = snapshot.restingRotation
+                    if type(turn) == 'table' then
+                        patch.rot_x = Park.angle(tonumber(turn.x) or record.rot_x)
+                        patch.rot_y = Park.angle(tonumber(turn.y) or record.rot_y)
+                        patch.rot_z = Park.angle(tonumber(turn.z) or record.rot_z)
+                    end
+
+                    --[[
+                        The live entry's spawn position moves with it, or `poseIfFresh` keeps
+                        measuring against where the server created the entity and every later
+                        sweep writes this same row again.
+                    ]]
+                    if live then
+                        live.spawnX, live.spawnY, live.spawnZ = resting.x, resting.y, resting.z
+                    end
+                end
+            end
         end
     end
 
@@ -834,7 +900,7 @@ RegisterNetEvent('vpark:server:changed', function(id, snapshot)
 
     if Spawn.playerIsNear and Spawn.playerIsNear(src, entry.entity, 30.0) == false then return end
 
-    Persist.applySnapshot(id, snapshot)
+    Persist.applySnapshot(id, snapshot, nil, src)
     Persist.touch(id, 'onExit')
 end)
 
@@ -855,7 +921,7 @@ RegisterNetEvent('vpark:server:captured', function(snapshots, token)
             -- Only vehicles this client was actually asked about. Without this check a client
             -- could volunteer a snapshot for any vehicle on the server.
             if request.allowed[snapshot.id] then
-                if Persist.applySnapshot(snapshot.id, snapshot) then
+                if Persist.applySnapshot(snapshot.id, snapshot, nil, src) then
                     changed = changed + 1
                 end
             end
