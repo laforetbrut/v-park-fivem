@@ -1,3 +1,4 @@
+-- Author: vyrriox
 --[[
     server/api.lua
 
@@ -199,6 +200,9 @@ end)
     decided who is allowed.
 ]]
 exports('SetAnchored', function(reference, on)
+    local ok, reason = writesAllowed()
+    if not ok then return refuse(reason) end
+
     if type(reference) ~= 'string' then return false end
     return (Actions.setAnchor(nil, reference, on == true, false))
 end)
@@ -430,6 +434,9 @@ exports('Despawn', function(reference)
 end)
 
 exports('Flush', function()
+    local ok, reason = writesAllowed()
+    if not ok then return refuse(reason) end
+
     Database.thread(function() Persist.flush(true) end)
     return true
 end)
@@ -492,6 +499,9 @@ end)
 -- ---------------------------------------------------------------------------------------
 
 exports('UpdatePlate', function(entity, plate)
+    local ok, reason = writesAllowed()
+    if not ok then return refuse(reason) end
+
     local id = entity and DoesEntityExist(entity) and Entity(entity).state['vpark:id']
     if not id then
         -- Not one of ours. Set it on the entity anyway, which is what the original does.
@@ -505,6 +515,9 @@ exports('UpdatePlate', function(entity, plate)
 end)
 
 exports('DeleteVehicle', function(entity)
+    local ok, reason = writesAllowed()
+    if not ok then return refuse(reason) end
+
     if not entity or not DoesEntityExist(entity) then return false end
 
     local id = Entity(entity).state['vpark:id']

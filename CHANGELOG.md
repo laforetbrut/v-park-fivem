@@ -7,6 +7,66 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.2.0] - 2026-09-12
+
+### Fixed and optimized
+
+- **Reliable saves and quieter tracking.** Version dirty rows so SQL acknowledgments cannot clear
+  newer changes. Serialize concurrent flushes, retain failed batches, release the lock after an
+  exception and use acknowledged writes for normal save triggers.
+- Send one entry event per actual vehicle entry while preserving local unfreezing, late adoption
+  and the normal save sweep. End the fast ownership retry window at its configured duration.
+- Reuse guarded position capture on shutdown, reject invalid coordinates and continue past a
+  disappearing entity. Shutdown dispatch does not count as an acknowledged save.
+- Include plate/model/class/owner-label/source metadata in dirty detection.
+- Reconcile character switches, QBCore unload, pending registrations, temporarily unavailable
+  character data and ownership transfers between restores. Reject another player's supplied source.
+- Update garage location and stored state in one framework statement; propagate reported SQL
+  failures and retain the vehicle when an explicit garage/impound return fails. Use SQL NULL
+  directly for ox_core's out-of-garage state.
+- Apply the configured API write restrictions to anchor, flush and legacy plate/delete exports.
+
+### Validation and upgrade
+
+21 static check groups, 48 mocked Lua behavioral tests and NUI JavaScript syntax checks pass.
+The first seven new regressions reproduced failures on published 1.1.3 before their fixes.
+The polling scenario counts 1 entry event instead of 100 across 100 polls; no live CPU benchmark
+is claimed. The suite retains all 30 existing extras, neons, tyres, schema and Quasar tests.
+
+Keep the existing config; no new defaults, dependency or SQL migration. The extras/neon restoration
+and placement code is unchanged from 1.1.3. Upgrading from 1.1.1 also includes the prior 1.1.2/1.1.3
+fixes below. Actual custom models, multiplayer, installed mechanic/garage versions and SQL drivers
+still need validation on a FiveM server. Shutdown writes remain best effort if the process or
+SQL service stops abruptly. Garage/framework and v-park deletion writes are not one transaction.
+
+### Français
+
+- **Sauvegardes fiabilisées et moins d'événements réseau.** Une confirmation SQL n'efface plus une
+  modification arrivée pendant l'écriture. Les écritures simultanées sont sérialisées, les échecs
+  restent en attente et les exceptions libèrent le verrou. Les sauvegardes normales attendent SQL.
+- Un événement d'entrée par entrée réelle, avec maintien du déblocage local, de l'enregistrement
+  tardif et des captures périodiques. La fenêtre de tentatives rapides expire correctement.
+- Contrôles de position du despawn réutilisés à l'arrêt, coordonnées invalides refusées et entités
+  disparues isolées. La transmission d'une requête à l'arrêt ne vaut pas confirmation SQL.
+- Plaque, modèle, classe, nom du propriétaire et source inclus dans la détection des modifications.
+- Suivi des changements de personnage, déchargements QBCore, enregistrements en attente, absence
+  temporaire de données du personnage et ventes entre restaurations. Source réseau contrôlée.
+- Garage et état de rangement modifiés ensemble ; erreurs SQL remontées et véhicule conservé
+  lorsqu'un retour explicite ou une mise en fourrière échoue. État extérieur ox_core écrit en NULL.
+- Restrictions d'écriture de l'API appliquées également à l'ancre, au flush et aux exports historiques
+  de plaque et de suppression.
+
+Les 21 groupes de contrôles, 48 tests Lua simulés et la syntaxe JavaScript passent. Les sept premiers
+nouveaux tests reproduisaient les défauts de la 1.1.3. Le scénario de conduite passe de 100 événements
+à 1 pour 100 passages, sans prétendre mesurer le CPU en jeu. Les 30 tests existants sont conservés.
+Garder la configuration ; aucune nouvelle dépendance, valeur par défaut ou migration SQL.
+Les extras/néons et le placement restent identiques à la 1.1.3. Depuis la 1.1.1, les correctifs
+1.1.2/1.1.3 sont également inclus. Le serveur réel, ses modèles et ses pilotes SQL restent à valider.
+Un arrêt brutal peut interrompre les écritures. Le retour framework et la suppression v-park ne
+forment pas une transaction unique.
+
+---
+
 ## [1.1.3] - 2026-09-12
 
 ### Fixed

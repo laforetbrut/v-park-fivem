@@ -52,6 +52,7 @@ local count = 0
 -- ids whose row differs from what is in the database. Flushed by `server/persist.lua`.
 local dirty = {}
 local dirtyCount = 0
+local dirtyRevision = 0
 
 -- id -> { entity, netId, placedAt, placer }. Only the vehicles currently in the world.
 local live = {}
@@ -279,6 +280,8 @@ end
 ]]
 function Store.hashOf(record)
     return Park.hash({
+        plate = record.plate, model = record.model, modelName = record.model_name,
+        class = record.class, ownerName = record.owner_name, source = record.source,
         p = { record.pos_x, record.pos_y, record.pos_z },
         r = { record.rot_x, record.rot_y, record.rot_z },
         b = record.bucket,
@@ -445,17 +448,18 @@ end
 
 function Store.markDirty(id)
     if not vehicles[id] then return end
-    if dirty[id] then return end
-    dirty[id] = true
-    dirtyCount = dirtyCount + 1
+    dirtyRevision = dirtyRevision + 1
+    if not dirty[id] then dirtyCount = dirtyCount + 1 end
+    -- A write acknowledgment clears only the revision that it actually serialized.
+    dirty[id] = dirtyRevision
 end
 
 function Store.dirty()
     return dirty, dirtyCount
 end
 
-function Store.clearDirty(id)
-    if not dirty[id] then return end
+function Store.clearDirty(id, revision)
+    if not dirty[id] or (revision ~= nil and dirty[id] ~= revision) then return end
     dirty[id] = nil
     dirtyCount = dirtyCount - 1
 end

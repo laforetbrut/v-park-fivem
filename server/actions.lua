@@ -1,3 +1,4 @@
+-- Author: vyrriox
 --[[
     server/actions.lua
 
@@ -580,8 +581,10 @@ function Actions.delete(src, reference)
     local plate = record.plate
     local model = record.model_name
 
-    local ok = Lifecycle.remove(record.id, 'delete', Bridge.characterId(src) or 'console', 'admin')
-    if not ok then return false, 'error.unknown_vehicle' end
+    local ok, reason = Lifecycle.remove(record.id, 'delete', Bridge.characterId(src) or 'console', 'admin')
+    if not ok then
+        return false, reason == 'garage_failed' and 'error.garage_failed' or 'error.unknown_vehicle'
+    end
 
     Database.audit('delete', Bridge.characterId(src), Bridge.name(src), record.id, { plate = plate })
     Webhook.admin('delete', src, plate or record.id, { model = model })
@@ -596,7 +599,9 @@ function Actions.impound(src, reference)
     local ok, outcome = Lifecycle.remove(record.id, 'impound',
         Bridge.characterId(src) or 'console', 'admin_impound')
 
-    if not ok then return false, 'error.unknown_vehicle' end
+    if not ok then
+        return false, outcome == 'garage_failed' and 'error.garage_failed' or 'error.unknown_vehicle'
+    end
 
     Webhook.admin('impound', src, record.plate or record.id, { outcome = outcome })
 
@@ -637,16 +642,7 @@ function Actions.toGarage(src, reference, garageId)
 
     garageId = Park.trim(tostring(garageId or ''))
 
-    -- Write the garage name where the framework keeps it, then mark it stored. Two columns on
-    -- qb-core and ESX, one on ox_core where the column IS the garage name.
-    if garageId ~= '' and schema.garageColumn then
-        Database.execute(
-            ('UPDATE `%s` SET `%s` = ? WHERE `%s` = ?')
-                :format(schema.table, schema.garageColumn, schema.plate),
-            { garageId, record.plate }
-        )
-    end
-
+    -- The bridge writes the garage and stored state together, using the framework schema.
     if not Bridge.returnToGarage(record.plate, garageId ~= '' and garageId or nil) then
         return false, 'error.garage_failed'
     end

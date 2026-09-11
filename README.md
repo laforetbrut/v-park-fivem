@@ -1,6 +1,6 @@
 # v-park
 
-Current release: **1.1.3**. Author: **vyrriox**.
+Current release: **1.2.0**. Author: **vyrriox**.
 
 Vehicle persistence for FiveM, built for QBCore and running on qbx_core, ESX and ox_core too.
 
@@ -155,6 +155,43 @@ Run `/vparkinfo` to print what was actually detected on **your** server.
 ---
 
 ## Installation
+
+### Upgrading to 1.2.0
+
+Keep your current `config.lua`. No configuration default, SQL schema, tuning field, extra/neon
+restoration code, fuel provider or placement setting changes in this release relative to 1.1.3.
+Replace the resource files from the release archive while it is stopped, then start it again.
+Back up the resource and database before upgrading. Do not run the Advanced Parking importer
+for an ordinary v-park upgrade.
+
+- Dirty saves carry revisions: a change received during an SQL write stays queued, and a failed
+  write can be retried. Normal trigger saves await acknowledgment; shutdown only dispatches writes
+  because FiveM does not permit waiting there. An abrupt process/database stop can still lose a
+  pending write.
+- Shutdown reuses the despawn position checks and isolates unavailable entities. It does not
+  replace a saved position with stale spawn coordinates or placement nudges.
+- An occupied vehicle sends one entry event per entry instead of one every polling pass. Local
+  unfreezing and late registration still run. The initial ownership retry burst now expires.
+- Character changes, QBCore unloads, reused player slots and sales between restores update owner
+  tracking. Keys and notices require the current character to match.
+- Garage location and stored state are updated together. A reported garage SQL failure no longer
+  removes the vehicle through the explicit garage/impound path. This does not make all SQL writes
+  across the framework and v-park tables a single transaction.
+- `SetAnchored`, `Flush`, `UpdatePlate` and `DeleteVehicle` now also respect `Config.Api.allowWrites`
+  and `Config.Api.allowedResources`. Add authorized integration resources to that list if it is used.
+
+From **1.1.1**, this archive also includes the tyre, extra retry/rebuild and neon ownership fixes
+already shipped in **1.1.2/1.1.3**, described below. Those changes have mock regressions but the exact
+jim-mechanic, qb-core and Quasar versions installed on a server must be checked in FiveM. There is
+no new mechanic dependency or undocumented jim-mechanic extra/neon export.
+
+Validation: `python tools/check.py` runs 21 static groups including Lua 5.4 parsing.
+`python tools/check_audit.py` runs 48 behavioral tests, including all 30 existing extras/neon/tyre
+and Quasar regressions. A simulated drive reduced entry events from 100 to 1 over 100 polls;
+this is an event count, not an in-game CPU benchmark. `node --check html/js/app.js` checks NUI syntax.
+No live multiplayer, custom model rendering or database-driver integration test was run here.
+Before wider deployment, check save/return, a mechanic edit, two-client streaming, character switch,
+garage return and restart on the installed server stack.
 
 ### Upgrading to 1.1.3
 
@@ -756,6 +793,46 @@ physique en vingt minutes, et n'est pas simulée du tout.
 qu'on règle `Config.Placement.probe.shrink` sur son propre MLO au lieu de deviner.
 
 ## Installation
+
+### Mise à jour vers 1.2.0
+
+Conserver le `config.lua` actuel. Cette version ne change aucun réglage par défaut, schéma SQL,
+champ de tuning, code de restauration des extras/néons, fournisseur de carburant ou réglage de
+placement par rapport à la 1.1.3. Remplacer les fichiers de la ressource arrêtée avec l'archive,
+puis la démarrer. Sauvegarder la ressource et la base avant la mise à jour. Ne pas lancer l'import
+Advanced Parking pour une mise à jour ordinaire de v-park.
+
+- Les sauvegardes portent une révision : une modification reçue pendant l'écriture SQL reste en
+  attente et une écriture échouée peut être retentée. Les sauvegardes normales attendent la
+  confirmation SQL. L'arrêt transmet les requêtes sans attendre, comme l'impose FiveM : un arrêt
+  brutal du processus ou de la base peut encore interrompre une écriture en attente.
+- L'arrêt reprend les contrôles de position du despawn et isole les entités indisponibles. Une
+  ancienne position de spawn ou un décalage de placement ne remplace pas la position sauvegardée.
+- Un véhicule occupé envoie un événement d'entrée par entrée, au lieu d'un événement à chaque
+  passage de la boucle. Le déblocage local et l'enregistrement tardif restent actifs. La période
+  de tentatives rapides pour reconnaître la propriété expire correctement.
+- Le suivi des propriétaires traite les changements de personnage, déchargements QBCore,
+  réutilisations d'identifiant joueur et ventes entre deux restaurations. Les clés et notifications
+  nécessitent une correspondance avec le personnage actuel.
+- Le garage et l'état de rangement sont modifiés ensemble. Un échec SQL signalé par le garage
+  ne supprime plus le véhicule via le retour explicite ou la fourrière. Cela ne transforme pas
+  toutes les écritures des tables du framework et de v-park en une transaction unique.
+- `SetAnchored`, `Flush`, `UpdatePlate` et `DeleteVehicle` respectent aussi `Config.Api.allowWrites`
+  et `Config.Api.allowedResources`. Ajouter les intégrations autorisées à cette liste si elle est utilisée.
+
+Depuis la **1.1.1**, l'archive inclut également les correctifs pneus, extras et néons déjà publiés
+en **1.1.2/1.1.3**, détaillés ci-dessous. Ils disposent de tests simulés ; les versions exactes de
+jim-mechanic, qb-core et Quasar installées restent à vérifier dans FiveM. Aucune nouvelle dépendance
+mécanique ni aucun export jim-mechanic non documenté pour les extras ou néons n'est ajouté.
+
+Validation : `python tools/check.py` exécute 21 groupes de contrôles dont la syntaxe Lua 5.4.
+`python tools/check_audit.py` exécute 48 tests de comportement, dont les 30 tests existants des
+extras, néons, pneus et garages Quasar. Une conduite simulée passe de 100 événements d'entrée à
+1 pour 100 passages de boucle ; ce chiffre ne mesure pas la charge CPU en jeu.
+`node --check html/js/app.js` vérifie la syntaxe NUI. Aucun test réel multijoueur, de rendu des
+modèles personnalisés ou des pilotes SQL n'a été effectué ici. Avant un déploiement général,
+vérifier sauvegarde/retour, modification chez le mécanicien, streaming avec deux joueurs,
+changement de personnage, retour au garage et redémarrage sur les ressources installées.
 
 ### Mise à jour vers 1.1.3
 

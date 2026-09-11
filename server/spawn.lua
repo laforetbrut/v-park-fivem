@@ -1035,6 +1035,28 @@ end
     walks near it. The distinction matters enough that the two live in different files -
     `server/lifecycle.lua` is the one that can actually remove a vehicle from existence.
 ]]
+-- The same pose rules apply at despawn and shutdown. A fresh server reading alone is not
+-- proof that the vehicle was deliberately moved or that a client's parked pose is obsolete.
+function Spawn.savePosition(id, entry)
+    entry = entry or Store.live(id)
+    local record = Store.get(id)
+    if not entry or not record or not safeExists(entry.entity) then return false end
+    local position, rotation
+    if entry.driven == true and entry.seen == true and not entry.nudged and not entry.parked then
+        position, rotation = poseIfFresh(entry)
+    else
+        position, rotation = poseIfMoved(entry, record)
+    end
+    if not position or not rotation then return false end
+    for _, axis in ipairs({ 'x', 'y', 'z' }) do
+        if not Park.isFinite(position[axis]) or not Park.isFinite(rotation[axis]) then return false end
+    end
+    return Store.update(id, {
+        pos_x=Park.coord(position.x), pos_y=Park.coord(position.y), pos_z=Park.coord(position.z),
+        rot_x=Park.angle(rotation.x), rot_y=Park.angle(rotation.y), rot_z=Park.angle(rotation.z),
+    })
+end
+
 function Spawn.despawn(id, reason)
     local entry = Store.live(id)
     if not entry then return false end
@@ -1075,68 +1097,7 @@ function Spawn.despawn(id, reason)
         can have gone anywhere. Best effort even then, through the safe accessors: an entity
         nobody has in scope may not answer.
     ]]
-    local record = Store.get(id)
-    --[[
-        `driven`: somebody has sat in it since it was restored.
-
-        A vehicle that was merely WOKEN has not been driven, and waking is what happens to
-        every vehicle a player walks past. A woken vehicle is simulated and can roll on a
-        camber, so reading its pose back here would record the roll as the place its owner
-        left it. Only a person driving it can change where it lives.
-
-        `nudged`: it is standing in a spot the search invented rather than the one it belongs
-        in, so reading it back would write that spot down. See the `restored` handler.
-    ]]
-    --[[
-        `parked`: the client that was driving already told us exactly where it left this, in
-        `vpark:server:parked`. That report is better information than anything readable here.
-
-        A server-side entity's position is maintained by its network owner, so once the driver
-        has walked away the value this function would read is stale - and stale at the position
-        the server created the entity with, which is the position from before the drive. Reading
-        it would replace a correct answer with an old one.
-    ]]
-    local couldHaveMoved = entry.driven == true and entry.seen == true
-        and not entry.nudged and not entry.parked
-
-    --[[
-        OR SOMETHING MOVED IT WITHOUT DRIVING IT. See `poseIfMoved`, and the tow truck it is for.
-
-        Checked before the flags above rather than after, because a towed vehicle has none of them
-        set: nobody sat in it, so `driven` is false and `parked` was never reported.
-    ]]
-    if record and not couldHaveMoved and safeExists(entity) then
-        local moved, movedRotation = poseIfMoved(entry, record)
-
-        if moved and movedRotation then
-            Park.debug('%s moved without being driven - writing where it ended up', id)
-            Store.update(id, {
-                pos_x = Park.coord(moved.x),
-                pos_y = Park.coord(moved.y),
-                pos_z = Park.coord(moved.z),
-                rot_x = Park.angle(movedRotation.x),
-                rot_y = Park.angle(movedRotation.y),
-                rot_z = Park.angle(movedRotation.z),
-            })
-        end
-    end
-
-    if record and couldHaveMoved and safeExists(entity) then
-        -- `poseIfFresh` rather than a bare read: see its note. The flags above say who MIGHT
-        -- have moved it; this says whether the number actually moved.
-        local position, rotation = poseIfFresh(entry)
-
-        if position and rotation then
-            Store.update(id, {
-                pos_x = Park.coord(position.x),
-                pos_y = Park.coord(position.y),
-                pos_z = Park.coord(position.z),
-                rot_x = Park.angle(rotation.x),
-                rot_y = Park.angle(rotation.y),
-                rot_z = Park.angle(rotation.z),
-            })
-        end
-    end
+    Spawn.savePosition(id, entry)
 
     if placer then
         pcall(TriggerClientEvent, 'vpark:client:forget', placer, id)

@@ -1,3 +1,4 @@
+-- Author: vyrriox
 --[[
     bridge/server/framework.lua
 
@@ -693,17 +694,21 @@ function Bridge.markOut(plate)
     local normalised = Park.plate(plate)
     if not normalised then return false end
 
-    local value
-    if frameworkKind == 'qb' then value = 0
-    elseif frameworkKind == 'esx' then value = 0
-    elseif frameworkKind == 'ox' then value = nil    -- NULL: not in any garage
-    else return false end
+    local sql, params
+    if frameworkKind == 'ox' then
+        sql = ('UPDATE `%s` SET `%s` = NULL WHERE `%s` = ?')
+            :format(schema.table, schema.storedColumn, schema.plate)
+        params = { normalised }
+    elseif frameworkKind == 'qb' or frameworkKind == 'esx' then
+        sql = ('UPDATE `%s` SET `%s` = ? WHERE `%s` = ?')
+            :format(schema.table, schema.storedColumn, schema.plate)
+        params = { 0, normalised }
+    else
+        return false
+    end
 
-    local sql = ('UPDATE `%s` SET `%s` = ? WHERE `%s` = ?')
-        :format(schema.table, schema.storedColumn, schema.plate)
-
-    Database.execute(sql, { value, normalised })
-    return true
+    local result = Database.execute(sql, params)
+    return result ~= nil and result ~= false
 end
 
 --[[
@@ -727,11 +732,19 @@ function Bridge.returnToGarage(plate, garage)
     elseif frameworkKind == 'ox' then value = garage or 'default'
     else return false end
 
-    local sql = ('UPDATE `%s` SET `%s` = ? WHERE `%s` = ?')
-        :format(schema.table, schema.storedColumn, schema.plate)
+    local assignment = ('`%s` = ?'):format(schema.storedColumn)
+    local params = { value }
+    if type(garage) == 'string' and garage ~= '' and schema.garageColumn
+        and schema.garageColumn ~= schema.storedColumn then
+        assignment = assignment .. (', `%s` = ?'):format(schema.garageColumn)
+        params[#params + 1] = garage
+    end
+    params[#params + 1] = normalised
+    local sql = ('UPDATE `%s` SET %s WHERE `%s` = ?')
+        :format(schema.table, assignment, schema.plate)
 
-    Database.execute(sql, { value, normalised })
-    return true
+    local result = Database.execute(sql, params)
+    return result ~= nil and result ~= false
 end
 
 --[[
@@ -749,9 +762,10 @@ function Bridge.impound(plate)
     if not normalised then return false, 'none' end
 
     if frameworkKind == 'qb' and schema.storedColumn then
-        Database.execute(('UPDATE `%s` SET `%s` = 2 WHERE `%s` = ?')
+        local result = Database.execute(('UPDATE `%s` SET `%s` = 2 WHERE `%s` = ?')
             :format(schema.table, schema.storedColumn, schema.plate), { normalised })
-        return true, 'impound'
+        if result ~= nil and result ~= false then return true, 'impound' end
+        return false, 'none'
     end
 
     if Bridge.returnToGarage(normalised) then

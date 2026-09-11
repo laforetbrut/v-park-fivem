@@ -292,27 +292,12 @@ AddEventHandler('onResourceStop', function(resource)
 
     -- Everything currently in the world gets its position written down. A vehicle that has
     -- been pushed since its last sweep would otherwise come back where it was a minute ago.
+    state.ready = false
     for id, entry in pairs(Store.allLive()) do
-        if entry.entity and DoesEntityExist(entry.entity) then
-            local position = GetEntityCoords(entry.entity)
-            local rotation = GetEntityRotation(entry.entity)
-
-            if position and (position.x ~= 0.0 or position.y ~= 0.0) then
-                Store.update(id, {
-                    pos_x = Park.coord(position.x),
-                    pos_y = Park.coord(position.y),
-                    pos_z = Park.coord(position.z),
-                    rot_x = Park.angle(rotation.x),
-                    rot_y = Park.angle(rotation.y),
-                    rot_z = Park.angle(rotation.z),
-                })
-            end
-        end
+        local ok, err = pcall(Spawn.savePosition, id, entry)
+        if not ok then Park.warn('could not capture shutdown position for %s: %s', id, tostring(err)) end
     end
 
-    -- `flushNow`, not `flush`. The awaiting version yields between batches, and a yield
-    -- inside onResourceStop can simply never resume - the scheduler is not guaranteed to run
-    -- again. See its header.
     local written = Persist.flushNow()
     Park.log('shutting down: %d vehicle(s) handed to the database', written)
 end)

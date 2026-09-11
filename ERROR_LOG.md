@@ -8,6 +8,91 @@ out of it.
 
 ---
 
+## [2026-09-12 00:55] - Acknowledging an older write discarded newer changes
+**Context:** Auditing save triggers and batched persistence for the next release.
+**Error:** A change during SQL execution was cleared by the earlier acknowledgment. Forced flushes
+could overlap, exceptions could leave the flush locked, and unconfirmed dispatch cleared dirty rows.
+**Root cause:** Dirty state was a boolean; normal triggers used the non-awaiting shutdown path.
+**Fix:** Monotonic dirty revisions, revision-specific acknowledgment, serialized flushes, exception
+cleanup, retained failed batches and acknowledged normal triggers. Shutdown only dispatches.
+**Prevention:** Mock changes and record recreation during execution, false/nil results, exceptions
+and concurrent forced flushes. Never equate dispatch with durable storage.
+**Français :** Une ancienne confirmation effaçait des modifications récentes. Les révisions, le
+verrou et les tests de concurrence protègent désormais la file ; l'arrêt reste sans confirmation.
+
+## [2026-09-12 00:55] - Repeated entry processing flooded the save trigger
+**Context:** Measuring the occupied-vehicle polling path.
+**Error:** One drive generated an entry event on every poll and continuously reset its retry window.
+**Root cause:** Polling called onEnter repeatedly; no persistent-id transition was recorded.
+**Fix:** Keep the actual entry time and emit once per entry/id. Continue local unfreezing and
+late tracking updates. The configured short ownership retry burst now expires.
+**Prevention:** Exercise 100 polls, late adoption and late local tracking. Keep local vehicle
+safety outside the network-event deduplication gate.
+**Français :** Chaque passage renvoyait une entrée et réinitialisait la période rapide. Le suivi
+conserve l'entrée réelle et limite les événements, sans supprimer le déblocage local.
+
+## [2026-09-12 00:55] - Shutdown bypassed the trusted-position checks
+**Context:** Comparing resource shutdown with normal despawn.
+**Error:** Raw server coordinates could replace a newer saved pose; one native error aborted the pass.
+**Root cause:** Shutdown duplicated capture logic without stale-spawn and placement protections.
+**Fix:** Share Spawn.savePosition, validate all six coordinates and isolate each entity failure.
+**Prevention:** Cover stale spawn positions, nudges, occupancy, motion, invalid axes and disappearing
+entities. The stop handler must not yield or await.
+**Français :** L'arrêt ignorait les protections de position. Il réutilise désormais le contrôle
+du despawn, valide les coordonnées et poursuit la sauvegarde si une entité disparaît.
+
+## [2026-09-12 00:55] - Character changes retained an obsolete online owner
+**Context:** Auditing framework lifecycle and key delivery.
+**Error:** An old character could remain online on a reused slot; a late registration could survive
+an unload, and an already-owned vehicle did not recognize a sale between restores.
+**Root cause:** The online lookup checked only connection status and registration never cleared
+previous mappings. Restore only upgraded vehicles not already classified as owned.
+**Fix:** Verify current character identity, cancel superseded registrations and QBCore unloads,
+remove previous mappings and reconcile the current framework owner. Keep unresolved mappings
+inert so a temporary framework outage can recover. Network sources override supplied arguments.
+**Prevention:** Test switching, disconnect, unload, late jobs, source spoofing, framework recovery
+and key delivery after a sale. Use the documented framework lifecycle rather than guessing events.
+**Français :** Les anciens personnages restaient parfois en ligne. Les contrôles d'identité,
+l'annulation des enregistrements et la relecture du propriétaire corrigent ce suivi.
+
+## [2026-09-12 00:55] - Garage SQL failures were reported as success
+**Context:** Reviewing return-to-garage and impound paths.
+**Error:** A failed framework write still returned true; the garage and stored state were written
+separately. The ox_core mark-out parameter array contained a nil hole.
+**Root cause:** SQL results were ignored, garage selection lived outside the bridge and NULL was
+represented as a missing positional parameter.
+**Fix:** Propagate nil/false results, combine garage/state in one statement and write SQL NULL
+explicitly. Keep the vehicle on explicit garage/impound failure and count only successful expiry.
+**Prevention:** Exercise all three framework kinds, failure results and retained vehicles. Do not
+claim cross-table atomicity: framework state and v-park deletion remain separate operations.
+**Français :** Les erreurs du garage étaient masquées. Elles remontent maintenant ; le garage et
+l'état sont écrits ensemble et un retour explicite échoué conserve le véhicule.
+
+## [2026-09-12 00:55] - Metadata and compatibility exports bypassed existing controls
+**Context:** Reviewing dirty detection and every exported mutation.
+**Error:** Metadata-only changes did not become dirty, and four exported mutations ignored API
+write settings used by the other exports.
+**Root cause:** Hash input omitted plate/model/class/owner label/source; permission checks were absent.
+**Fix:** Include that metadata and apply writesAllowed to SetAnchored, Flush, UpdatePlate and
+DeleteVehicle. Existing authorizations and defaults are preserved.
+**Prevention:** Test metadata-only edits and disabled, rejected and authorized API callers.
+**Français :** Certaines métadonnées n'étaient pas sauvegardées et quatre exports ignoraient les
+restrictions d'écriture. La détection et les vérifications communes leur sont désormais appliquées.
+
+## [2026-09-12 00:55] - Audit fixtures selected the wrong callback and incomplete tracking tuple
+**Context:** Adding shutdown and late-tracking regression scenarios.
+**Error:** The shutdown test called a garage callback by array index; late tracking returned the
+record without its persistent id. An early finite-value guard also used a potentially sparse array.
+**Root cause:** Fixtures assumed handler order and omitted part of Stream.byEntity's contract.
+**Fix:** Dispatch all stop handlers with complete bridge mocks, return both tracking values and
+check position/rotation by explicit axis names.
+**Prevention:** Model real callback contracts and invalid data; do not infer meaning from handler
+registration order or iterate optional values in a positional array.
+**Français :** Deux simulations utilisaient des contrats incomplets. Elles reproduisent désormais
+les callbacks réels ; les coordonnées sont vérifiées explicitement par axe.
+
+---
+
 ## [2026-09-12 00:19] - Extra repair suppression prevented component reconstruction
 **Context:** Reviewing police lightbars that changed after streaming or respawning.
 **Error:** Extra flags could match while the model component was not rebuilt.

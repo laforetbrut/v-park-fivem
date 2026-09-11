@@ -1,3 +1,4 @@
+-- Author: vyrriox
 --[[
     server/lifecycle.lua
 
@@ -109,11 +110,16 @@ function Lifecycle.remove(id, disposition, actor, reason)
             local ok, how = Bridge.impound(record.plate)
             if ok then
                 outcome = how == 'impound' and 'impounded' or 'returned'
+            elseif Bridge.ownedTable() then
+                return false, 'garage_failed'
             end
         elseif disposition == 'garage'
             or (Config.Garages and Config.Garages.returnToGarageOnRemoval ~= false) then
             if Bridge.returnToGarage(record.plate) then
                 outcome = 'returned'
+            elseif Bridge.ownedTable() and Config.Garages
+                and Config.Garages.returnToGarageOnRemoval then
+                return false, 'garage_failed'
             end
         end
     end
@@ -248,9 +254,10 @@ function Lifecycle.sweepExpiry()
             local age = now - (record.touched_at or now)
 
             if age > hours * 3600 and not protected(record) then
-                Lifecycle.remove(id, disposition, 'system', 'expired')
-                removed = removed + 1
-                stats.expired = stats.expired + 1
+                if Lifecycle.remove(id, disposition, 'system', 'expired') then
+                    removed = removed + 1
+                    stats.expired = stats.expired + 1
+                end
             end
         end
 
@@ -429,9 +436,10 @@ function Lifecycle.sweepSemi()
                 and Park.now() >= record.rental_until then
 
                 if not (rules.protectWhenInUse ~= false and protected(record)) then
-                    Lifecycle.remove(id, rules.onExpiry or 'delete', 'system', 'rental_ended')
-                    removed = removed + 1
-                    stats.semiExpired = stats.semiExpired + 1
+                    if Lifecycle.remove(id, rules.onExpiry or 'delete', 'system', 'rental_ended') then
+                        removed = removed + 1
+                        stats.semiExpired = stats.semiExpired + 1
+                    end
                     goto continue
                 end
             end
@@ -449,9 +457,10 @@ function Lifecycle.sweepSemi()
                         -- not vanish because the officer who signed it out logged off.
                         record.offline_secs = 0
                     else
-                        Lifecycle.remove(id, rules.onExpiry or 'delete', 'system', 'owner_absent')
-                        removed = removed + 1
-                        stats.semiExpired = stats.semiExpired + 1
+                        if Lifecycle.remove(id, rules.onExpiry or 'delete', 'system', 'owner_absent') then
+                            removed = removed + 1
+                            stats.semiExpired = stats.semiExpired + 1
+                        end
                         goto continue
                     end
                 elseif remaining and warnBefore > 0 and remaining <= warnBefore and not record.warned then
@@ -597,7 +606,7 @@ function Lifecycle.evictOldest(owner)
 
     if not oldest then return false end
 
-    Lifecycle.remove(oldest.id, 'garage', 'system', 'evicted')
+    if not Lifecycle.remove(oldest.id, 'garage', 'system', 'evicted') then return false end
     stats.evicted = stats.evicted + 1
 
     if oldest.owner then

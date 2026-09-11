@@ -1,3 +1,4 @@
+-- Author: vyrriox
 --[[
     server/ownership.lua
 
@@ -158,8 +159,7 @@ end
 --[[
     Re-check a restored vehicle's ownership against the framework, once.
 
-    Called from the spawn path. Cheap: one indexed lookup, and only when the vehicle is not
-    already marked as owned.
+    Called from the spawn path. One indexed lookup also detects a sale between restores.
 ]]
 function Ownership.onRestored(record, entity, netId)
     if not record then return end
@@ -168,7 +168,7 @@ function Ownership.onRestored(record, entity, netId)
         local row = Bridge.ownedByPlate(record.plate)
 
         if row then
-            if row.owner and record.owner_type ~= 'owned' then
+            if row.owner and (record.owner_type ~= 'owned' or record.owner ~= row.owner) then
                 Park.debug('%s is now owned by %s in the framework - upgrading its ownership',
                     record.id, tostring(row.owner))
 
@@ -257,6 +257,17 @@ end
 -- rebuilt per query. The semi-persistence sweep asks this once per semi-persistent vehicle
 -- per minute, and a rebuild per question would be a loop over every player each time.
 local online = {}
+local registrations = {}
+
+local function unregister(src)
+    registrations[src] = nil
+    for characterId, mapped in pairs(online) do
+        if mapped == src then
+            online[characterId] = nil
+            Lifecycle.onOwnerOffline(characterId)
+        end
+    end
+end
 
 --[[
     The source for a character id, or nil when they are not online.
@@ -267,10 +278,21 @@ function Ownership.sourceOf(characterId)
     local src = online[characterId]
     if not src then return nil end
 
-    -- The map can outlive a disconnect by one event. Verifying costs one call and saves
-    -- sending a notification to a slot that now belongs to somebody else.
+    -- A slot can remain connected while its character changes. Verify both identities before
+    -- giving keys or sending notices intended for the saved owner.
     if not Bridge.playerName(src) then
         online[characterId] = nil
+        Lifecycle.onOwnerOffline(characterId)
+        return nil
+    end
+    local currentId = Bridge.characterId(src)
+    if currentId ~= characterId then
+        -- A restarting framework can temporarily have no player object. Keep the mapping
+        -- for recovery, but never treat an unresolved character as online.
+        if currentId ~= nil then
+            online[characterId] = nil
+            Lifecycle.onOwnerOffline(characterId)
+        end
         return nil
     end
 
@@ -293,13 +315,24 @@ end
     on the wrong identifier.
 ]]
 local function register(src)
+    src = tonumber(src)
+    if not src or src <= 0 then return end
+    local registration = {}
+    registrations[src] = registration
     CreateThread(function()
         local characterId = Bridge.waitForCharacter(src, 60000)
-        if not characterId then
+        if registrations[src] ~= registration then return end
+        if not characterId or not Bridge.playerName(src) then
+            registrations[src] = nil
             Park.debug('could not resolve a character for %s within 60s', Bridge.playerName(src) or src)
             return
         end
 
+        if online[characterId] == src then
+            registrations[src] = nil
+            return
+        end
+        unregister(src)
         online[characterId] = src
 
         -- Coming back resets every countdown against them. Done here rather than in the sweep
@@ -363,21 +396,26 @@ end)
     without disconnecting is a real thing on every one of them. Missing it means the previous
     character stays registered as online and their job vehicle never expires.
 ]]
-RegisterNetEvent('QBCore:Server:OnPlayerLoaded', function() register(source) end)
-RegisterNetEvent('esx:playerLoaded', function(src) register(src or source) end)
-RegisterNetEvent('ox:playerLoaded', function() register(source) end)
+-- A network caller can only register itself. Local framework events may supply the source.
+local function loaded(src)
+    local caller = tonumber(source)
+    register(caller and caller > 0 and caller or src)
+end
+
+RegisterNetEvent('QBCore:Server:OnPlayerLoaded', loaded)
+RegisterNetEvent('esx:playerLoaded', loaded)
+RegisterNetEvent('ox:playerLoaded', loaded)
+
+-- QBCore unloads a character before freeing its player object; cancel pending registrations.
+AddEventHandler('QBCore:Server:OnPlayerUnload', function(src)
+    local caller = tonumber(source)
+    src = caller and caller > 0 and caller or tonumber(src)
+    if src and src > 0 then unregister(src) end
+end)
 
 AddEventHandler('playerDropped', function()
     local src = source
-
-    for characterId, mapped in pairs(online) do
-        if mapped == src then
-            online[characterId] = nil
-            Lifecycle.onOwnerOffline(characterId)
-            break
-        end
-    end
-
+    unregister(src)
     Persist.onPlayerDropped(src)
 end)
 

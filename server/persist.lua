@@ -1181,115 +1181,78 @@ end
     awaited callback, and a yield at that moment can simply never resume.
 
     So this builds the same batches and fires them, in one pass, with no yield anywhere. It
-    returns how many rows it handed to the driver, which is not quite the same as how many were
-    written - but the driver drains its own queue on shutdown, and this is as close to a
-    guarantee as the runtime offers.
+    returns how many rows it handed to the driver. There is no acknowledgment here, so a
+    simultaneous database shutdown or a process crash can still interrupt those writes.
 ]]
+-- Shutdown cannot yield. Dispatch the latest snapshots, but do not confuse dispatch with a
+-- confirmed write: normal runtime saves use flush(), which can acknowledge and retry them.
 function Persist.flushNow()
     if not Database.available() then return 0 end
-
     local dirty, dirtyCount = Store.dirty()
     if dirtyCount == 0 then return 0 end
-
     local batchSize = math.max(1, math.floor(tonumber(Config.Database.batchSize) or 200))
-    local written = 0
-
-    local batch = {}
-
+    local written, batch = 0, {}
     local function fireBatch()
         if #batch == 0 then return end
-
         local sql, values = upsertBatch(batch)
-
-        if Database.fire(sql, values) then
-            written = written + #batch
-        end
-
+        if Database.fire(sql, values) then written = written + #batch end
         batch = {}
     end
-
     for id in pairs(dirty) do
         local record = Store.get(id)
         if record then
             batch[#batch + 1] = record
             if #batch >= batchSize then fireBatch() end
         end
-        Store.clearDirty(id)
     end
-
     fireBatch()
-
-    stats.written = stats.written + written
     return written
 end
 
 function Persist.flush(force)
-    if flushing and not force then return 0 end
-    if not Database.available() then
-        -- In memory mode the dirty set has nowhere to go. Clearing it stops it growing
-        -- without bound over a long session.
-        for id in pairs(Store.dirty()) do Store.clearDirty(id) end
-        return 0
-    end
-
+    -- Force does not bypass a pending write. Its rows remain queued for the next pass.
+    if flushing or not Database.available() then return 0 end
     local dirty, dirtyCount = Store.dirty()
     if dirtyCount == 0 then return 0 end
-
     flushing = true
-    local started = Park.ticks()
-
+    local started, written = Park.ticks(), 0
     local batchSize = math.max(1, math.floor(tonumber(Config.Database.batchSize) or 200))
-    local written = 0
-
-    local batch = {}
     local ids = {}
-
+    for id in pairs(dirty) do ids[#ids + 1] = id end
+    local batch, revisions = {}, {}
     local function writeBatch()
         if #batch == 0 then return end
-
         local sql, values = upsertBatch(batch)
-        local ok = Database.execute(sql, values) ~= nil
-
-        if ok then
-            for _, id in ipairs(ids) do Store.clearDirty(id) end
+        local ok, result = pcall(Database.execute, sql, values)
+        if ok and result ~= nil and result ~= false then
+            for id, revision in pairs(revisions) do Store.clearDirty(id, revision) end
             written = written + #batch
             stats.batches = stats.batches + 1
         else
             Park.error('a batch of %d vehicle(s) failed to write - they stay queued', #batch)
         end
-
-        batch = {}
-        ids = {}
+        batch, revisions = {}, {}
     end
-
-    for id in pairs(dirty) do
-        local record = Store.get(id)
-
-        if not record then
-            Store.clearDirty(id)
-        else
-            batch[#batch + 1] = record
-            ids[#ids + 1] = id
-
-            if #batch >= batchSize then
-                writeBatch()
-                Wait(0)
+    local ok, err = pcall(function()
+        for _, id in ipairs(ids) do
+            local record, revision = Store.get(id), dirty[id]
+            if record and revision then
+                batch[#batch + 1] = record
+                revisions[id] = revision
+                if #batch >= batchSize then
+                    writeBatch()
+                    Wait(0)
+                end
             end
         end
-    end
-
-    writeBatch()
-
+        writeBatch()
+    end)
+    flushing = false
+    if not ok then Park.error('the flush raised; unwritten rows remain queued: %s', tostring(err)) end
     stats.written = stats.written + written
     stats.lastFlushMs = Park.ticks() - started
     stats.lastFlushRows = written
-
-    flushing = false
-
-    if written > 0 then
-        Park.trace('flushed %d vehicle(s) in %d ms', written, stats.lastFlushMs)
-    end
-
+    if written > 0 then Park.trace('flushed %d vehicle(s) in %d ms', written, stats.lastFlushMs) end
     return written
 end
 
@@ -1337,7 +1300,7 @@ function Persist.touch(id, trigger)
 
                 if Store.get(id) then
                     cooldown[id] = Park.ticks()
-                    Database.thread(function() Persist.flushNow() end)
+                    Database.thread(function() Persist.flush() end)
                 end
             end)
         end
@@ -1360,7 +1323,7 @@ function Persist.touch(id, trigger)
         into one write and the sweep picks up the rest.
     ]]
     Database.thread(function()
-        Persist.flushNow()
+        Persist.flush()
     end)
 
     return true

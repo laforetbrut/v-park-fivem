@@ -1,3 +1,4 @@
+-- Author: vyrriox
 --[[
     client/track.lua
 
@@ -178,9 +179,12 @@ local function vparkId(vehicle)
 end
 
 local function onEnter(vehicle)
-    current.entity = vehicle
-    current.netId = NetworkGetNetworkIdFromEntity(vehicle)
-    current.since = Park.ticks()
+    if current.entity ~= vehicle then
+        current.entity = vehicle
+        current.netId = NetworkGetNetworkIdFromEntity(vehicle)
+        current.since = Park.ticks()
+        current.id = nil
+    end
 
     -- Getting in cancels a pending settle: the car is not parked, it is being driven.
     settling[vehicle] = nil
@@ -223,7 +227,10 @@ local function onEnter(vehicle)
 
         -- `true`: somebody got IN it. See `Config.Cleanup` for why that is a different fact
         -- from the vehicle merely having been interacted with.
-        TriggerServerEvent('vpark:server:touched', id, true)
+        if current.id ~= id then
+            current.id = id
+            TriggerServerEvent('vpark:server:touched', id, true)
+        end
         return
     end
 
@@ -303,6 +310,7 @@ end
 local function onExit(vehicle)
     current.entity = nil
     current.netId = nil
+    current.id = nil
 
     --[[
         ============================================================================
