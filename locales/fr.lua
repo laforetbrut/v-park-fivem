@@ -1,3 +1,4 @@
+-- Author: vyrriox
 --[[
     locales/fr.lua
 
@@ -144,7 +145,7 @@ Locale.register('fr', {
     ['info.keys']          = "clés : %s",
     ['info.mode']          = "mode de persistance : %s",
     ['info.counts']        = "%d conservés, %d dans le monde, %d en attente d'écriture, %d cellules",
-    ['info.neons_off']     = "néons : non enregistrés, aucune ressource capable trouvée (Config.Save.fields.neons)",
+    ['info.neons_off']     = "néons : enregistrement désactivé (Config.Save.fields.neons)",
     ['info.neons_on']      = "néons : enregistrés, gérés par %s",
     ['info.zones']         = "%d zone(s) bloquée(s)",
     ['info.memory_mode']   = "EN MÉMOIRE : rien ne survit à un redémarrage du serveur",

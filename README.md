@@ -1,6 +1,6 @@
 # v-park
 
-Current release: **1.1.2**. Author: **vyrriox**.
+Current release: **1.1.3**. Author: **vyrriox**.
 
 Vehicle persistence for FiveM, built for QBCore and running on qbx_core, ESX and ox_core too.
 
@@ -155,6 +155,34 @@ Run `/vparkinfo` to print what was actually detected on **your** server.
 ---
 
 ## Installation
+
+### Upgrading to 1.1.3
+
+Replace the resource files, keep your custom config, and restart v-park so every client loads
+this update. No new SQL migration is required. `Config.Save.fields.neons = true` is now the
+default; an existing `'auto'` also enables persistence without jim-mechanic. An explicit `false`
+still disables it. Keep `extras`, `health`, `damage` and `deformation` enabled to restore them.
+
+On a fresh spawn, v-park permits extra-triggered repair, applies the saved extras and rebuilds
+the vehicle with `SetVehicleFixed`. It then disables extra-triggered repair again and restores
+health, broken windows/doors, tyres and deformation in that order. A failed extra still protects
+the complete saved property set. Extra edits on parked vehicles trigger a snapshot even when
+body health stays unchanged; incomplete readings and spectators cannot overwrite the selection.
+
+Neons are verified after placement: all four switches and the RGB colour must match across
+three readings 200 ms apart, within ten attempts. The server publishes its saved selection for
+the next network owner, whose observations also detect colour-only changes and deliberate all-off
+states. Changes must remain stable for 500 ms, then use the existing throttled save path. Engine
+transitions reapply the confirmed choice if needed. Failed verification retains the saved neon
+group; background recovery is limited to three attempts per owner session. No mechanic dependency
+or permanent loop repeatedly forcing old choices is required.
+
+Run `python tools/check.py` and `python tools/check_regressions.py` for the local checks. All
+30 regression tests use mocked FiveM natives; they cannot prove a custom model's visual geometry
+or real OneSync replication. Validate with the actual police vehicle and two clients: change
+extras and RGB, switch the engine off/on, leave and return, transfer network ownership and restart
+the server. Compare `/vparkprops` with the visual result. A resource that continuously forces
+its own appearance can still conflict; use one persistence resource for the same vehicles.
 
 ### Upgrading to 1.1.2
 
@@ -728,6 +756,37 @@ physique en vingt minutes, et n'est pas simulée du tout.
 qu'on règle `Config.Placement.probe.shrink` sur son propre MLO au lieu de deviner.
 
 ## Installation
+
+### Mise à jour vers 1.1.3
+
+Remplacer les fichiers, conserver le `config.lua` personnalisé et redémarrer v-park pour charger
+la mise à jour sur tous les clients. Aucune nouvelle migration SQL. `Config.Save.fields.neons = true`
+est désormais la valeur par défaut ; une ancienne valeur `'auto'` active aussi la persistance
+sans jim-mechanic. `false` la désactive toujours. Garder `extras`, `health`, `damage` et
+`deformation` activés pour restaurer ces éléments.
+
+À la création du véhicule, v-park autorise la réparation déclenchée par les extras, applique les
+extras sauvegardés et reconstruit le véhicule avec `SetVehicleFixed`. Il désactive ensuite cette
+réparation et remet les niveaux de santé, les vitres/portes cassées, les pneus et les déformations,
+dans cet ordre. Un échec des extras protège toujours toutes les propriétés sauvegardées. Une
+modification des extras d'un véhicule garé déclenche une capture même sans changement de santé.
+Une lecture incomplète ou celle d'un spectateur ne peut plus écraser la sélection.
+
+Après le placement, les quatre côtés des néons et leur couleur RGB doivent correspondre pendant
+trois lectures espacées de 200 ms, avec dix tentatives au maximum. Le serveur transmet la sélection
+sauvegardée au nouveau propriétaire réseau. Les modifications de couleur seule et l'extinction
+volontaire sont détectées après 500 ms de stabilité, puis passent par l'enregistrement habituel.
+Un changement d'état du moteur réapplique le choix confirmé si nécessaire. En cas d'échec, les
+néons sauvegardés sont conservés, avec trois tentatives de récupération au maximum par session de
+propriété réseau. Aucune dépendance à un mécanicien ni boucle imposant continuellement un ancien
+choix n'est nécessaire.
+
+Contrôles locaux : `python tools/check.py` et `python tools/check_regressions.py`. Les 30 tests
+utilisent des natives FiveM simulées ; ils ne prouvent pas le rendu d'un modèle personnalisé ni
+la réplication OneSync réelle. Vérifier le modèle de police avec deux clients : modifier extras
+et RGB, éteindre/rallumer le moteur, s'éloigner/revenir, transférer le contrôle réseau et redémarrer
+le serveur. Comparer `/vparkprops` au rendu. Une ressource qui impose continuellement son propre
+état peut encore entrer en conflit ; utiliser une seule persistance pour les mêmes véhicules.
 
 ### Mise à jour vers 1.1.2
 

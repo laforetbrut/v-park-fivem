@@ -5,7 +5,7 @@ lua54 'yes'
 name 'v-park'
 author 'vyrriox'
 description 'Vehicle persistence for FiveM on qb-core, qbx_core, ESX and ox_core: vehicles stay where they were left across restarts, are restored to the exact spot even in tight spaces, and are streamed in only when somebody is near. Bodywork deformation is stored and synchronised, job and rental vehicles can be semi-persistent, and there is a migration from Advanced Parking.'
-version '1.1.2'
+version '1.1.3'
 
 -- No hard dependency, on purpose. oxmysql, every framework, every fuel resource, every key
 -- resource, every garage and every notification system are detected at runtime and all
@@ -44,6 +44,7 @@ shared_scripts {
     -- What a stored vehicle IS: the property groups, their config gates, and the order they
     -- are applied in. Read its header before changing that order.
     'shared/schema.lua',
+    'shared/appearance.lua',
 
     -- Whether a vehicle may persist at all. After classes and zones, which it asks.
     'shared/rules.lua',
@@ -64,6 +65,7 @@ client_scripts {
 
     -- Reading everything off a vehicle and putting it all back.
     'client/properties.lua',
+    'client/neons.lua',
 
     -- The tight-space placement engine. The headline file; read its header.
     'client/placement.lua',

@@ -109,10 +109,30 @@ local foreignHealth = {}
     ground. The same probe therefore runs here, once per vehicle, until it answers.
 ]]
 local foreignGround = {}
+local seenExtras = {}
+
+-- Extra edits often leave body health unchanged. Report them through the existing throttled
+-- snapshot path, including parked vehicles that this client did not originally place.
+local function observeExtras(id, entity)
+    local control = NetworkHasControlOfEntity(entity)
+    if not Schema.enabled('extras') or (control ~= true and control ~= 1)
+        or NetworkGetEntityOwner(entity) ~= PlayerId() then
+        seenExtras[id] = nil
+        return
+    end
+    if Entity(entity).state['vpark:hold'] then return end
+    local previous = seenExtras[id]
+    if previous and previous.entity == entity and Properties.extrasMatch(entity, previous.values) then return end
+    seenExtras[id] = {entity=entity, values=Properties.captureExtras(entity)}
+    if previous and previous.entity == entity then Stream.dirty(id) end
+end
+
 
 local function forgetForeign(id)
     if foreign[id] == nil then return end
     foreign[id] = nil
+    if not tracked[id] then seenExtras[id] = nil end
+    if not tracked[id] then Properties.forgetNeons(id) end
     foreignCount = foreignCount - 1
 end
 
@@ -228,6 +248,8 @@ local function mirrorPass(playerPosition)
                 the vehicle despawned first. Body health is one native call and it moves for a
                 repair and for damage alike.
             ]]
+            observeExtras(id, entity)
+            Properties.observeNeons(id, entity, Stream.dirty)
             local health = GetVehicleBodyHealth(entity)
 
             if foreignHealth[id] == nil then
@@ -466,7 +488,7 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
 
         if type(data.properties) == 'table' then
             local ok, applied, failed = pcall(Properties.apply, entity, data.properties,
-                { version = data.version })
+                { version = data.version, rebuildExtras = true, deferNeons = true })
 
             -- A local withheld group cannot protect a snapshot from another client.
             -- Keep the server's existing undressed guard up when extras never verified.
@@ -509,6 +531,19 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
             local settleBy = Park.ticks() + 3000
             while Deformation.busy(entity) and Park.ticks() < settleBy do Wait(25) end
         end
+
+        local neonsVerified = true
+        if result.ok and Schema.enabled('neons') then
+            local ok, verified = pcall(Properties.applyNeons, entity, data.properties, true)
+            if not ok then Park.warn('neon restore for %s raised: %s', data.id, tostring(verified)) end
+            neonsVerified = ok and verified == true
+            if not neonsVerified then
+                unverified[data.id] = unverified[data.id] or {}
+                unverified[data.id].neons = true
+            end
+        end
+        Properties.rememberNeons(data.id, entity, data.properties, neonsVerified)
+        result.neonsVerified = neonsVerified
 
         local settledHealth = GetVehicleBodyHealth(entity)
 
@@ -566,18 +601,6 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
                 restoredHealth = settledHealth,
 
                 --[[
-                    What the neons are SUPPOSED to be, kept so the tick below can put them back.
-
-                    The value is lost repeatedly and for more than one reason - ownership moving,
-                    a restore that did not take, an engine state change - and seven releases were
-                    spent trying to work out which. Holding the answer and re-asserting it costs
-                    four native reads every couple of seconds on a vehicle that has neons, and does
-                    not care which of those it was.
-                ]]
-                neonsWanted = type(data.properties) == 'table' and data.properties.neonEnabled or nil,
-                neonsColour = type(data.properties) == 'table' and data.properties.neonColor or nil,
-
-                --[[
                     Whether this vehicle currently looks the way the database says it does.
 
                     A vehicle whose properties could not be applied is a STOCK car standing
@@ -624,7 +647,9 @@ RegisterNetEvent('vpark:client:forget', function(id)
 
     if record.netId then byNet[record.netId] = nil end
     tracked[id] = nil
+    seenExtras[id] = nil
     unverified[id] = nil
+    Properties.forgetNeons(id)
     trackedCount = trackedCount - 1
 end)
 
@@ -707,14 +732,7 @@ CreateThread(function()
             local playerPosition = GetEntityCoords(PlayerPedId())
             nearestDistance = math.huge
 
-            --[[
-                Resolved once for the whole pass rather than per vehicle, because with
-                `Config.Save.fields.neons = 'auto'` this asks the game for a resource state.
-
-                Off by default. When it is off, v-park does not read, hold or report the neons
-                of anything - see the note on that config field for why nine releases of trying
-                ended in deferring to the mod shops that do it well.
-            ]]
+            -- Resolve the capture gate once per polling pass.
             local neonsEnabled = Schema.enabled('neons')
 
             for id, record in pairs(tracked) do
@@ -733,143 +751,17 @@ CreateThread(function()
 
                     if record.netId then byNet[record.netId] = nil end
                     tracked[id] = nil
+                    seenExtras[id] = nil
+                    Properties.forgetNeons(id)
                     unverified[id] = nil
                     trackedCount = trackedCount - 1
                 else
                     local distance = #(GetEntityCoords(record.entity) - playerPosition)
                     if distance < nearestDistance then nearestDistance = distance end
 
-                    --[[
-                        ================================================================================
-                        WHAT THIS TICK DOES FOR EVERY VEHICLE V-PARK IS HOLDING.
-                        ================================================================================
-
-                        Three things, and they accumulated one release at a time - which is visible
-                        in the history and was worth tidying into one place.
-
-                        1. BODY HEALTH. A repair from txAdmin, a mechanic script or a collision
-                           handled elsewhere tells v-park nothing, and the capture sweep does not
-                           look at a frozen vehicle at all. One native call, and it moves for a
-                           repair and for damage alike, so the change is reported at once instead
-                           of up to thirty seconds later - or never, if the vehicle despawned.
-
-                        2. NEONS CHANGING WHILE SOMEBODY IS IN IT. A mod shop is the one place the
-                           value is deliberately altered and nothing else notices it. Only a state
-                           that is seen to MOVE counts: presence is not intent, and treating it as
-                           intent destroyed the stored value at the moment somebody checked it.
-
-                        3. NEONS DRIFTING WHILE NOBODY IS. The engine loses the state for several
-                           different reasons at several different moments - losing it across a
-                           store-and-retrieve cycle is known FiveM behaviour - so it is put back
-                           rather than diagnosed. Only when at least one light is meant to be ON,
-                           and never while somebody is sitting in the vehicle.
-                    ]]
-                    if neonsEnabled and not IsVehicleSeatFree(record.entity, -1) then
-                        local now = 0
-                        for index = 0, 3 do
-                            if IsVehicleNeonLightEnabled(record.entity, index) then
-                                now = now + (2 ^ index)
-                            end
-                        end
-
-                        --[[
-                            ================================================================================
-                            SOMEBODY CHANGING THE NEONS IS NOT THE SAME AS SOMEBODY BEING PRESENT.
-                            ================================================================================
-
-                            1.0.32 let any occupied vehicle report its neons, on the reasoning that
-                            the person sitting in it owns them. That is true of somebody who changes
-                            something and false of somebody who gets in TO LOOK - which is what a
-                            player does when checking whether their neons survived. Getting in fired
-                            an immediate report of the state the failed restore had left, and the
-                            stored value went to zero at the exact moment it was being inspected.
-
-                            The same mistake as 1.0.29's guard, in a different place. Presence is
-                            not intent, and the way to tell them apart is to watch for the state
-                            actually moving.
-
-                            `neonsWanted` moves with it, or the tick below would put the old value
-                            back the moment the player got out - fighting them over the change they
-                            had just made.
-                        ]]
-                        if record.neonSeen ~= nil and record.neonSeen ~= now then
-                            record.neonsChosen = true
-
-                            local wanted = {}
-                            for index = 0, 3 do
-                                wanted[index + 1] = IsVehicleNeonLightEnabled(record.entity, index)
-                            end
-                            record.neonsWanted = wanted
-
-                            Stream.dirty(id)
-                        end
-
-                        record.neonSeen = now
-                    else
-                        record.neonSeen = nil
-                    end
-
-                    local wantsNeons = false
-                    if not neonsEnabled then record.neonsWanted = nil end
-                    if record.neonsWanted then
-                        for _, value in ipairs(record.neonsWanted) do
-                            if value == true then wantsNeons = true break end
-                        end
-                    end
-
-                    if wantsNeons and IsVehicleSeatFree(record.entity, -1)
-                        and (record.neonsAt or 0) < Park.ticks() then
-                        record.neonsAt = Park.ticks() + 2000
-
-                        local drifted = false
-                        for index = 0, 3 do
-                            if IsVehicleNeonLightEnabled(record.entity, index)
-                                ~= (record.neonsWanted[index + 1] == true) then
-                                drifted = true
-                                break
-                            end
-                        end
-
-                        if drifted and Properties.applyNeons then
-                            pcall(Properties.applyNeons, record.entity, {
-                                neonEnabled = record.neonsWanted,
-                                neonColor = record.neonsColour,
-                            })
-
-                            --[[
-                                A vehicle that needs correcting once has had its state dropped by
-                                the engine, which is ordinary. One that needs it five times is
-                                being actively fought, and that is worth a line in the SERVER log -
-                                where the operator is looking, which took three attempts to get
-                                right.
-                            ]]
-                            record.neonFixes = (record.neonFixes or 0) + 1
-
-                            if record.neonFixes == 5 then
-                                local got = {}
-                                for index = 0, 3 do
-                                    got[index + 1] =
-                                        IsVehicleNeonLightEnabled(record.entity, index) and 1 or 0
-                                end
-
-                                TriggerServerEvent('vpark:server:neonFailed', id, {
-                                    wanted = (function()
-                                        local out = {}
-                                        for index = 1, 4 do
-                                            out[index] =
-                                                record.neonsWanted[index] == true and 1 or 0
-                                        end
-                                        return out
-                                    end)(),
-                                    got = got,
-                                    control = NetworkHasControlOfEntity
-                                        and NetworkHasControlOfEntity(record.entity) or false,
-                                    owner = NetworkGetEntityOwner
-                                        and NetworkGetEntityOwner(record.entity) or -1,
-                                    exists = true,
-                                })
-                            end
-                        end
+                    if record.dressed ~= false then observeExtras(id, record.entity) end
+                    if neonsEnabled and record.dressed ~= false then
+                        Properties.observeNeons(id, record.entity, Stream.dirty)
                     end
 
                     local health = GetVehicleBodyHealth(record.entity)
@@ -1412,39 +1304,8 @@ function Stream.dirty(id)
     pushChange(id)
 end
 
---[[
-    ================================================================================================
-    WHAT A CLIENT THAT DID NOT PLACE THIS VEHICLE CAN HONESTLY SAY ABOUT IT.
-    ================================================================================================
-
-    The save sweep asks whichever client is NEAREST a vehicle, and for one being driven it asks the
-    occupant. Neither is necessarily the client that placed it, and until now a client with no
-    `tracked` entry answered nothing - silently, because an absent snapshot means "no news". Every
-    modification, repair and dent on a car placed by somebody else's machine went unrecorded.
-
-    Modifications, colours and damage are part of the network sync tree, so this client is looking at
-    the real vehicle and not a local guess: what it reads is what the owner has. Three things it
-    genuinely cannot know, and each is left out rather than guessed:
-
-      the deformation reference   Whether the dents are worth re-measuring depends on what body
-                                  health was when the vehicle was restored, which only the placing
-                                  client saw. THE SERVER SENDS IT: `reference` is the stored body
-                                  health, and comparing live health against that is the same
-                                  question `Deformation.shouldRecapture` asks, asked with the one
-                                  number this client is missing.
-
-      the neons                   Only a person in the vehicle can choose them, and this client has
-                                  no record of anybody having done so. Reporting them would be the
-                                  1.0.29 mistake with a different table underneath it.
-
-      whether it was dressed      A restore that could not apply its properties leaves a stock car,
-                                  and reporting that would overwrite the real one. Only the placing
-                                  client knows. So a vehicle that IS being tracked somewhere else
-                                  and failed to dress can still be reported here - which is the one
-                                  case this path is weaker than the other, and it is bounded: the
-                                  placing client is the nearest client for the whole of a failed
-                                  restore, because it was chosen for being nearest.
-]]
+-- A client that did not place the vehicle may report its networked properties. Neon values
+-- require a verified owner session; the server also retains every property while undressed.
 local function foreignSnapshot(id, reference)
     local entity = foreign[id]
     if not entity or not DoesEntityExist(entity) then return nil end
@@ -1457,15 +1318,19 @@ local function foreignSnapshot(id, reference)
     -- Named rather than merely absent: a snapshot REPLACES the stored properties, so a group
     -- dropped without being named is a group deleted. See the note in `Stream.snapshot`, which
     -- also explains why the anchor is in here.
-    local withheld = { neons = true }
+    local withheld = {}
     if not recapture then
         withheld.deformation = true
         withheld.health = true
     end
     if properties.anchored ~= true then withheld.anchor = true end
 
-    for _, key in ipairs(Schema.keys.neons or {}) do
-        properties[key] = nil
+    local neons = Properties.savedNeons(id, entity)
+    if neons then
+        properties.neonEnabled, properties.neonColor = neons.neonEnabled, neons.neonColor
+    else
+        for _, key in ipairs(Schema.keys.neons or {}) do properties[key] = nil end
+        withheld.neons = true
     end
 
     local moved = foreignDriven[id] == true
@@ -1544,7 +1409,9 @@ function Stream.snapshot(id, reference)
 
     -- External scripts can change extras without moving or damaging a frozen vehicle.
     if record.frozen and record.captureClean and settled
-        and Properties.extrasMatch(record.entity, record.lastExtras) then
+        and Properties.extrasMatch(record.entity, record.lastExtras)
+        and (not Schema.enabled('neons') or Schema.sameNeons(
+            Properties.savedNeons(id, record.entity), record.lastNeons)) then
         return nil
     end
 
@@ -1584,6 +1451,7 @@ function Stream.snapshot(id, reference)
     -- Clean until something touches it again.
     record.captureClean = true
     record.lastExtras = properties.extras
+    record.lastNeons = Properties.savedNeons(id, entity)
 
     --[[
         A VEHICLE NOBODY HAS DRIVEN DOES NOT REPORT WHERE IT IS.
@@ -1730,41 +1598,13 @@ function Stream.snapshot(id, reference)
         end
     end
 
-    --[[
-        AND NEITHER DOES IT REPORT WHETHER ITS NEONS ARE ON.
-
-        The same argument as the position above, and it took seven releases to notice that it was
-        the same argument. ONLY A PERSON IN THE VEHICLE CAN TURN NEONS ON OR OFF. Everything else
-        that changes them - the engine dropping the state as ownership migrates, a restore that did
-        not take, a client that never had control - is the game losing the value, not somebody
-        choosing it.
-
-        So they are left out until somebody has sat in it, and the server keeps what it has. That is
-        what makes this permanent rather than one more handshake: there is no path by which a dark
-        vehicle nobody has touched can report itself dark and overwrite the player's own setting.
-
-        Every previous attempt tried to DETECT the failure and suppress the report. This does not
-        need to detect anything, which is why it is the last one.
-    ]]
-    --[[
-        REPORTED ONLY AFTER SOMEBODY HAS ACTUALLY CHANGED THEM.
-
-        Not "has been driven", and not "somebody is in it". Both of those are true of a player who
-        gets in to check whether their neons survived, and reporting then is how the stored value
-        was destroyed at the exact moment it was being inspected.
-
-        `neonsChosen` is set by the tick above, and only when the state is observed to MOVE while
-        somebody is in the driver's seat. That is the only event in the game that means a person
-        decided something about this vehicle's neons.
-
-        Everything else - a restore that did not take, ownership moving, the engine dropping the
-        state, which FiveM is known to do when a vehicle is stored and taken out again - leaves the
-        stored value alone, and the tick puts the lights back.
-    ]]
-    if record.neonsChosen ~= true then
-        for _, key in ipairs(Schema.keys.neons or {}) do
-            properties[key] = nil
-        end
+    local neons = Properties.savedNeons(id, entity)
+    if neons then
+        properties.neonEnabled, properties.neonColor = neons.neonEnabled, neons.neonColor
+        -- A later successful owner verification recovers from an initial neon-only failure.
+        withheld.neons = nil
+    else
+        for _, key in ipairs(Schema.keys.neons or {}) do properties[key] = nil end
         withheld.neons = true
     end
 

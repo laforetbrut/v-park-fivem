@@ -7,6 +7,54 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.1.3] - 2026-09-12
+
+### Fixed
+
+- Rebuild extras before restoring damage. During a fresh spawn, allow extra-triggered repair,
+  apply and verify the saved extras, rebuild the vehicle, then restore health, windows, doors,
+  tyres and deformation. The repair guard is restored even when the extras fail.
+- Detect extra edits on parked vehicles without waiting for damage or the periodic save sweep.
+  Save sweeps prefer the network owner; spectator and incomplete extra readings retain the saved
+  selection. Failed extra restoration still protects all saved properties.
+- Save neon switches and RGB by default without jim-mechanic. Legacy `'auto'` enables the built-in
+  path; explicit `false` still disables it. Capture colour-only edits and deliberate all-off states.
+- Verify neons after placement with network control and three matching reads, 200 ms apart.
+  Replicate the server's selection for the next network owner, handle engine transitions, cancel
+  stale restoration jobs and protect saved neon data on failure. Ownership and matching proof now
+  control the previously unused verification acknowledgment. Retries remain bounded.
+
+### Validation
+
+All 21 static check groups and 30 Lua regression tests pass. Five targeted tests also reject the
+published 1.1.2 implementation: rebuilding extras, clearing the neon guard, accepting spectator
+extras, choosing the capture client and enabling the legacy auto setting. Natives are mocked;
+custom police lightbar rendering, actual multiplayer replication and server restarts must still
+be validated in FiveM with the installed models and resources. No SQL migration is added.
+
+### Français
+
+- Reconstruction des extras avant la remise des dégâts : réparation autorisée au spawn, sélection
+  et vérification des extras, reconstruction, puis santé, vitres, portes, pneus et déformations.
+  La protection contre les réparations déclenchées par les extras est rétablie même en cas d'échec.
+- Détection des modifications d'extras sur les véhicules garés. Les captures périodiques privilégient
+  le propriétaire réseau ; les lectures incomplètes et celles des spectateurs ne remplacent pas
+  la sélection sauvegardée. Un échec de restauration protège toujours toutes les propriétés.
+- Sauvegarde des quatre côtés des néons et du RGB activée sans jim-mechanic. L'ancienne valeur
+  `'auto'` active le système intégré ; `false` le désactive. Les changements de couleur seule et
+  l'extinction volontaire sont pris en compte.
+- Vérification des néons après placement par trois lectures espacées de 200 ms avec contrôle
+  réseau. Sélection transmise au prochain propriétaire réseau, gestion des transitions moteur,
+  annulation des anciennes tentatives et conservation des données en cas d'échec. L'accusé de
+  vérification est maintenant utilisé et contrôlé côté serveur. Les tentatives restent limitées.
+
+Les 21 groupes de contrôles et les 30 tests Lua passent. Cinq tests ciblés détectent les défauts
+sur la 1.1.2 publiée. Les natives sont simulées : le rendu des gyrophares personnalisés, le
+multijoueur réel et les redémarrages restent à valider dans FiveM avec les ressources installées.
+Aucune migration SQL supplémentaire.
+
+---
+
 ## [1.1.2] - 2026-09-11
 
 ### Fixed

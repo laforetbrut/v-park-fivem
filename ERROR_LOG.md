@@ -8,6 +8,39 @@ out of it.
 
 ---
 
+## [2026-09-12 00:19] - Extra repair suppression prevented component reconstruction
+**Context:** Reviewing police lightbars that changed after streaming or respawning.
+**Error:** Extra flags could match while the model component was not rebuilt.
+**Root cause:** SetVehicleAutoRepairDisabled was treated as a general health-regeneration guard,
+but the CFX native declaration identifies it as disabling repair when extras are enabled.
+**Fix:** On fresh restoration only, allow extra-triggered repair, apply extras and rebuild with
+SetVehicleFixed before restoring health, damage and deformation. Restore the guard on failure.
+**Prevention:** Keep all healing before damage; test the ordering and failed-rebuild guard.
+The visual result on the actual custom police model still requires FiveM validation.
+
+## [2026-09-12 00:19] - Neon selection could never reach a verified save
+**Context:** Auditing neon persistence and network ownership changes.
+**Error:** Default auto disabled capture without a mechanic, colour-only edits were missed, and
+the server verification event had no caller. The promised post-placement apply was absent.
+**Root cause:** Mechanic detection was mistaken for integration, capture tracked only occupied
+vehicle switches, and restoration, acknowledgment and ownership were not one tested workflow.
+**Fix:** Built-in persistence, canonical switches/RGB, post-placement verification, server selection
+replication, owner-only observation, bounded recovery and authenticated verification acknowledgments.
+Also route periodic captures to the simulator and withhold incomplete or spectator extra readings.
+**Prevention:** Exercise the real placement, snapshot and acknowledgment paths; cover RGB-only,
+all-off, late statebags, engine changes, stale owners, failed writes and explicit config opt-out.
+
+## [2026-09-12 00:19] - Integration tests caught missing save and acknowledgment wiring
+**Context:** Connecting the new neon verification to the existing server handlers.
+**Error:** The initial acknowledgment did not clear the guard and accepted changes were not published.
+**Root cause:** Exact replacements spanning old comments did not match; fixture snapshots also
+shared Lua table references unlike serialized network payloads.
+**Fix:** Patch asserted source blocks explicitly and pass independent snapshot tables in tests.
+**Prevention:** Verify both ends of the event and persistence path, and require expected source
+matches for scripted edits. The complete regression suite passed before publication.
+
+---
+
 ## [2026-09-11 23:44] - An unavailable extra was excluded from the verification set
 **Context:** A production report described intermittent police lightbar changes after respawning.
 **Error:** The 1.1.1 check skipped extras for which DoesExtraExist was false on its first read.

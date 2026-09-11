@@ -208,7 +208,7 @@ local function banner()
     -- Said out loud, because "my neons are not being saved" is otherwise a bug report rather
     -- than a setting. See `Config.Save.fields.neons`.
     if state.neons == false then
-        print('^3[v-park]^7 neons: NOT stored (no neon-capable resource found)')
+        print('^3[v-park]^7 neons: NOT stored (Config.Save.fields.neons is false)')
     elseif type(state.neons) == 'string' then
         print(('^2[v-park]^7 neons: stored, handled by ^5%s^7'):format(state.neons))
     end
@@ -224,18 +224,8 @@ end
 CreateThread(function()
     state.version = GetResourceMetadata(Park.resource, 'version', 0) or 'unknown'
 
-    --[[
-        Which way `'auto'` resolved, so an operator can see it rather than infer it from
-        behaviour. See `Config.Save.fields.neons`.
-
-        Left nil when the field is `true` or `false`, because then somebody chose and does not
-        need telling. `false` here means "auto, and nothing was found".
-    ]]
-    local fields = Config.Save and Config.Save.fields
-    if type(fields) == 'table' and fields.neons == 'auto' and Schema.autoEnabled then
-        local on, resource = Schema.autoEnabled()
-        state.neons = on and resource or false
-    end
+    -- Built-in persistence also handles the legacy 'auto' setting.
+    state.neons = Schema.enabled('neons') and Park.resource or false
 
     -- 1. OneSync.
     local oneSync = oneSyncState()

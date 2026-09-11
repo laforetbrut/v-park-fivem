@@ -1,3 +1,4 @@
+-- Author: vyrriox
 --[[
     shared/schema.lua
 
@@ -196,53 +197,9 @@ end
     exist is treated as ON, not off: a typo in the config should not silently stop storing
     modifications, and the check script catches the typo separately.
 ]]
---[[
-    `'auto'` means "on where something else is handling this properly".
-
-    Only neons use it today. See the note on `Config.Save.fields.neons`: the state does not survive a
-    vehicle being re-created, that is the game rather than this resource, and v-park attempting it
-    anyway interfered with the mod shops that do it well. So it defers, and says so at boot.
-]]
---[[
-    ================================================================================================
-    ASKED OF THE GAME AT MOST ONCE A SECOND, NOT ONCE PER PROPERTY.
-    ================================================================================================
-
-    `'auto'` resolves by asking the game whether a resource is running, and `Schema.enabled` is
-    called from the two hottest paths there are: `Schema.filter`, which runs per key per row, and
-    the client tick, which runs up to five times a second.
-
-    Loading three thousand rows at boot therefore asked the game the same question about the same
-    resource thousands of times, and got the same answer every time. The answer CAN change - a
-    mechanic script started after v-park is the whole point of the feature - so it is cached with a
-    lifetime rather than resolved once: a second is far below the time it takes anybody to notice a
-    resource starting, and far above the length of a boot.
-]]
-local autoCache = { at = -math.huge, on = false, resource = nil }
-local AUTO_TTL = 1000
-
+-- Legacy 'auto' now means built-in neon persistence, independent of mechanic resources.
 local function autoEnabled()
-    local now = Park.ticks()
-
-    if now - autoCache.at < AUTO_TTL then
-        return autoCache.on, autoCache.resource
-    end
-
-    local managers = (Config and Config.Save and Config.Save.neonManagers) or {}
-
-    autoCache.at = now
-    autoCache.on = false
-    autoCache.resource = nil
-
-    for _, resource in ipairs(managers) do
-        if Park.started(resource) then
-            autoCache.on = true
-            autoCache.resource = resource
-            break
-        end
-    end
-
-    return autoCache.on, autoCache.resource
+    return true, nil
 end
 
 Schema.autoEnabled = autoEnabled

@@ -307,15 +307,11 @@ function Properties.capture(vehicle, options)
     properties.tyreSmokeColor = { GetVehicleTyreSmokeColor(vehicle) }
 
     -- --------------------------------------------------------------------- neons ---
-    local neonEnabled = {}
-    for index = 0, 3 do
-        neonEnabled[index + 1] = IsVehicleNeonLightEnabled(vehicle, index)
+    local neons = Properties.captureNeons(vehicle)
+    if neons then
+        properties.neonEnabled = neons.neonEnabled
+        properties.neonColor = neons.neonColor
     end
-    properties.neonEnabled = neonEnabled
-    -- Both spellings, for the same reason as the setter. A raise here would take the whole
-    -- capture with it and the vehicle would be saved as a stock car.
-    properties.neonColor = { Properties.native(
-        'GetVehicleNeonLightsColour', 'GetVehicleNeonLightsColor', vehicle) }
 
     -- -------------------------------------------------------------------- extras ---
     -- The game's own convention is inverted and it is worth writing down: an extra that is
@@ -629,112 +625,55 @@ local function applyCustomPaint(vehicle, properties)
     end
 end
 
---[[
-    ================================================================================================
-    NEONS GO ON LAST, AND STAY ON LAST. THE ENGINE IS WHY.
-    ================================================================================================
-
-    The database settled this one. A vehicle the tester had given magenta neons was stored as:
-
-        neonColor   = [255, 0, 255]     <- the colour, captured perfectly
-        neonEnabled = [false, false, false, false]
-
-    So the capture works and the natives work. The neons were genuinely OFF at the moment the
-    vehicle was captured, and it is v-park that turns them off.
-
-    NEON LIGHTS ARE LIGHTS, and `SetVehicleEngineOn(vehicle, false, ...)` puts a vehicle's lights
-    out. That call happens twice after the neons are switched on: once at the end of
-    `Properties.apply`, because a restored car should be parked with its engine off, and again in
-    `Placement.place`, which runs after the dressing. So the restore lit the neons, the engine went
-    off, the neons went out, and the next capture wrote `false` over the stored `true` - after which
-    they were off for good, which is why they never came back even once.
-
-    The fix is an ordering one, and it has to hold in both places. This function is applied at the
-    very end of `Properties.apply`, and again by `client/stream.lua` after the placement has
-    finished with the vehicle.
-
-    Nothing else in the restore path touches lights, so last really is last.
-]]
-local function applyNeons(vehicle, properties)
-    if type(properties) ~= 'table' then return end
-    if type(properties.neonEnabled) ~= 'table' then return end
-
-    local colour = properties.neonColor
-
-    local function write()
-        for index = 0, 3 do
-            SetVehicleNeonLightEnabled(vehicle, index, properties.neonEnabled[index + 1] == true)
-        end
-
-        if type(colour) == 'table' and #colour >= 3 then
-            Properties.native('SetVehicleNeonLightsColour', 'SetVehicleNeonLightsColor',
-                vehicle, colour[1], colour[2], colour[3])
-        end
+-- Read all four switches and RGB together. Numeric zero from a native is false.
+function Properties.captureNeons(vehicle)
+    local state = { neonEnabled = {} }
+    for index = 0, 3 do
+        state.neonEnabled[index + 1] = nativeEnabled(IsVehicleNeonLightEnabled(vehicle, index))
     end
+    local colour = { Properties.native('GetVehicleNeonLightsColour', 'GetVehicleNeonLightsColor', vehicle) }
+    if #colour == 3 then state.neonColor = colour end
+    return Schema.neonState(state)
+end
 
-    local function correct()
-        for index = 0, 3 do
-            local wanted = properties.neonEnabled[index + 1] == true
-            if IsVehicleNeonLightEnabled(vehicle, index) ~= wanted then return false end
+function Properties.neonsMatch(vehicle, properties)
+    local wanted = Schema.neonState(properties)
+    local actual = Properties.captureNeons(vehicle)
+    if not wanted or not actual then return false end
+    -- Older rows may carry switches without a colour; only verify what they supplied.
+    if not wanted.neonColor then actual.neonColor = nil end
+    return Schema.sameNeons(actual, wanted)
+end
+
+local function applyNeons(vehicle, properties, verify, canApply)
+    if type(properties) ~= 'table' or properties.neonEnabled == nil then return true end
+    local wanted = Schema.neonState(properties)
+    if not wanted then return false end
+    local stable = 0
+    for attempt = 1, (verify and 10 or 1) do
+        if not DoesEntityExist(vehicle) or (canApply and not canApply()) then return false end
+        if not nativeEnabled(NetworkHasControlOfEntity(vehicle)) then
+            NetworkRequestControlOfEntity(vehicle)
+            stable = 0
+        else
+            if not Properties.neonsMatch(vehicle, wanted) then
+                stable = 0
+                if wanted.neonColor then
+                    Properties.native('SetVehicleNeonLightsColour', 'SetVehicleNeonLightsColor',
+                        vehicle, table.unpack(wanted.neonColor))
+                end
+                for index = 0, 3 do
+                    SetVehicleNeonLightEnabled(vehicle, index, wanted.neonEnabled[index + 1])
+                end
+            end
+            if Properties.neonsMatch(vehicle, wanted) then
+                stable = stable + 1
+                if not verify or stable >= 3 then return true end
+            end
         end
-        return true
+        if verify and attempt < 10 then Wait(200) end
     end
-
-    write()
-
-    --[[
-        READ BACK IMMEDIATELY, AND KNOW WHAT THAT PROVES: ALMOST NOTHING.
-
-        A native write always takes effect LOCALLY. Reading it back in the same frame therefore
-        agrees with itself whatever the network thinks, so this check passed every single time and
-        the warning below it never once printed - on a server where the neons were demonstrably
-        being lost. An instrument that cannot fail is not an instrument.
-
-        What actually decides is whether the value survives the owner's next sync, which happens
-        somewhere in the following second. That is checked by the watchdog in `client/stream.lua`,
-        which comes back and looks a few times after the restore has finished.
-
-        This is still worth doing: it catches an outright refusal, and it is the write itself.
-    ]]
-    if correct() then return true end
-
-    --[[
-        ================================================================================================
-        A NEON WRITTEN WITHOUT NETWORK CONTROL IS WRITTEN INTO THE VOID.
-        ================================================================================================
-
-        This is the failure that cost 1.0.9 the vehicle colours, in a different property: a native
-        applied by a client that does not own the entity takes effect locally and is then overwritten
-        by the owner's next sync, silently and within a frame or two.
-
-        The neons are applied twice on a restore - at the end of the property apply, which holds
-        control, and again after `Placement.place`, which turns the engine off and puts the lights
-        out on its way past. That second one is the one that matters, and by then the control taken
-        for the placement may have lapsed. So it wrote, the owner's sync said otherwise, and the
-        vehicle came back dark with the right value sitting in the database.
-
-        Asking for control and writing again is the fix. Reading the value back afterwards is what
-        makes it honest: if it still disagrees, that goes in the log with the vehicle's id, and the
-        next report is a line rather than a guess.
-    ]]
-    if Placement and Placement.takeControl then
-        Placement.takeControl(vehicle, 1000)
-    end
-
-    write()
-
-    if correct() then return true end
-
-    --[[
-        `warn`, not `debug`. The debug level is off on a normal server, so the last version of this
-        line was written for a log nobody was reading - which is the same mistake as not logging at
-        all, and it cost a round trip to find out.
-    ]]
-    Park.warn('neons would not stay on entity %d: wanted %s, got %s, control %s', vehicle,
-        tostring(properties.neonEnabled[1] == true),
-        tostring(IsVehicleNeonLightEnabled(vehicle, 0)),
-        tostring(NetworkHasControlOfEntity and NetworkHasControlOfEntity(vehicle)))
-
+    Park.warn('neon switches or colour could not be verified on entity %d', vehicle)
     return false
 end
 
@@ -743,7 +682,7 @@ Properties.applyNeons = applyNeons
 local EXTRA_ATTEMPTS = 10
 local EXTRA_RETRY_MS = 50
 
-local function applyExtras(vehicle, properties)
+local function applyExtras(vehicle, properties, rebuild)
     -- STEP 4. Before body health, because toggling an extra repairs the panel it is on.
     if type(properties.extras) ~= 'table' then return end
 
@@ -778,6 +717,9 @@ local function applyExtras(vehicle, properties)
                     end
                 end
             end
+            -- On a freshly spawned, held vehicle only. Rebuild components before applying
+            -- stored health, broken parts and deformation later in Properties.apply.
+            if rebuild then SetVehicleFixed(vehicle) end
         end
 
         stuck = {}
@@ -892,9 +834,8 @@ function Properties.apply(vehicle, properties, options)
         return ok
     end
 
-    -- The vehicle must not be repairing itself underneath us while we build it. Some game
-    -- builds tick a slow auto-repair on a vehicle nobody is in, which quietly undoes the
-    -- damage we are about to apply.
+    -- Suppress extra-triggered repairs outside the explicit fresh-spawn reconstruction.
+    -- This native controls repairs caused by extras, not a background health timer.
     if SetVehicleAutoRepairDisabled then
         SetVehicleAutoRepairDisabled(vehicle, true)
     end
@@ -940,7 +881,16 @@ function Properties.apply(vehicle, properties, options)
     end
 
     if enabledGroup('extras') then
-        guard('extras', function() applyExtras(vehicle, properties) end)
+        guard('extras', function()
+            if options.rebuildExtras and SetVehicleAutoRepairDisabled then
+                SetVehicleAutoRepairDisabled(vehicle, false)
+            end
+            local ok, err = pcall(applyExtras, vehicle, properties, options.rebuildExtras == true)
+            if options.rebuildExtras and SetVehicleAutoRepairDisabled then
+                SetVehicleAutoRepairDisabled(vehicle, true)
+            end
+            if not ok then error(err) end
+        end)
     end
 
     if enabledGroup('plate') then
@@ -1063,7 +1013,7 @@ function Properties.apply(vehicle, properties, options)
         A neon that will not hold is a FAILURE, not a silent shrug. Marking it here is what stops
         the next capture reporting the dark vehicle as the truth.
     ]]
-    if enabledGroup('neons') then
+    if enabledGroup('neons') and not options.deferNeons then
         guard('neons', function()
             if not applyNeons(vehicle, properties) then
                 failed.neons = true

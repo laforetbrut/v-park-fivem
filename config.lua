@@ -697,27 +697,9 @@ Config.Save = {
         modifications = true,  -- every mod slot, wheels, livery, plate holder
         colours = true,        -- primary, secondary, pearlescent, wheel, interior, dashboard
         customPaint = true,    -- RGB custom paint, which is separate from the colour index
-        --[[
-            OFF BY DEFAULT, AND TURNED ON BY ITSELF WHERE SOMETHING HANDLES NEONS PROPERLY.
-
-            Neon state does not survive a vehicle being destroyed and re-created, and that is the
-            game rather than this resource: losing it across a store-and-retrieve cycle is known
-            FiveM behaviour, reported by the community independently of v-park. Nine releases went
-            into working around it here - each fix plausible, several of them real bugs in their own
-            right - and it still did not work.
-
-            What those nine releases DID produce was interference: a hold loop that switched a
-            player's neons off two seconds after they fitted them, and a capture that wrote a failed
-            restore over the value they had chosen. Persisting a thing badly is worse than not
-            persisting it, because the failure reaches into the parts that were working.
-
-            So v-park does not touch neons unless something on the server is known to manage them
-            well. See `Config.Save.neonManagers`: when one of those resources is running, this turns
-            itself on, because that resource is doing the part v-park cannot.
-
-            Set it to `true` to force it on regardless, or `false` to force it off.
-        ]]
-        neons = 'auto',
+        -- Store the four neon switches and RGB, without a mechanic dependency.
+        -- Legacy 'auto' also enables persistence. Set false to opt out explicitly.
+        neons = true,
         extras = true,
         xenon = true,
         windowTint = true,
@@ -739,23 +721,7 @@ Config.Save = {
         statebags = true,      -- only the keys in `statebagKeys` below
     },
 
-    --[[
-        Resources that manage neon lights properly, and whose presence switches
-        `Config.Save.fields.neons` on.
-
-        The list is names, not behaviour. v-park has no way to test whether a resource is good at
-        neons, so it trusts the server owner's choice of mechanic script rather than guessing -
-        guessing about neons is what the nine releases above were, and they were wrong every time.
-
-        `jim-mechanic` is here because it owns the whole neon lifecycle: its `underglow_controller`
-        item is what fits, styles and colours them, so it is the thing that knows what a vehicle's
-        neons are supposed to be. Both spellings, since that author's resources ship under `jim-`
-        and `jim_` both.
-
-        ADD YOURS if it belongs here. Any mechanic or mod-shop resource that puts a vehicle's neons
-        back after it is re-created qualifies, and there is no penalty for a name that is not
-        installed - an absent resource simply does not match.
-    ]]
+    -- Legacy setting retained for existing configs; neon persistence no longer uses this list.
     neonManagers = { 'jim-mechanic', 'jim_mechanic' },
 
     -- Bring a wreck back as a wreck.

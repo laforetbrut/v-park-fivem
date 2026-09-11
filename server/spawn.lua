@@ -1,3 +1,4 @@
+-- Author: vyrriox
 --[[
     server/spawn.lua
 
@@ -168,28 +169,28 @@ local function neighboursOf(record)
     return list
 end
 
---[[
-    Does this record carry neons that are switched on?
+-- Server-side ownership reads can fail while an entity is being removed.
+function Spawn.isNetworkOwner(entry, src)
+    if not entry or not entry.entity or src == nil or not DoesEntityExist(entry.entity) then return false end
+    local ok, owner = pcall(NetworkGetEntityOwner, entry.entity)
+    return ok and owner == src
+end
 
-    Only those need the guard: a vehicle whose neons are off has nothing to lose if a capture reports
-    them off. See the note in `Persist.applySnapshot`.
-]]
-local function hasNeonsOn(record)
-    local properties = record and record.properties
-    if type(properties) ~= 'table' then return false end
-    if type(properties.neonEnabled) ~= 'table' then return false end
-
-    for _, value in ipairs(properties.neonEnabled) do
-        if value == true then return true end
-    end
-
-    return false
+-- Publish only the server's saved selection. The next network owner restores this before capture.
+function Spawn.publishNeons(record, entry)
+    if not entry or not entry.entity or not DoesEntityExist(entry.entity) then return end
+    local wanted = Schema.enabled('neons') and Schema.neonState(record.properties) or false
+    local ok, err = pcall(function() Entity(entry.entity).state:set('vpark:neons', wanted, true) end)
+    if not ok then Park.warn('could not publish neon selection for %s: %s', record.id, tostring(err)) end
 end
 
 local function sendRestore(record, src, netId)
     -- Not to be believed about its neons until the client that places it says they held.
     local entry = Store.live(record.id)
-    if entry and hasNeonsOn(record) then entry.unverifiedNeons = true end
+    if entry then
+        entry.unverifiedNeons = Schema.enabled('neons') and Schema.neonState(record.properties) ~= nil
+        Spawn.publishNeons(record, entry)
+    end
 
     --[[
         AND NOT TO BE BELIEVED ABOUT ANYTHING ELSE UNTIL SOMEBODY HAS DRESSED IT.
@@ -1498,6 +1499,9 @@ RegisterNetEvent('vpark:server:restored', function(id, result)
     ]]
     if result.ok and result.dressed ~= false then
         entry.undressed = nil
+        if result.neonsVerified == true and Spawn.isNetworkOwner(entry, src) then
+            entry.unverifiedNeons = nil
+        end
     end
 
     --[[
@@ -2039,16 +2043,14 @@ RegisterNetEvent('vpark:server:neonFailed', function(id, detail)
         tostring(detail.control), tostring(detail.owner), tostring(detail.exists))
 end)
 
-RegisterNetEvent('vpark:server:verified', function(id, group)
+RegisterNetEvent('vpark:server:verified', function(id, group, netId, proof)
     local src = source
-
-    if type(id) ~= 'string' or group ~= 'neons' then return end
-
-    local entry = Store.live(id)
-    if not entry then return end
-
-    if Spawn.playerIsNear and Spawn.playerIsNear(src, entry.entity, 30.0) == false then return end
-
+    if type(id) ~= 'string' or group ~= 'neons' or type(netId) ~= 'number' then return end
+    local entry, record = Store.live(id), Store.get(id)
+    if not entry or not record or entry.undressed or entry.netId ~= netId then return end
+    if not Spawn.isNetworkOwner(entry, src) then return end
+    -- Ownership is checked above; the simulator can legitimately stand beyond interaction range.
+    if not Schema.sameNeons(proof, record.properties) then return end
     entry.unverifiedNeons = nil
 end)
 

@@ -1,3 +1,4 @@
+-- Author: vyrriox
 --[[
     locales/en.lua
 
@@ -148,7 +149,7 @@ Locale.register('en', {
     ['info.keys']          = 'keys: %s',
     ['info.mode']          = 'persistence mode: %s',
     ['info.counts']        = '%d kept, %d in the world, %d waiting to be written, %d grid cells',
-    ['info.neons_off']     = 'neons: not stored, no neon-capable resource found (Config.Save.fields.neons)',
+    ['info.neons_off']     = 'neons: saving disabled (Config.Save.fields.neons)',
     ['info.neons_on']      = 'neons: stored, handled by %s',
     ['info.zones']         = '%d blocked zone(s)',
     ['info.memory_mode']   = 'IN MEMORY: nothing survives a server restart',

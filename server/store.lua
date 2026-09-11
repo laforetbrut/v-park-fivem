@@ -1,3 +1,4 @@
+-- Author: vyrriox
 --[[
     server/store.lua
 
@@ -632,8 +633,8 @@ end
     ------------------------------------------------------------------------------------------
 
     unverifiedNeons
-                  Set when a restore is sent for a vehicle whose neons are on, and cleared when the
-                  placing client reports they held or when somebody gets in. While it is set,
+                  Set for every saved neon selection during restore. Cleared by a successful
+                  restore acknowledgment or matching proof from the current network owner. While it is set,
                   `Persist.applySnapshot` drops the neon keys from any snapshot, so a vehicle that
                   came back dark cannot write that failure over the player's own value. It lives
                   here rather than on the client because the capture is asked of whichever client is

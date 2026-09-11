@@ -1,3 +1,4 @@
+-- Author: vyrriox
 --[[
     server/persist.lua
 
@@ -322,7 +323,7 @@ function Persist.adopt(src, payload, explicit)
         -- `true`: the position in this payload was measured against the entity above, so it may
         -- say where the vehicle is. Without that, a plate collision would be a way to move a car
         -- that the driven rule in `applySnapshot` would otherwise refuse.
-        Persist.applySnapshot(existing.id, payload, true)
+        Persist.applySnapshot(existing.id, payload, true, src)
         return existing
     end
 
@@ -468,6 +469,7 @@ function Persist.adopt(src, payload, explicit)
 
     -- Marking it means the placement code will never delete it as ambient, and a restart can
     -- adopt it rather than duplicating it.
+    Spawn.publishNeons(record, Store.live(record.id))
     local marked = pcall(function() Entity(entity).state:set('vpark:id', record.id, true) end)
     if not marked then
         Park.debug('%s was adopted but could not be marked - it is still ours', record.id)
@@ -742,25 +744,8 @@ function Persist.applySnapshot(id, snapshot, proven, src)
     if dressed and type(snapshot.properties) == 'table' then
         local properties = Schema.filter(snapshot.properties)
 
-        --[[
-            ================================================================================================
-            A GROUP THE RESTORE HAS NOT PROVED IS NOT ACCEPTED FROM ANYBODY.
-            ================================================================================================
-
-            The client that restores a vehicle knows whether its neons actually held, and 1.0.28 had
-            it drop them from its own report when they had not. That was right and it was not
-            enough, for the reason that cost a release in 1.0.16: THE CAPTURE IS ASKED OF WHICHEVER
-            CLIENT IS NEAREST, and every other client's idea of what is unproven is empty.
-
-            So the flag lives here, where there is one of it. It is set when a restore is sent for a
-            vehicle whose neons are on, and cleared either by the restoring client saying they held
-            or by somebody getting into the vehicle - at which point whatever they do to it is
-            deliberate.
-
-            While it is set, a snapshot's neon keys are dropped and the stored value stands. That is
-            what stops a vehicle that came back dark from writing its own failure into the database,
-            which is what made this bug permanent rather than intermittent.
-        ]]
+        -- A failed neon restore retains the stored switches and RGB until the network owner
+        -- verifies the saved selection. Entering the vehicle alone never clears this guard.
         --[[
             WITHHELD, THEN CARRIED ACROSS. The two halves have to happen in that order and both
             have to happen, because the assignment at the bottom of this block REPLACES the stored
@@ -772,11 +757,32 @@ function Persist.applySnapshot(id, snapshot, proven, src)
 
         local live = Store.live(id)
 
-        if live and live.unverifiedNeons then
+        -- Only the current owner may replace a verified switch/RGB selection. Spectators and
+        -- incomplete readings retain the stored group, including a deliberate all-off choice.
+        local neons = Schema.neonState(properties)
+        local networkOwner = Spawn.isNetworkOwner(live, src)
+        if Schema.enabled('neons') and (not networkOwner or not neons or live.unverifiedNeons) then
             for _, key in ipairs(Schema.keys.neons or {}) do
                 properties[key] = nil
             end
             withheld.neons = true
+        end
+
+        if neons and not withheld.neons then
+            properties.neonEnabled, properties.neonColor = neons.neonEnabled, neons.neonColor
+        end
+        if not Schema.enabled('neons') then withheld.neons = nil end
+        local completeExtras = type(properties.extras) == 'table'
+        if completeExtras and record.properties and type(record.properties.extras) == 'table' then
+            for index in pairs(record.properties.extras) do
+                if properties.extras[tostring(index)] == nil then completeExtras = false; break end
+            end
+        end
+        if Schema.enabled('extras') and (not networkOwner or not completeExtras) then
+            for _, key in ipairs(Schema.keys.extras or {}) do properties[key] = nil end
+            withheld.extras = true
+        elseif not Schema.enabled('extras') then
+            withheld.extras = nil
         end
 
         if record.properties then
@@ -855,10 +861,15 @@ function Persist.applySnapshot(id, snapshot, proven, src)
         patch.statebags = type(snapshot.statebags) == 'table' and snapshot.statebags or nil
     end
 
+    local oldNeons = Schema.neonState(record.properties)
     local changed = Store.update(id, patch)
 
     if changed then
         Persist.guardSize(record)
+        if patch.properties and not Schema.sameNeons(oldNeons, record.properties)
+            and (oldNeons or Schema.neonState(record.properties)) then
+            Spawn.publishNeons(record, Store.live(id))
+        end
     end
 
     return changed
@@ -1000,7 +1011,8 @@ local function sweep()
 
         The occupant is the exact answer, not an estimate: they are sitting in it.
     ]]
-    local perClient = {}
+    local perClient, online = {}, {}
+    for _, player in ipairs(players) do online[player.src] = player end
     local index = 0
 
     for id, entry in pairs(Store.allLive()) do
@@ -1014,7 +1026,13 @@ local function sweep()
             if record and entry.entity and DoesEntityExist(entry.entity) then
                 local best, bestDistance
 
-                if driving then
+                -- The simulator owns extras and neons. A nearer spectator cannot provide a
+                -- verified selection, so prefer the actual owner whenever they are online.
+                local ok, owner = pcall(NetworkGetEntityOwner, entry.entity)
+                local simulator = ok and online[owner] or nil
+                if simulator and simulator.bucket == record.bucket then
+                    best = simulator.src
+                elseif driving then
                     best = entry.occupant
                 else
                     for _, player in ipairs(players) do
