@@ -465,10 +465,12 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
         local dressed = true
 
         if type(data.properties) == 'table' then
-            local ok, _, failed = pcall(Properties.apply, entity, data.properties,
+            local ok, applied, failed = pcall(Properties.apply, entity, data.properties,
                 { version = data.version })
 
-            dressed = ok
+            -- A local withheld group cannot protect a snapshot from another client.
+            -- Keep the server's existing undressed guard up when extras never verified.
+            dressed = ok and applied ~= false and not (type(failed) == 'table' and failed.extras)
             unverified[data.id] = type(failed) == 'table' and next(failed) and failed or nil
             if not dressed then
                 Park.debug('could not apply properties to %s - placing it anyway, and it will '

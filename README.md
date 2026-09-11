@@ -1,6 +1,6 @@
 # v-park
 
-Current release: **1.1.1**. Author: **vyrriox**.
+Current release: **1.1.2**. Author: **vyrriox**.
 
 Vehicle persistence for FiveM, built for QBCore and running on qbx_core, ESX and ox_core too.
 
@@ -155,6 +155,19 @@ Run `/vparkinfo` to print what was actually detected on **your** server.
 ---
 
 ## Installation
+
+### Upgrading to 1.1.2
+
+Replace the resource files while retaining your custom config, then restart v-park so clients
+load the updated code. There is no additional database change beyond the 1.1.1 repair below.
+Extras that are not ready are retried ten times, with at most nine 50 ms waits. The complete
+selection is verified after each pass, with network control required before writing.
+
+If an extra remains unavailable, the error lists its index. The vehicle keeps its existing
+saved properties until a later successful restore; this also prevents another client's capture
+from overwriting the player's selection. New property changes during that failure are not saved.
+Tyre states now retain the distinction between a puncture and a tyre destroyed down to its rim.
+Validate the actual police model by leaving/returning with two clients and restarting the server.
 
 ### Upgrading to 1.1.1
 
@@ -715,6 +728,20 @@ physique en vingt minutes, et n'est pas simulée du tout.
 qu'on règle `Config.Placement.probe.shrink` sur son propre MLO au lieu de deviner.
 
 ## Installation
+
+### Mise à jour vers 1.1.2
+
+Remplacer les fichiers de la ressource en conservant la configuration personnalisée, puis
+redémarrer v-park pour charger le code client mis à jour. Aucun changement SQL supplémentaire
+par rapport à la réparation de la 1.1.1 ci-dessous. Les extras indisponibles font l'objet de dix
+tentatives, avec au maximum neuf attentes de 50 ms. Chaque passage vérifie la sélection complète
+et exige le contrôle réseau avant toute écriture.
+
+Si un extra reste indisponible, son indice apparaît dans l'erreur. Les propriétés sauvegardées
+sont conservées jusqu'à une restauration réussie, y compris lorsqu'un autre client transmet une
+capture. Les nouvelles modifications de propriétés pendant cet échec ne sont pas enregistrées.
+Les pneus conservent la distinction entre une crevaison et un pneu détruit jusqu'à la jante.
+Valider le modèle de police réel avec deux joueurs, un éloignement/retour et un redémarrage serveur.
 
 ### Mise à jour vers 1.1.1
 

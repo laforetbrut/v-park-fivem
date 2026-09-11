@@ -7,6 +7,49 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.1.2] - 2026-09-11
+
+### Fixed
+
+- Restore delayed vehicle extras. Keep unavailable extras pending, retry up to ten times with
+  a 50 ms interval, require network control before writes and verify the complete selection
+  after every pass. A permanently unavailable extra now fails explicitly instead of being skipped.
+- Keep the server's existing undressed guard active when extras fail to restore. Neither the
+  placing client nor a second client's snapshot can overwrite the saved properties with defaults.
+  The guard clears after a successful restore by the nominated client. Property changes made
+  while the guard is active are deliberately not saved.
+- Restore tyre state 1 as punctured and state 2 as destroyed down to the rim. Normalize native
+  boolean/integer results during capture and preserve detached wheels as state 3.
+
+### Validation
+
+All 21 static check groups and 11 Lua regression tests pass. Tests cover ready, delayed and
+unavailable extras, linked extras, control loss, the actual server snapshot guard, and repeated
+tyre restore/capture cycles. The new delayed-extra, tyre-state and restore-guard tests also reject
+the published 1.1.1 code. FiveM natives are mocked; the police model and real multiplayer streaming
+still require in-game validation. The production report's loading-delay explanation is consistent
+with the code defect, but has not been independently reproduced in FiveM here.
+
+### Français
+
+- Restauration des extras disponibles avec retard : conservation des indices attendus, dix
+  tentatives espacées de 50 ms, contrôle réseau avant écriture et vérification de la sélection
+  complète. Un extra toujours indisponible est signalé au lieu d'être ignoré.
+- Maintien de la protection serveur après un échec des extras. Les captures du joueur qui place
+  le véhicule et celles d'un second joueur ne peuvent plus écraser les propriétés sauvegardées.
+  Une restauration réussie par le client désigné lève cette protection. Les changements de
+  propriétés effectués pendant cet échec ne sont volontairement pas sauvegardés.
+- Correction des pneus : état 1 crevé, état 2 détruit jusqu'à la jante, état 3 roue arrachée.
+  Prise en charge des résultats natifs booléens et entiers lors de la capture.
+
+Les 21 groupes de contrôles et les 11 tests Lua passent. Les tests des extras retardés, des pneus
+et de la protection après restauration échouent sur le code publié en 1.1.1. Les natives sont
+simulées : le véhicule de police réel et le streaming multijoueur restent à vérifier en jeu.
+Le délai de montage évoqué dans le rapport est cohérent avec le défaut constaté dans le code,
+mais n'a pas été reproduit indépendamment dans FiveM ici.
+
+---
+
 ## [1.1.1] - 2026-09-11
 
 ### Fixed

@@ -8,6 +8,25 @@ out of it.
 
 ---
 
+## [2026-09-11 23:44] - An unavailable extra was excluded from the verification set
+**Context:** A production report described intermittent police lightbar changes after respawning.
+**Error:** The 1.1.1 check skipped extras for which DoesExtraExist was false on its first read.
+**Root cause:** The expected set was built from current availability, so a missing extra could
+never fail verification. Local unverified flags also did not protect another client's snapshot.
+**Fix:** Keep the saved expectation, retry with bounded waits and network control, recheck the
+whole selection and keep the server's undressed guard active on failure.
+**Prevention:** Test delayed and permanently unavailable extras, coupled changes and a second
+client's actual server snapshot path. An immediate successful read does not prove future network stability.
+
+## [2026-09-11 23:44] - Tyre restore inverted punctured and rim-only states
+**Context:** The same production report identified alternating tyre damage across restarts.
+**Error:** Capture stored rim-only damage as 2, but restore passed onRim=true for state 1.
+**Root cause:** The getter's completely argument and setter's onRim argument were mapped backwards.
+**Fix:** Use level == 2 for onRim and normalize boolean/integer native results during capture.
+**Prevention:** Test all three tyre states across repeated restore/capture cycles, including intact tyres.
+
+---
+
 ## [2026-09-11 23:34] - Fresh databases were marked migrated without the required column
 **Context:** INSERT failures reported by an operator.
 **Error:** Unknown column 'vehicle_type' in 'INSERT INTO'.

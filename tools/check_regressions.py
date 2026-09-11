@@ -25,7 +25,8 @@ class Regressions(unittest.TestCase):
                 error('missing upvalue ' .. name)
             end
             function CreateThread() end
-            function RegisterNetEvent() end
+            netEvents = {}
+            function RegisterNetEvent(name, fn) netEvents[name] = fn end
             handlers = {}
             function AddEventHandler(event, fn)
                 handlers[event] = handlers[event] or {}
@@ -41,6 +42,10 @@ class Regressions(unittest.TestCase):
             end
             function DoesExtraExist(_, index) return boolResult(states[index] ~= nil) end
             function IsVehicleExtraTurnedOn(_, index) return boolResult(states[index] == true) end
+            waits = 0
+            function Wait(ms) assert(ms == 50); waits = waits + 1 end
+            function NetworkHasControlOfEntity() return true end
+            function NetworkRequestControlOfEntity() end
             writes = {}
             function SetVehicleExtra(_, index, disable)
                 assert(type(disable) == 'number')
@@ -79,7 +84,7 @@ class Regressions(unittest.TestCase):
                 assert(not states[0] and states[1] and not states[2] and states[20])
                 writes = {}
                 apply(42, {extras = {['0'] = true, ['1'] = false, ['2'] = true, ['20'] = false,
-                    ['3'] = 0, ['-1'] = 0, ['1.5'] = 0, garbage = false}})
+                    ['-1'] = 0, ['1.5'] = 0, garbage = false}})
                 assert(states[0] and not states[1] and states[2] and not states[20])
                 assert(#writes == 4)
                 assert(writes[1][2] == 1 and writes[2][2] == 1 and writes[3][2] == 0)
@@ -90,6 +95,140 @@ class Regressions(unittest.TestCase):
             end
             SetVehicleExtra = noop
             assert(not pcall(apply, 42, {extras = {['1'] = 0}}), 'refused extra must fail its group')
+        """)
+
+    def test_delayed_and_never_available_extras(self):
+        self.load('client/properties.lua')
+        self.lua.execute("""
+            local apply = upvalue(Properties.apply, 'applyExtras')
+            apply(42, {extras = {['1'] = 0}})
+            assert(waits == 0, 'ready model must not wait')
+            states[3] = nil
+            Wait = function(ms)
+                assert(ms == 50)
+                waits = waits + 1
+                if waits == 3 then states[3] = false end
+            end
+            apply(42, {extras = {['3'] = 0}})
+            assert(waits == 3 and states[3], 'late extra must be restored')
+            waits = 0
+            Wait = function(ms) assert(ms == 50); waits = waits + 1 end
+            local ok, err = pcall(apply, 42, {extras = {['4'] = 1}})
+            assert(not ok and tostring(err):find('extras 4', 1, true))
+            assert(waits == 9, 'retry budget must be bounded at 450 ms')
+        """)
+
+    def test_extra_retry_keeps_control_and_rechecks_linked_extras(self):
+        self.load('client/properties.lua')
+        self.lua.execute("""
+            local apply = upvalue(Properties.apply, 'applyExtras')
+            local originalWrite = SetVehicleExtra
+            NetworkHasControlOfEntity = function() return waits >= 2 end
+            SetVehicleExtra = function(...)
+                assert(NetworkHasControlOfEntity(), 'cannot write without control')
+                originalWrite(...)
+            end
+            apply(42, {extras = {['1'] = 0}})
+            assert(waits == 2 and states[1])
+            waits = 0
+            NetworkHasControlOfEntity = function() return true end
+            local disturb = true
+            SetVehicleExtra = function(vehicle, index, disable)
+                originalWrite(vehicle, index, disable)
+                if index == 2 and disable == 0 and disturb then
+                    states[1] = false
+                    disturb = false
+                end
+            end
+            apply(42, {extras = {['1'] = 0, ['2'] = 0}})
+            assert(waits == 1 and states[1] and states[2], 'recheck the full set after writes')
+            NetworkHasControlOfEntity = function() return false end
+            assert(not pcall(apply, 42, {extras = {['1'] = 0}}))
+            DoesEntityExist = function() return false end
+            assert(not pcall(apply, 42, {extras = {['1'] = 0}}))
+        """)
+
+    def test_tyre_states_round_trip_across_repeated_restores(self):
+        self.load('client/properties.lua')
+        self.lua.execute("""
+            local apply = upvalue(Properties.apply, 'applyDamage')
+            local tyres = {}
+            IsVehicleTyreBurst = function(_, index, rimOnly)
+                local level = tyres[index] or 0
+                return boolResult(rimOnly and level >= 2 or not rimOnly and level >= 1)
+            end
+            IsVehicleWheelBrokenOff = function(_, index) return boolResult(tyres[index] == 3) end
+            SetVehicleTyreBurst = function(_, index, onRim) tyres[index] = onRim and 2 or 1 end
+            BreakOffVehicleWheel = function(_, index) tyres[index] = 3 end
+            for _, mode in ipairs({false, true}) do
+                integerNatives = mode
+                for cycle = 1, 4 do
+                    apply(42, {tyres = {['0'] = 1, ['1'] = 2, ['2'] = 3}})
+                    assert(tyres[0] == 1 and tyres[1] == 2 and tyres[2] == 3, 'onRim mapping is reversed')
+                    local captured = Properties.captureTyres(42)
+                    assert(captured['0'] == 1 and captured['1'] == 2 and captured['2'] == 3)
+                    assert(captured['3'] == nil)
+                    tyres = {}
+                    apply(42, {tyres = captured})
+                end
+            end
+        """)
+
+    def test_failed_extras_keep_server_undressed_guard(self):
+        source = (ROOT / 'client/stream.lua').read_text(encoding='utf-8')
+        start = source.index('        local dressed = true')
+        end = source.index('        local result = Placement.place', start)
+        self.lua.execute("\n            entity = 42\n            data = {id = 'sample', properties = {extras = {['1'] = 0}}}\n            unverified = {}\n            Properties = {}\n        ")
+        assess = self.lua.eval('function() ' + source[start:end] + ' return dressed end')
+        self.lua.execute('Properties.apply = function() return true, {extras = true} end')
+        self.assertFalse(assess())
+        self.assertTrue(self.lua.eval('unverified.sample.extras'))
+        self.lua.execute('Properties.apply = function() return true, {} end')
+        self.assertTrue(assess())
+        self.lua.execute('Properties.apply = function() return false end')
+        self.assertFalse(assess())
+        # Exercise the real property guard, restore acknowledgment and foreign snapshot path.
+        self.load('client/properties.lua')
+        self.lua.execute("""
+            Schema = {enabled = function(group) return group == 'extras' end}
+            SetVehicleModKit, SetVehicleEngineOn, SetVehicleDoorsShut = noop, noop, noop
+            GetEntityModel = function() return 123 end
+            IsVehicleWindowIntact = function() return true end
+            data.properties.extras = {['4'] = 0}
+        """)
+        self.assertFalse(assess())
+        self.assertTrue(self.lua.eval('unverified.sample.extras'))
+        self.lua.execute("""
+            live = {entity=42, placer=7, undressed=true}
+            saved = {properties={extras={['4']=0}}, vehicle_type='automobile'}
+            Park.ticks = function() return 1000 end
+            Park.trace = noop
+            Park.timing = function() return {} end
+            Store = {live=function() return live end, get=function() return saved end,
+                update=function(_, patch)
+                    for key, value in pairs(patch) do saved[key] = value end
+                    return false
+                end}
+            Entity = function() return {state={set=noop}} end
+        """)
+        self.load('server/spawn.lua')
+        self.load('server/persist.lua')
+        self.lua.execute("""
+            source = 7
+            netEvents['vpark:server:restored']('sample', {ok=true, dressed=false})
+            assert(live.undressed, 'failed extras must keep the server guard')
+            Persist.applySnapshot('sample', {properties={extras={['4']=1}}}, false, 8)
+            assert(saved.properties.extras['4'] == 0, 'another client must not overwrite the choice')
+        """)
+        self.lua.execute('states[4] = false')
+        self.assertTrue(assess())
+        self.lua.execute("""
+            source = 8
+            netEvents['vpark:server:restored']('sample', {ok=true, dressed=true})
+            assert(live.undressed, 'only the nominated client may clear the guard')
+            source = 7
+            netEvents['vpark:server:restored']('sample', {ok=true, dressed=true})
+            assert(not live.undressed, 'successful restore must clear the guard')
         """)
 
     def test_frozen_vehicle_recaptures_changed_extras(self):

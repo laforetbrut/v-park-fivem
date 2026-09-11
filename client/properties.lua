@@ -210,6 +210,20 @@ function Properties.extrasMatch(vehicle, expected)
     return true
 end
 
+function Properties.captureTyres(vehicle)
+    local tyres = {}
+    for index = 0, 7 do
+        if nativeEnabled(IsVehicleTyreBurst(vehicle, index, false)) then
+            if IsVehicleWheelBrokenOff and nativeEnabled(IsVehicleWheelBrokenOff(vehicle, index)) then
+                tyres[tostring(index)] = 3
+            else
+                tyres[tostring(index)] = nativeEnabled(IsVehicleTyreBurst(vehicle, index, true)) and 2 or 1
+            end
+        end
+    end
+    return tyres
+end
+
 function Properties.capture(vehicle, options)
     if not DoesEntityExist(vehicle) then return nil end
 
@@ -410,17 +424,7 @@ function Properties.capture(vehicle, options)
 
     -- 1 punctured, 2 completely burst, 3 broken off the axle. Three different states and
     -- three different repairs, so they are stored as the state and not as a boolean.
-    local tyres = {}
-    for index = 0, 7 do
-        if IsVehicleTyreBurst(vehicle, index, false) then
-            if IsVehicleWheelBrokenOff and IsVehicleWheelBrokenOff(vehicle, index) then
-                tyres[tostring(index)] = 3
-            else
-                tyres[tostring(index)] = IsVehicleTyreBurst(vehicle, index, true) and 2 or 1
-            end
-        end
-    end
-    properties.tyres = tyres
+    properties.tyres = Properties.captureTyres(vehicle)
 
     -- Which doors are standing open, and how far. Only stored when the config asks for it,
     -- because most servers want a parked car to have its doors shut.
@@ -736,6 +740,9 @@ end
 
 Properties.applyNeons = applyNeons
 
+local EXTRA_ATTEMPTS = 10
+local EXTRA_RETRY_MS = 50
+
 local function applyExtras(vehicle, properties)
     -- STEP 4. Before body health, because toggling an extra repairs the panel it is on.
     if type(properties.extras) ~= 'table' then return end
@@ -743,8 +750,7 @@ local function applyExtras(vehicle, properties)
     local wanted = {}
     for key, value in pairs(properties.extras) do
         local index = tonumber(key)
-        if index and index % 1 == 0 and index >= 0 and index <= 20
-            and nativeEnabled(DoesExtraExist(vehicle, index)) then
+        if index and index % 1 == 0 and index >= 0 and index <= 20 then
             -- Native v-park rows use 0=on/1=off; imported framework booleans mean enabled.
             if type(value) == 'boolean' then
                 wanted[index] = value and 0 or 1
@@ -754,17 +760,40 @@ local function applyExtras(vehicle, properties)
         end
     end
 
-    -- Disable first, then enable, in a stable order for models with linked extras.
-    for disable = 1, 0, -1 do
+    if not next(wanted) then return end
+
+    local stuck = {}
+    for attempt = 1, EXTRA_ATTEMPTS do
+        if not DoesEntityExist(vehicle) then error('vehicle disappeared while restoring extras') end
+        local controlled = nativeEnabled(NetworkHasControlOfEntity(vehicle))
+        if not controlled then NetworkRequestControlOfEntity(vehicle) end
+
+        -- Keep the full desired set between attempts: an extra that appears late can reset
+        -- one that succeeded earlier. Recheck all of them after the complete write pass.
+        if controlled then
+            for disable = 1, 0, -1 do
+                for index = 0, 20 do
+                    if wanted[index] == disable and nativeEnabled(DoesExtraExist(vehicle, index)) then
+                        SetVehicleExtra(vehicle, index, disable)
+                    end
+                end
+            end
+        end
+
+        stuck = {}
         for index = 0, 20 do
-            if wanted[index] == disable then SetVehicleExtra(vehicle, index, disable) end
+            local disable = wanted[index]
+            if disable ~= nil and (not controlled
+                or not nativeEnabled(DoesExtraExist(vehicle, index))
+                or nativeEnabled(IsVehicleExtraTurnedOn(vehicle, index)) ~= (disable == 0)) then
+                stuck[#stuck + 1] = index
+            end
         end
+        if #stuck == 0 then return end
+        if attempt < EXTRA_ATTEMPTS then Wait(EXTRA_RETRY_MS) end
     end
-    for index, disable in pairs(wanted) do
-        if nativeEnabled(IsVehicleExtraTurnedOn(vehicle, index)) ~= (disable == 0) then
-            error(('extra %d did not restore'):format(index))
-        end
-    end
+    error(('extras %s did not restore after %d attempts')
+        :format(table.concat(stuck, ', '), EXTRA_ATTEMPTS))
 end
 
 local function applyDamage(vehicle, properties)
@@ -798,7 +827,7 @@ local function applyDamage(vehicle, properties)
                     SetVehicleTyreBurst(vehicle, index, false, 1000.0)
                     BreakOffVehicleWheel(vehicle, index, true, true, true, false)
                 else
-                    SetVehicleTyreBurst(vehicle, index, level == 1, 1000.0)
+                    SetVehicleTyreBurst(vehicle, index, level == 2, 1000.0)
                 end
             end
         end
