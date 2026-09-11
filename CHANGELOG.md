@@ -7,6 +7,50 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.1.1] - 2026-09-11
+
+### Fixed
+
+- Restore vehicle extras consistently: handle boolean and integer native results, capture extra
+  index zero, accept imported boolean states, apply disabled extras before enabled ones, and
+  report rejected restores so the saved group is retained. Frozen vehicles are recaptured when
+  their extras change, even without movement or damage.
+- Include `vehicle_type` in fresh database creation and repair its absence regardless of stored
+  schema metadata. Verify the column after adding it; do not mark a failed migration successful.
+  An optional repeatable SQL repair is included for installations with automatic migrations off.
+- Read nested Quasar spawn/menu coordinates and skip malformed garage entries. Include an
+  optional export bridge for older Quasar builds, with installation instructions.
+- Refresh garage discovery and server zones after a supported garage starts or stops. Reduce
+  the default exclusion radius from 25 to 5 metres around the spawn bay.
+- Check the actual runtime CREATE TABLE rather than accepting a column mentioned elsewhere.
+  Add seven Lua behavioral regression tests for schema repair, extras and garage discovery.
+
+### Validation
+
+The 21 static check groups and seven Lua regression tests pass. FiveM natives and database
+responses are mocked in the regression tests. The reported police model, multiplayer streaming
+and a live MySQL/Quasar server still need in-game validation.
+
+### Français
+
+- Restauration cohérente des extras : résultats natifs booléens ou entiers, indice zéro,
+  états booléens importés, désactivation avant activation et signalement d'un extra refusé pour
+  préserver sa valeur sauvegardée. Un changement sur un véhicule gelé déclenche une capture.
+- Ajout de `vehicle_type` à la création et réparation même si la base est déjà marquée à jour.
+  Vérification après ajout, sans annoncer une migration réussie en cas d'échec. Script SQL
+  réexécutable fourni pour les installations sans migration automatique.
+- Lecture des coordonnées imbriquées Quasar, exclusion des entrées invalides et pont optionnel
+  documenté pour les anciennes versions dépourvues d'export.
+- Rafraîchissement des garages et zones serveur après démarrage ou arrêt d'un garage pris en
+  charge. Rayon d'exclusion par défaut réduit de 25 à 5 mètres autour de la place de sortie.
+- Contrôle du véritable CREATE TABLE et ajout de sept tests de régression Lua.
+
+Les 21 groupes de contrôles statiques et les sept tests Lua passent. Les natives FiveM et les
+réponses SQL sont simulées. Le véhicule de police signalé, le streaming multijoueur et un serveur
+MySQL/Quasar réel restent à valider en jeu. Les extras déjà écrasés doivent être reconfigurés une fois.
+
+---
+
 ## [1.1.0] - 2026-09-10
 
 **Three players testing at once found four bugs that a single player cannot reach, and a fifth

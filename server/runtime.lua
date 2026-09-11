@@ -1,5 +1,6 @@
 --[[
     server/runtime.lua
+    Author: vyrriox
 
     Boot order, and the one flag every timer in this resource waits on.
 
@@ -101,64 +102,7 @@ end
 
     Every garage resource stores its list differently, so each is a small adapter.
 ]]
-local GARAGE_READERS = {
-    {
-        resource = 'qs-advancedgarages',
-        read = function()
-            -- Quasar keeps its garages in a shared config table exposed through an export on
-            -- recent builds. Older builds have no export at all, which is why the failure
-            -- path here is a warning and not an error.
-            local list = Park.try(function() return exports['qs-advancedgarages']:GetGarages() end)
-            if type(list) ~= 'table' then return nil end
-
-            local out = {}
-            for key, garage in pairs(list) do
-                local point = Park.toVec(garage.takeVehicle or garage.spawnPoint or garage.coords
-                    or garage.location or garage.Location)
-                if point then
-                    out[#out + 1] = { id = tostring(garage.id or key), label = garage.label or key, point = point }
-                end
-            end
-            return out
-        end,
-    },
-    {
-        resource = 'qb-garages',
-        read = function()
-            -- qb-garages publishes `Garages` as a shared global inside its own state, which
-            -- is not reachable from here. Its config file is, and reading a Lua file we do
-            -- not own is not something this resource does. So: the export if there is one.
-            local list = Park.try(function() return exports['qb-garages']:GetGarages() end)
-            if type(list) ~= 'table' then return nil end
-
-            local out = {}
-            for key, garage in pairs(list) do
-                local point = Park.toVec(garage.takeVehicle or garage.putVehicle or garage.spawnPoint)
-                if point then
-                    out[#out + 1] = { id = tostring(key), label = garage.label or key, point = point }
-                end
-            end
-            return out
-        end,
-    },
-    {
-        resource = 'jg-advancedgarages',
-        read = function()
-            local list = Park.try(function() return exports['jg-advancedgarages']:GetGarages() end)
-            if type(list) ~= 'table' then return nil end
-
-            local out = {}
-            for key, garage in pairs(list) do
-                local point = Park.toVec(garage.parkingSpots and garage.parkingSpots[1]
-                    or garage.garageLocation or garage.coords)
-                if point then
-                    out[#out + 1] = { id = tostring(garage.id or key), label = garage.label or key, point = point }
-                end
-            end
-            return out
-        end,
-    },
-}
+-- Resource-specific readers live in bridge/server/garages.lua.
 
 --[[
     Which garage resource is installed, and what it calls its garages.
@@ -171,7 +115,7 @@ function Runtime.garages()
 
     local configured = Config.Compat and Config.Compat.garages
 
-    for _, reader in ipairs(GARAGE_READERS) do
+    for _, reader in ipairs(Bridge.garageReaders) do
         if Park.started(reader.resource) and (configured == 'auto' or configured == reader.resource) then
             local ok, list = pcall(reader.read)
 
@@ -200,7 +144,7 @@ local function compileZones()
     local extra = {}
 
     if Config.ZoneOptions and Config.ZoneOptions.autoGarages ~= false then
-        local radius = tonumber(Config.ZoneOptions.autoGarageRadius) or 25.0
+        local radius = tonumber(Config.ZoneOptions.autoGarageRadius) or 5.0
 
         for _, garage in ipairs(Runtime.garages()) do
             extra[#extra + 1] = {
@@ -216,6 +160,21 @@ local function compileZones()
     local count = Zones.compile(extra)
     Park.log('%d blocked zone(s) compiled (%d from garages)', count, #extra)
 end
+
+-- Refresh after a garage starts or stops. Deferring keeps stop handlers non-yielding and
+-- lets the other resource finish registering its exports before we read them.
+local function refreshGarages(resource)
+    if not state.ready or not Bridge.isGarageResource(resource) then return end
+    SetTimeout(1000, function()
+        if not state.ready then return end
+        state.garages = nil
+        state.garageResource = nil
+        compileZones()
+    end)
+end
+
+AddEventHandler('onResourceStart', refreshGarages)
+AddEventHandler('onResourceStop', refreshGarages)
 
 -- ---------------------------------------------------------------------------------------
 -- The banner

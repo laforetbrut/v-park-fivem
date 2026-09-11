@@ -1,5 +1,6 @@
 --[[
     client/stream.lua
+    Author: vyrriox
 
     What the client does with a vehicle the server has just created for it, and the single
     timer that wakes and re-freezes them.
@@ -1539,7 +1540,9 @@ function Stream.snapshot(id, reference)
     local health = GetVehicleBodyHealth(record.entity)
     local settled = record.lastHealth == nil or math.abs(health - record.lastHealth) < 1.0
 
-    if record.frozen and record.captureClean and settled then
+    -- External scripts can change extras without moving or damaging a frozen vehicle.
+    if record.frozen and record.captureClean and settled
+        and Properties.extrasMatch(record.entity, record.lastExtras) then
         return nil
     end
 
@@ -1578,6 +1581,7 @@ function Stream.snapshot(id, reference)
 
     -- Clean until something touches it again.
     record.captureClean = true
+    record.lastExtras = properties.extras
 
     --[[
         A VEHICLE NOBODY HAS DRIVEN DOES NOT REPORT WHERE IT IS.

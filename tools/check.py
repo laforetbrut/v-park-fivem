@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 tools/check.py
+Author: vyrriox
 
 Static checks over the whole resource. Run it before every commit and before every release.
 
@@ -413,9 +414,18 @@ def check_schema_columns():
     # The runtime CREATE TABLE in database.lua has to agree too, or a fresh install and an
     # imported one end up with different tables.
     database = read(os.path.join(ROOT, 'server', 'database.lua'))
-    for column in lua_columns:
-        if f'`{column}`' not in database:
-            fail('schema', f'`{column}` is in Store.columns and not in the runtime schema')
+    runtime_table = re.search(
+        r"local function vehiclesSchema\(\).*?CREATE TABLE IF NOT EXISTS %s \((.*?)\n\) ENGINE",
+        database, re.S)
+    if not runtime_table:
+        fail('schema', 'could not find the runtime vehicles CREATE TABLE')
+        return
+    runtime_columns = re.findall(r"^\s*`([a-z_]+)`\s+\w", runtime_table.group(1), re.M)
+    if runtime_columns != lua_columns:
+        fail('schema', 'runtime CREATE TABLE columns differ from Store.columns: '
+             f'missing={sorted(set(lua_columns) - set(runtime_columns))}, '
+             f'extra={sorted(set(runtime_columns) - set(lua_columns))}; check order too')
+
 
 
 # ==============================================================================================

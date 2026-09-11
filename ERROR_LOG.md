@@ -8,6 +8,43 @@ out of it.
 
 ---
 
+## [2026-09-11 23:34] - Fresh databases were marked migrated without the required column
+**Context:** INSERT failures reported by an operator.
+**Error:** Unknown column 'vehicle_type' in 'INSERT INTO'.
+**Root cause:** The runtime CREATE TABLE omitted the column, but a fresh database was stamped
+current before the upgrade path ran. The static check accepted a mention in migration code.
+**Fix:** Include the column in CREATE TABLE; inspect and repair it on every automatic schema boot,
+verify ALTER took effect, and check the actual CREATE TABLE in the static validator.
+**Prevention:** Test fresh tables, old tables with absent metadata and falsely current tables.
+
+## [2026-09-11 23:34] - Numeric zero enabled extras and a frozen shortcut missed changes
+**Context:** Police vehicle extras changed after leaving and returning.
+**Error:** Native integer zero was truthy; imported false extras were also enabled on apply.
+**Root cause:** Capture used Lua truthiness, restore only understood numeric disable flags,
+and the frozen-and-clean shortcut checked body health but not externally changed extras.
+**Fix:** Normalize native BOOL results explicitly, support boolean imports and index zero,
+restore in stable disable/enable order, verify results and compare extras before skipping capture.
+**Prevention:** Exercise both native representations, imported values, round trips and frozen edits.
+**Limitation:** The exact police model and multiplayer behavior have not been tested in FiveM.
+
+## [2026-09-11 23:34] - Quasar garage coordinates were not a direct vector
+**Context:** Installed Quasar garages produced no automatic exclusion zones or panel choices.
+**Error:** Missing GetGarages export on older builds, or nested coords rejected as a vector.
+**Root cause:** Reader assumed a direct coordinate field and cached failure for the resource lifetime.
+**Fix:** Validate nested spawn/menu points, supply an optional Quasar export bridge and refresh
+cached discovery on supported garage resource lifecycle events. Default bay radius is five metres.
+**Prevention:** Test raw nested, bridged flat, malformed and restarted garage lists separately.
+
+## [2026-09-11 23:34] - Local clone and GitHub access crossed execution identities
+**Context:** Preparing an isolated checkout and inspecting the release destination.
+**Error:** Git dubious-ownership checks, sandbox TLS credentials failure and GitHub HTTP 401.
+**Root cause:** Sandbox and authenticated host use different execution identities and credentials.
+**Fix:** Use an invocation-scoped safe-directory override for the dedicated checkout and approved
+host execution for GitHub operations. No credentials copied and no global Git settings changed.
+**Prevention:** Keep local source edits in the workspace and use authenticated execution for remote Git.
+
+---
+
 ## [2026-09-11 04:15] - Reading a value from the one place it cannot be read
 
 **Context:** a tow truck moves a vehicle, puts it down, and the next restart returns it to where it

@@ -1,5 +1,7 @@
 # v-park
 
+Current release: **1.1.1**. Author: **vyrriox**.
+
 Vehicle persistence for FiveM, built for QBCore and running on qbx_core, ESX and ox_core too.
 
 Leave a car somewhere and it is still there after the restart, **in the same parking space** -
@@ -153,6 +155,24 @@ Run `/vparkinfo` to print what was actually detected on **your** server.
 ---
 
 ## Installation
+
+### Upgrading to 1.1.1
+
+Back up the database and keep your customized `config.lua` before replacing the resource.
+With `Config.Database.autoSchema = true` (default), restart v-park to add a missing
+`vehicle_type` column, even if the database was already marked current. Existing rows are kept.
+If automatic schema changes are disabled, run `sql/upgrade_1.1.1.sql` on the existing database
+first, adapting its table prefix if necessary, then restart. Reimporting the installation SQL
+alone does not alter an existing table.
+
+The default `Config.ZoneOptions.autoGarageRadius` is now **5 metres**, centred on the spawn bay.
+If keeping your old config, change this value yourself to adopt the new default.
+
+Extras now handle native boolean/integer results, extra index zero and imported boolean values.
+Changes made to extras on a frozen vehicle trigger a new capture. An extra that fails to restore
+is logged and withheld from the next snapshot, preserving its saved value. A configuration
+already overwritten by an earlier version cannot be reconstructed: set the intended extras once
+in game, let the save complete, then test leaving and returning and a resource/server restart.
 
 1. Drop `v-park` into your `resources/` folder.
 2. `ensure v-park` in `server.cfg`, **after** your framework and after oxmysql.
@@ -471,6 +491,25 @@ already calls them keeps working after the switch.
 
 ## Garage integration
 
+### Older Quasar builds without `GetGarages`
+
+The reader accepts both flat garage entries and Quasar's nested `coords.spawnCoords` /
+`coords.menuCoords`, preferring the spawn bay. Garages without valid coordinates are skipped.
+A supported garage starting or stopping refreshes the cached list and server zones after one second.
+
+If Quasar does not expose a server-side `GetGarages` export:
+
+1. Copy `integrations/quasar/vpark_bridge.lua.example` to
+   `qs-advancedgarages/config/vpark_bridge.lua`.
+2. Add `'config/vpark_bridge.lua',` immediately after `'config/garages.lua',` in Quasar's
+   manifest list that loads the config on the server (shared is also valid). Do not load it twice.
+3. Restart Quasar, then v-park for the initial installation. `/vparkinfo` should report the
+   detected resource and garage count; the boot log should say `read ... garage(s)`.
+
+The bridge only exports Quasar's own config; v-park handles the conversion. A Quasar update
+may remove this file and manifest entry, so keep a copy. If you cannot install the bridge,
+configure `Config.Zones` and `Config.Panel.garages` manually.
+
 A garage stores a vehicle by deleting its entity. We do not hook that. Instead:
 
 1. Every vehicle we restore carries a `vpark:id` statebag.
@@ -676,6 +715,43 @@ physique en vingt minutes, et n'est pas simulée du tout.
 qu'on règle `Config.Placement.probe.shrink` sur son propre MLO au lieu de deviner.
 
 ## Installation
+
+### Mise à jour vers 1.1.1
+
+Sauvegarder la base et conserver le `config.lua` personnalisé avant de remplacer la ressource.
+Avec `Config.Database.autoSchema = true` (valeur par défaut), redémarrer v-park ajoute la colonne
+`vehicle_type` manquante, même si la base était déjà marquée à jour. Les lignes sont conservées.
+Si les migrations automatiques sont désactivées, exécuter `sql/upgrade_1.1.1.sql` sur la base
+existante, en adaptant son préfixe de table si nécessaire, puis redémarrer. Réimporter uniquement
+le SQL d'installation ne modifie pas une table existante.
+
+Le rayon par défaut `Config.ZoneOptions.autoGarageRadius` passe à **5 mètres**, autour de la
+place de sortie. Reporter cette valeur manuellement si l'ancien fichier de configuration est conservé.
+
+Les extras prennent en charge les résultats natifs booléens ou entiers, l'indice zéro et les
+booléens importés. Un changement d'extras sur un véhicule gelé déclenche une nouvelle capture.
+Un extra refusé à la restauration est signalé et sa valeur sauvegardée est préservée.
+Une configuration déjà écrasée par une ancienne version ne peut pas être retrouvée : remettre
+les extras souhaités en jeu, attendre leur sauvegarde, puis tester un éloignement/retour et
+un redémarrage de la ressource ou du serveur.
+
+### Quasar sans export `GetGarages`
+
+Les coordonnées imbriquées `coords.spawnCoords` et `coords.menuCoords` sont reconnues, avec
+priorité à la place de sortie. Les entrées sans coordonnées valides sont ignorées.
+Le démarrage ou l'arrêt d'un garage pris en charge rafraîchit la liste et les zones serveur
+après une seconde.
+
+1. Copier `integrations/quasar/vpark_bridge.lua.example` dans
+   `qs-advancedgarages/config/vpark_bridge.lua`.
+2. Ajouter `'config/vpark_bridge.lua',` après `'config/garages.lua',` dans la liste du manifeste
+   Quasar qui charge la configuration côté serveur, ou en partagé. Ne pas le charger deux fois.
+3. Redémarrer Quasar, puis v-park lors de cette première installation. Vérifier la ressource et
+   le nombre de garages dans `/vparkinfo`, ainsi que `read ... garage(s)` dans la console.
+
+Le pont expose uniquement la configuration Quasar ; v-park la convertit. Une mise à jour de
+Quasar peut supprimer le fichier et sa ligne de manifeste : conserver une copie. Sans ce pont,
+renseigner manuellement `Config.Zones` et `Config.Panel.garages`.
 
 1. Placez `v-park` dans `resources/`.
 2. `ensure v-park` dans `server.cfg`, **après** votre framework et après oxmysql.

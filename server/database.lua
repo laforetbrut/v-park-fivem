@@ -1,5 +1,6 @@
 --[[
     server/database.lua
+    Author: vyrriox
 
     The only file that talks to MySQL.
 
@@ -432,6 +433,7 @@ CREATE TABLE IF NOT EXISTS %s (
     `model`          BIGINT       NOT NULL,
     `model_name`     VARCHAR(64)  DEFAULT NULL,
     `class`          TINYINT      NOT NULL DEFAULT 0,
+    `vehicle_type`   VARCHAR(24)  DEFAULT NULL,
     `owner`          VARCHAR(64)  DEFAULT NULL,
     `owner_type`     VARCHAR(16)  NOT NULL DEFAULT 'unowned',
     `owner_name`     VARCHAR(64)  DEFAULT NULL,
@@ -603,6 +605,9 @@ local function ensureColumn(table_, column, definition)
     Park.log('adding column `%s` to %s', column, Database.rawTable(table_))
     Database.execute(('ALTER TABLE %s ADD COLUMN %s %s')
         :format(Database.table(table_), quote(column), definition))
+    if not Database.columns(Database.rawTable(table_))[column:lower()] then
+        error(('required column %s.%s could not be added'):format(Database.rawTable(table_), column))
+    end
     return true
 end
 
@@ -630,6 +635,10 @@ local function buildSchema()
 
     local current = tonumber(Database.meta('schema_version')) or 0
 
+    -- Older fresh installs were marked current without this column. Check the actual
+    -- schema even when its version already agrees, and before recording a successful boot.
+    ensureColumn('vehicles', 'vehicle_type', 'VARCHAR(24) DEFAULT NULL AFTER `class`')
+
     if current == 0 then
         Database.meta('schema_version', SCHEMA_VERSION)
         Database.meta('created_at', Park.now())
@@ -650,9 +659,7 @@ local function buildSchema()
             corrected for good. Nothing has to be backfilled and nothing breaks in the
             meantime.
         ]]
-        if current < 2 then
-            ensureColumn('vehicles', 'vehicle_type', 'VARCHAR(24) DEFAULT NULL AFTER `class`')
-        end
+        -- This column is checked unconditionally above, including incorrectly stamped installs.
 
         Database.meta('schema_version', SCHEMA_VERSION)
         Park.log('schema upgraded from version %d to %d', current, SCHEMA_VERSION)

@@ -1,5 +1,6 @@
 --[[
     client/properties.lua
+    Author: vyrriox
 
     Reading everything off a vehicle, and putting it all back.
 
@@ -182,6 +183,33 @@ end
 
 Properties.noteWindows = noteWindows
 
+-- Native BOOL results can be booleans or integers. Lua considers numeric zero true.
+local function nativeEnabled(value)
+    return value == true or value == 1
+end
+
+function Properties.captureExtras(vehicle)
+    local extras = {}
+    for index = 0, 20 do
+        if nativeEnabled(DoesExtraExist(vehicle, index)) then
+            extras[tostring(index)] = nativeEnabled(IsVehicleExtraTurnedOn(vehicle, index)) and 0 or 1
+        end
+    end
+    return extras
+end
+
+function Properties.extrasMatch(vehicle, expected)
+    if type(expected) ~= 'table' then return false end
+    local current = Properties.captureExtras(vehicle)
+    for key, value in pairs(current) do
+        if expected[key] ~= value then return false end
+    end
+    for key in pairs(expected) do
+        if current[key] == nil then return false end
+    end
+    return true
+end
+
 function Properties.capture(vehicle, options)
     if not DoesEntityExist(vehicle) then return nil end
 
@@ -280,13 +308,7 @@ function Properties.capture(vehicle, options)
     -- TURNED ON is stored as 0, and one turned off as 1, because that is what
     -- `SetVehicleExtra` takes. Storing the intuitive way round and inverting on apply is the
     -- same information and one more place to get it backwards.
-    local extras = {}
-    for index = 1, 20 do
-        if DoesExtraExist(vehicle, index) then
-            extras[tostring(index)] = IsVehicleExtraTurnedOn(vehicle, index) and 0 or 1
-        end
-    end
-    properties.extras = extras
+    properties.extras = Properties.captureExtras(vehicle)
 
     -- ------------------------------------------------------------- modifications ---
     --
@@ -718,12 +740,29 @@ local function applyExtras(vehicle, properties)
     -- STEP 4. Before body health, because toggling an extra repairs the panel it is on.
     if type(properties.extras) ~= 'table' then return end
 
+    local wanted = {}
     for key, value in pairs(properties.extras) do
         local index = tonumber(key)
-        if index then
-            -- The inverted convention, unwound here and nowhere else: stored 0 means on, and
-            -- `SetVehicleExtra`'s second argument means "disable".
-            SetVehicleExtra(vehicle, index, tonumber(value) == 1)
+        if index and index % 1 == 0 and index >= 0 and index <= 20
+            and nativeEnabled(DoesExtraExist(vehicle, index)) then
+            -- Native v-park rows use 0=on/1=off; imported framework booleans mean enabled.
+            if type(value) == 'boolean' then
+                wanted[index] = value and 0 or 1
+            elseif tonumber(value) == 0 or tonumber(value) == 1 then
+                wanted[index] = tonumber(value)
+            end
+        end
+    end
+
+    -- Disable first, then enable, in a stable order for models with linked extras.
+    for disable = 1, 0, -1 do
+        for index = 0, 20 do
+            if wanted[index] == disable then SetVehicleExtra(vehicle, index, disable) end
+        end
+    end
+    for index, disable in pairs(wanted) do
+        if nativeEnabled(IsVehicleExtraTurnedOn(vehicle, index)) ~= (disable == 0) then
+            error(('extra %d did not restore'):format(index))
         end
     end
 end

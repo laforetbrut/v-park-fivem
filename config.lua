@@ -1,3 +1,4 @@
+-- Author: vyrriox
 --[[
     v-park / config.lua
 
@@ -2066,17 +2067,17 @@ Config.Zones = {
 Config.ZoneOptions = {
     -- Automatically exclude the area around every garage your garage resource knows about.
     --
-    -- Reads the garage list from qb-garages, qbx_garages, jg-advancedgarages, cd_garage,
-    -- loaf_garage and okokGarage when one of them is installed. It is a read of their config
-    -- table, not a hook, and it degrades to doing nothing when the shape is not what we
-    -- expect - which is announced at boot rather than assumed.
+    -- Reads exports from qs-advancedgarages, qb-garages and jg-advancedgarages.
+    -- Older Quasar builds need the optional bridge in integrations/quasar; see README.md.
+    -- An unavailable list is announced at boot. Start/stop of a supported garage refreshes
+    -- the list and server zones after one second.
     --
     -- Turn this off if you WANT cars to persist on the garage forecourt, which some servers
     -- do deliberately.
     autoGarages = true,
 
-    -- Metres around each auto-detected garage point.
-    autoGarageRadius = 25.0,
+    -- Metres around each auto-detected spawn point. Keep nearby street parking persistent.
+    autoGarageRadius = 5.0,
 
     -- Draw every zone as a marker while `/vparkdebug` is on.
     debugDraw = true,

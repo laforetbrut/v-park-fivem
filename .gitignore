@@ -1,4 +1,7 @@
 # Assistant and QA artefacts. Local only, never committed.
+.codex/
+AGENTS.md
+AGENTS.override.md
 .claude/
 CLAUDE.md
 test-procedures/

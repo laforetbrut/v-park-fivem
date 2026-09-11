@@ -1,0 +1,6 @@
+-- Author: vyrriox
+-- Copy to qs-advancedgarages/config/vpark_bridge.lua.
+-- Load on the server after config/garages.lua, where Config.Garages is defined.
+exports('GetGarages', function()
+    return Config.Garages or {}
+end)
