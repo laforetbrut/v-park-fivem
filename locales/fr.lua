@@ -160,6 +160,10 @@ Locale.register('fr', {
     ['props.nothing_stored'] = "  enregistré  rien : v-park ne conserve pas ce véhicule",
     ['props.neons_guarded'] = "  protégé     la restauration n'a pas confirmé ces néons, aucune capture ne peut les modifier",
     ['props.header']       = "propriétés de %s [%s], id %s :",
+    ['props.extra_restore'] = '  restauration net %s  demande [%s]  apres placement [%s]',
+    ['props.extra_change'] = '  derniere modification enregistree [%s] -> [%s]',
+    ['props.live_extras'] = '  en jeu      extras %s  controle reseau %s',
+    ['props.stored_extras'] = '  enregistre  extras %s  restauration en attente %s  sauvegarde active %s',
     ['props.live_neons']   = "  en jeu      néons %s  couleur %s  moteur %s",
     ['props.stored_neons'] = "  enregistré  néons %s  couleur %s",
     ['props.live_damage']  = "  en jeu      vitres intactes %s  portières abîmées %s  caisse %s",
@@ -260,9 +264,9 @@ Locale.register('fr', {
     ['probe.no_model']     = "Aucun véhicule à sonder. Montez dedans, ou regardez-en un.",
     ['probe.no_dimensions']= "Ce modèle n'a pas de dimensions que le jeu accepte de donner.",
     ['probe.free']         = "La place est libre. Un véhicule serait placé exactement ici.",
-    ['probe.blocked']      = "La place est bloquée par %s. Le détail est dans la console.",
+    ['probe.blocked']      = "L'espace est bloqué par %s. Le détail est dans la console.",
 
-    ['reconcile.done']       = "%d véhicule(s) parasite(s) retiré(s) du monde.",
+    ['reconcile.done']       = "%d véhicule(s) isolé(s) ont été retiré(s) du monde.",
     ['admin.usage']        = "utilisation : admin | admin garages | admin reconcile | admin cleanup preview | admin cleanup run",
 
     -- ---------------------------------------------------------------------------------

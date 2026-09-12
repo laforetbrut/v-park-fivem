@@ -5,7 +5,7 @@ lua54 'yes'
 name 'v-park'
 author 'vyrriox'
 description 'Vehicle persistence for FiveM on qb-core, qbx_core, ESX and ox_core: vehicles stay where they were left across restarts, are restored to the exact spot even in tight spaces, and are streamed in only when somebody is near. Bodywork deformation is stored and synchronised, job and rental vehicles can be semi-persistent, and there is a migration from Advanced Parking.'
-version '1.2.0'
+version '1.2.1'
 
 -- No hard dependency, on purpose. oxmysql, every framework, every fuel resource, every key
 -- resource, every garage and every notification system are detected at runtime and all
@@ -141,6 +141,7 @@ files {
     'html/css/reset.css',
     'html/css/panel.css',
     'html/css/sandy.css',
+    'html/assets/vyrriox-mark.png',
     'html/js/app.js',
 
     -- Shipped for operators who prefer to import a schema by hand. The tables are created on

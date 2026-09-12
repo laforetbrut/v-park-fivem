@@ -66,6 +66,21 @@
     flex: 0 0 auto;
 }
 
+.mast-brand {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    padding-right: 16px;
+    border-right: 1px solid var(--mast-divider);
+}
+
+.mast-logo {
+    width: 46px;
+    height: 46px;
+    object-fit: contain;
+    filter: drop-shadow(2px 2px 0 var(--mast-logo-shadow));
+}
+
 /* The two rivets on the left of the sign. Pure decoration, and the cheapest kind: two
    box-shadows on one element rather than two more nodes. */
 .mast-mark {
@@ -92,7 +107,10 @@
 .mast-text {
     flex: 1 1 auto;
     min-width: 0;
+    padding-left: 1px;
 }
+
+.panel-credit { flex: 0 0 auto; margin: 0; padding: 6px 16px 8px; border-top: 1px solid var(--footer-edge); color: var(--footer-fg); font-size: 9px; letter-spacing: 0.12em; text-align: right; text-transform: uppercase; }
 
 #title {
     font-family: var(--font-display);

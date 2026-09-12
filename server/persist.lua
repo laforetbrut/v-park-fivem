@@ -861,6 +861,25 @@ function Persist.applySnapshot(id, snapshot, proven, src)
         patch.statebags = type(snapshot.statebags) == 'table' and snapshot.statebags or nil
     end
 
+    -- Keep the last accepted extra transition in live memory for /vparkprops diagnosis.
+    local extraEntry = Store.live(id)
+    local oldExtras = record.properties and record.properties.extras
+    local newExtras = patch.properties and patch.properties.extras
+    if extraEntry and type(oldExtras) == 'table' and type(newExtras) == 'table' then
+        local different = false
+        for key, value in pairs(oldExtras) do
+            if newExtras[key] ~= value then different = true; break end
+        end
+        for key, value in pairs(newExtras) do
+            if oldExtras[key] ~= value then different = true; break end
+        end
+        if different then
+            extraEntry.extraAudit = extraEntry.extraAudit or {}
+            extraEntry.extraAudit.before = oldExtras
+            extraEntry.extraAudit.after = newExtras
+        end
+    end
+
     local oldNeons = Schema.neonState(record.properties)
     local changed = Store.update(id, patch)
 

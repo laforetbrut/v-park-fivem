@@ -1,6 +1,6 @@
 # v-park
 
-Current release: **1.2.0**. Author: **vyrriox**.
+Current release: **1.2.1**. Author: **vyrriox**.
 
 Vehicle persistence for FiveM, built for QBCore and running on qbx_core, ESX and ox_core too.
 
@@ -155,6 +155,22 @@ Run `/vparkinfo` to print what was actually detected on **your** server.
 ---
 
 ## Installation
+
+### Upgrading to 1.2.1
+
+Keep your config and database. Extras are now rebuilt and verified **after placement**, before
+saved damage is restored. A final readback protects the saved selection if it changes again.
+The tester confirmed the stock `rebel2` retest; 51 Lua regressions and 21 static groups pass.
+Neon restoration remains unchanged. No new dependency or SQL migration is needed.
+
+Stop v-park, replace the resource files, then run `refresh` and `start v-park` in the server console.
+A full server restart also reloads the manifest. Verify **1.2.1** in the startup banner.
+If old code already saved the wrong extras, select them again before retesting.
+
+`/vparkprops` now prints a copyable report in **F8**, including requested/post-placement and
+live/stored extras. Compare a report before departure with one after return. Its latest extra
+change is runtime-only and resets when the entity is recreated. Custom models and installed
+mechanic/garage combinations still require their own test.
 
 ### Upgrading to 1.2.0
 
@@ -716,7 +732,9 @@ touching any of it.
 
 ## Licence
 
-MIT with an attribution requirement. See [LICENSE](LICENSE).
+Apache License 2.0 with a permanent `Copyright vyrriox` attribution requirement. Forks and
+derivative works are allowed, but public repositories must remain publicly accessible and retain
+the copyright and attribution. See [LICENSE](LICENSE).
 
 ---
 ---
@@ -793,6 +811,22 @@ physique en vingt minutes, et n'est pas simulée du tout.
 qu'on règle `Config.Placement.probe.shrink` sur son propre MLO au lieu de deviner.
 
 ## Installation
+
+### Mise à jour vers 1.2.1
+
+Conserver la configuration et la base. Les extras sont reconstruits et vérifiés **après placement**,
+avant de remettre les dégâts. Une dernière lecture protège la sélection enregistrée si elle change
+encore. Le testeur a confirmé le retest du `rebel2` d'origine ; 51 tests Lua et 21 groupes de contrôles
+passent. La restauration des néons reste identique. Aucune nouvelle dépendance ni migration SQL.
+
+Arrêter v-park, remplacer les fichiers, puis lancer `refresh` et `start v-park` dans la console serveur.
+Un redémarrage complet relit également le manifeste. Vérifier **1.2.1** dans la bannière de démarrage.
+Si l'ancien code a déjà sauvegardé les mauvais extras, les régler à nouveau avant le retest.
+
+`/vparkprops` affiche maintenant un rapport copiable dans **F8**, avec les extras demandés/après
+placement et visibles/enregistrés. Comparer avant éloignement et après retour. La dernière modification
+indiquée reste en mémoire et se réinitialise à la recréation de l'entité. Les modèles personnalisés
+et les combinaisons de ressources de mécanique/garage restent à tester sur chaque serveur.
 
 ### Mise à jour vers 1.2.0
 
@@ -980,4 +1014,6 @@ coûte de la changer. Voir aussi [CONFIG.md](CONFIG.md), [API.md](API.md) et
 
 ## Licence
 
-MIT avec obligation d'attribution. Voir [LICENSE](LICENSE).
+Apache License 2.0 avec obligation permanente de conserver `Copyright vyrriox`. Les forks et
+travaux dérivés sont autorisés, mais les dépôts doivent rester publics et conserver le copyright
+et l'attribution. Voir [LICENSE](LICENSE).

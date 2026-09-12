@@ -8,6 +8,63 @@ out of it.
 
 ---
 
+## [2026-09-12] - Extra restoration was acknowledged before placement finished
+**Context:** Live trace showed requested extras 1/2 ON and 4 OFF, but post-placement extras 1/2 OFF
+and 4 ON. The next accepted snapshot replaced the previously correct selection.
+**Error:** The restore acknowledgment used an early pre-placement extra readback as final proof.
+**Root cause:** The existing extra verification ran before placement and later appearance updates;
+no final readback prevented the changed result from clearing the server's undressed guard.
+**Fix:** Defer saved damage during the initial appearance pass. After placement, rebuild extras
+and require three matching reads across scheduler ticks, then restore health and damage once.
+Read extras again after deformation/neon work; any mismatch retains the existing server guard.
+**Prevention:** Test placement resets, a delayed reset, permanent failure and changes after damage.
+The full 51-test suite passes. The tester subsequently confirmed the stock pickup retest and
+reported success on the follow-up checks before requesting publication.
+**Français :** La trace situe la perte entre la demande de restauration et la fin du placement.
+Les extras sont maintenant rétablis et vérifiés après placement, avant les dégâts. Une dernière
+lecture empêche de valider une sélection différente. Le testeur a confirmé le retest en jeu
+puis demandé la publication après les vérifications complémentaires.
+
+## [2026-09-12] - Extra state drift is accepted after streaming
+**Context:** Before/after F8 reports on a stock pickup show extras 1 and 2 changing from ON to OFF.
+**Error:** Live and stored selections match before departure, then both contain the changed state
+on return, with the restore guard clear. These readings do not identify the exact transition.
+**Root cause:** Pending runtime tracing; a correct initial save does not prove correct restoration.
+**Fix:** Add read-only requested/post-placement and last-accepted-change diagnostics to vparkprops
+in F8. No restoration fix is claimed yet. The live-field check caught the new audit field missing
+from Store.liveFields; document its lifetime and register it before deployment.
+**Prevention:** Trace restore input, readback and accepted capture separately; keep audit data out
+of SQL and validate the live-state contract.
+**Français :** Les extras 1 et 2 changent et le changement est enregistré. Le rapport F8 compare
+maintenant demande de restauration, résultat après placement et dernière capture acceptée.
+La cause exacte et la correction restent à confirmer en jeu.
+
+## [2026-09-12] - Hot upgrade retained an incomplete resource load list
+**Context:** The first restart after updating the linked test resource.
+**Error:** Runtime.garages received nil instead of Bridge.garageReaders and startup stopped.
+**Root cause:** The new garage module exists and is declared after the framework in the updated
+manifest. A stale FXServer manifest after the live upgrade is the leading hypothesis, pending
+confirmation with refresh followed by restart.
+**Fix:** Request a resource-manifest refresh before restarting. Do not hide the missing module by
+silently disabling garage zones. Live confirmation is pending.
+**Prevention:** Reload resource manifests when an upgrade adds shared, client or server scripts.
+**Français :** Le premier redémarrage échoue car la liste des lecteurs de garages est absente.
+Les fichiers sont présents ; une ancienne liste de chargement est suspectée. Relire les manifestes
+avec refresh avant restart v-park, puis confirmer le démarrage réel.
+
+## [2026-09-12] - Published release was not deployed to the linked test resource
+**Context:** Live testing reported old version metadata and lost extras/neons after streaming.
+**Error:** The published archive was 1.2.0, while the test resource junction resolved to a clean
+local checkout still at 1.1.0. Updating the isolated release checkout did not update that target.
+**Root cause:** Release publication verification did not include the test server resource path.
+**Fix:** Fast-forward the linked local checkout to the published 1.2.0 commit. Verify manifest and
+appearance sources against the release, normalizing Git line endings. A resource restart and
+fresh in-game selection retest remain pending; no live success is claimed.
+**Prevention:** Verify the resolved resource path and loaded startup version separately from GitHub.
+A raw-byte comparison across Git checkouts can fail solely because of CRLF/LF conversion.
+**Français :** La release était en 1.2.0 mais le serveur utilisait un dépôt lié resté en 1.1.0.
+Le dépôt est synchronisé. Le redémarrage et le retest réel restent à confirmer.
+
 ## [2026-09-12 00:55] - Acknowledging an older write discarded newer changes
 **Context:** Auditing save triggers and batched persistence for the next release.
 **Error:** A change during SQL execution was cleared by the earlier acknowledgment. Forced flushes

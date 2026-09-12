@@ -1,3 +1,4 @@
+-- Author: vyrriox
 --[[
     server/commands.lua
 
@@ -682,7 +683,7 @@ RegisterNetEvent('vpark:server:props', function(token, live)
     propsWaiting[token] = nil
 
     if type(live) ~= 'table' then
-        reply(src, L('props.none'))
+        TriggerClientEvent('vpark:client:propsReport', src, { L('props.none') })
         return
     end
 
@@ -697,6 +698,20 @@ RegisterNetEvent('vpark:server:props', function(token, live)
         return table.concat(out, ',')
     end
 
+    local function extrasText(values)
+        if type(values) ~= 'table' then return '-' end
+        local out = {}
+        for index = 0, 20 do
+            local value = values[tostring(index)]
+            if value == nil then value = values[index] end
+            if value ~= nil then
+                local enabled = value == true or (type(value) ~= 'boolean' and tonumber(value) == 0)
+                out[#out + 1] = ('%d=%s'):format(index, enabled and 'ON' or 'OFF')
+            end
+        end
+        return #out > 0 and table.concat(out, ', ') or '-'
+    end
+
     local lines = {
         L('props.header', tostring(live.model or '?'), tostring(live.plate or '?'),
             tostring(id or 'not kept by v-park')),
@@ -704,7 +719,17 @@ RegisterNetEvent('vpark:server:props', function(token, live)
             live.engine == 1 and 'on' or 'off'),
     }
 
+    lines[#lines + 1] = L('props.live_extras', extrasText(live.extras), tostring(live.extraControl == true))
     if stored then
+        local entry = Store.live(id)
+        lines[#lines + 1] = L('props.stored_extras', extrasText(stored.extras),
+            tostring(entry and entry.undressed == true or false), tostring(Schema.enabled('extras')))
+        if entry then
+            local audit = entry.extraAudit or {}
+            lines[#lines + 1] = L('props.extra_restore', tostring(entry.netId or '-'),
+                extrasText(audit.wanted), extrasText(audit.observed))
+            lines[#lines + 1] = L('props.extra_change', extrasText(audit.before), extrasText(audit.after))
+        end
         local enabled = {}
         for _, value in ipairs(stored.neonEnabled or {}) do
             enabled[#enabled + 1] = value and 1 or 0
@@ -758,7 +783,7 @@ RegisterNetEvent('vpark:server:props', function(token, live)
             stored.modSmokeEnabled == true and '1' or '0', list(stored.tyreSmokeColor))
     end
 
-    replyMany(src, lines)
+    TriggerClientEvent('vpark:client:propsReport', src, lines)
 end)
 
 --[[

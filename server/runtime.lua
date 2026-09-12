@@ -185,36 +185,52 @@ local function banner()
 
     local compat = Bridge.summary()
     local store = Store.stats()
+    local width = 58
+    local function boxed(level, message)
+        local plain = tostring(message):gsub('%^%d', '')
+        if #plain > width then plain = plain:sub(1, width - 3) .. '...' end
+        print(('^%s[v-park]^7 ║ %-58s ║'):format(level == 'warn' and '3' or '2', plain))
+    end
+    local function centred(text)
+        local left = math.max(0, math.floor((width - #text) / 2))
+        return string.rep(' ', left) .. text
+    end
 
-    print('^2[v-park]^7 ------------------------------------------------------------')
-    print(('^2[v-park]^7 v%s by vyrriox'):format(state.version))
-    print(('^2[v-park]^7 framework: ^5%s^7   database: ^5%s^7   keys: ^5%s^7')
+    print(('^2[v-park]^7 ╔%s╗'):format(string.rep('═', width + 2)))
+    boxed('info', centred('\\      /'))
+    boxed('info', centred('\\    /'))
+    boxed('info', centred('\\  /'))
+    boxed('info', centred('\\/'))
+    boxed('info', string.rep('-', width))
+    boxed('info', ('V-PARK  v%s  |  Copyright vyrriox'):format(state.version))
+    for _, entry in ipairs(Park.bootLog) do boxed(entry.level, (entry.level == 'warn' and 'WARNING: ' or '') .. entry.message) end
+    boxed('info', ('framework %s | database %s | keys %s')
         :format(compat.framework, Database.driver(), compat.keys))
-    print(('^2[v-park]^7 %d vehicle(s) loaded, %d cell(s), mode ^5%s^7')
+    boxed('info', ('%d vehicle(s) loaded | %d cell(s) | mode %s')
         :format(store.total, store.cells, tostring(Config.Persistence and Config.Persistence.mode)))
 
     if Database.memory() then
-        print('^3[v-park]^7 IN MEMORY: nothing will survive a server restart')
+        boxed('warn', 'WARNING: in-memory mode, restart persistence is disabled')
     end
 
     if state.oneSync ~= 'on' then
-        print(('^3[v-park]^7 OneSync: %s'):format(tostring(state.oneSync)))
+        boxed('warn', ('OneSync: %s'):format(tostring(state.oneSync)))
     end
 
     if state.garageResource then
-        print(('^2[v-park]^7 garages: ^5%s^7 (%d)'):format(state.garageResource, #Runtime.garages()))
+        boxed('info', ('garages %s (%d detected)'):format(state.garageResource, #Runtime.garages()))
     end
 
     -- Said out loud, because "my neons are not being saved" is otherwise a bug report rather
     -- than a setting. See `Config.Save.fields.neons`.
     if state.neons == false then
-        print('^3[v-park]^7 neons: NOT stored (Config.Save.fields.neons is false)')
+        boxed('warn', 'neons: not stored')
     elseif type(state.neons) == 'string' then
-        print(('^2[v-park]^7 neons: stored, handled by ^5%s^7'):format(state.neons))
+        boxed('info', ('neons: stored, handled by %s'):format(state.neons))
     end
 
-    print('^2[v-park]^7 /vparkinfo for detail, /vparkadmin for the panel')
-    print('^2[v-park]^7 ------------------------------------------------------------')
+    boxed('info', '/vparkinfo details | /vparkadmin panel')
+    print(('^2[v-park]^7 ╚%s╝'):format(string.rep('═', width + 2)))
 end
 
 -- ---------------------------------------------------------------------------------------
@@ -222,6 +238,8 @@ end
 -- ---------------------------------------------------------------------------------------
 
 CreateThread(function()
+    Park.booting = true
+    Park.bootLog = {}
     state.version = GetResourceMetadata(Park.resource, 'version', 0) or 'unknown'
 
     -- Built-in persistence also handles the legacy 'auto' setting.
@@ -268,6 +286,10 @@ CreateThread(function()
     -- 6. Go.
     state.bootedAt = Park.now()
     state.ready = true
+    -- Keep startup diagnostics together with the first reconciliation pass. That pass waits
+    -- two seconds by design so abandoned entities are removed before normal streaming begins.
+    Wait(2500)
+    Park.booting = false
 
     banner()
 

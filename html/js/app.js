@@ -193,6 +193,7 @@ function applyStrings() {
     });
 
     $('bulk-clear').textContent = t('panel.clear_selection');
+    $('sheet-cancel').textContent = t('panel.cancel');
     $('detail-title').textContent = t('panel.detail_title');
     $('shortcuts').textContent = t('panel.shortcuts');
 

@@ -1,28 +1,30 @@
-MIT License with Attribution Requirement
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
 
 Copyright (c) 2026 vyrriox
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software
-and associated documentation files (the "Software"), to deal in the Software without
-restriction, including without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
-Software is furnished to do so, subject to the following conditions:
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-1. The above copyright notice and this permission notice shall be included in all copies or
-   substantial portions of the Software.
+    http://www.apache.org/licenses/LICENSE-2.0
 
-2. ATTRIBUTION REQUIREMENT.
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 
-   The Software prints the name of its author in its own boot banner and in its own
-   `/vparkinfo` output. You may translate that text, restyle it to match your server's
-   theme, and place your own credits alongside it. You may not remove it, hide it,
-   obscure it, or replace the name.
+Additional project attribution terms
+------------------------------------
 
-   Redistributing a copy of the Software with that attribution stripped terminates the
-   rights granted by this licence.
+Forks, mirrors, and derivative works are expressly permitted. Any public
+repository containing this Work or a derivative must remain publicly
+accessible without a private invitation.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
-BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+Redistributors must retain all copyright, license, and attribution notices,
+including the exact author credit "Copyright vyrriox". This credit may not be
+removed, hidden, obscured, replaced, or disabled from a redistributed copy.
+Additional credits and modifications are allowed. Removing this credit is a
+material breach of these additional project terms.

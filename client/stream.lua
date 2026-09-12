@@ -485,13 +485,15 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
             appeared again.
         ]]
         local dressed = true
+        local appearanceApplied = true
 
         if type(data.properties) == 'table' then
             local ok, applied, failed = pcall(Properties.apply, entity, data.properties,
-                { version = data.version, rebuildExtras = true, deferNeons = true })
+                { version = data.version, rebuildExtras = true, deferNeons = true, deferDamage = true })
 
             -- A local withheld group cannot protect a snapshot from another client.
             -- Keep the server's existing undressed guard up when extras never verified.
+            appearanceApplied = ok and applied ~= false
             dressed = ok and applied ~= false and not (type(failed) == 'table' and failed.extras)
             unverified[data.id] = type(failed) == 'table' and next(failed) and failed or nil
             if not dressed then
@@ -514,6 +516,19 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
             -- `neighboursOf` on the server: it replaces a statebag read that had to win a race.
             neighbours = data.neighbours,
         })
+
+        if result.ok and type(data.properties) == 'table' then
+            local ok, applied, failed = pcall(Properties.apply, entity, data.properties,
+                {version=data.version, finishPlacement=true, rebuildExtras=true, deferNeons=true})
+            dressed = appearanceApplied and ok and applied ~= false
+                and not (type(failed) == 'table' and failed.extras)
+            local withheld = unverified[data.id] or {}
+            withheld.extras = not dressed or nil
+            if type(failed) == 'table' then
+                for group in pairs(failed) do withheld[group] = true end
+            end
+            unverified[data.id] = next(withheld) and withheld or nil
+        end
 
 
         --[[
@@ -550,7 +565,18 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
         -- Told to the server as well as remembered here. `record.dressed` stops THIS client
         -- reporting a stock car as the truth; `entry.undressed` on the server stops every other
         -- client doing it, which matters now that any of them can be asked. See `applySnapshot`.
+        -- Read again after damage/deformation and neon verification. A stale early success
+        -- must never release the server's protection for a different extra selection.
+        if Schema.enabled('extras') and type(data.properties) == 'table'
+            and type(data.properties.extras) == 'table' and next(data.properties.extras) ~= nil
+            and not Properties.extrasMatch(entity, data.properties.extras) then
+            dressed = false
+            unverified[data.id] = unverified[data.id] or {}
+            unverified[data.id].extras = true
+            Park.warn('extras changed after placement for %s; keeping saved properties protected', data.id)
+        end
         result.dressed = dressed
+        result.extrasObserved = Properties.captureExtras(entity)
 
         --[[
             And the settled health goes with it, because every OTHER client needs it too.
@@ -1262,6 +1288,8 @@ RegisterNetEvent('vpark:client:props', function(token)
         plate = GetVehicleNumberPlateText(vehicle),
         neons = neons,
         neonColour = { red or 0, green or 0, blue or 0 },
+        extras = Properties.captureExtras(vehicle),
+        extraControl = NetworkHasControlOfEntity(vehicle) == true or NetworkHasControlOfEntity(vehicle) == 1,
         windows = windows,
         doors = doors,
         bodyHealth = math.floor(GetVehicleBodyHealth(vehicle) + 0.5),

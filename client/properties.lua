@@ -202,10 +202,13 @@ function Properties.extrasMatch(vehicle, expected)
     if type(expected) ~= 'table' then return false end
     local current = Properties.captureExtras(vehicle)
     for key, value in pairs(current) do
-        if expected[key] ~= value then return false end
+        local wanted = expected[key]
+        if wanted == nil then wanted = expected[tonumber(key)] end
+        if type(wanted) == 'boolean' then wanted = wanted and 0 or 1 else wanted = tonumber(wanted) end
+        if wanted ~= value then return false end
     end
     for key in pairs(expected) do
-        if current[key] == nil then return false end
+        if current[tostring(key)] == nil then return false end
     end
     return true
 end
@@ -682,7 +685,7 @@ Properties.applyNeons = applyNeons
 local EXTRA_ATTEMPTS = 10
 local EXTRA_RETRY_MS = 50
 
-local function applyExtras(vehicle, properties, rebuild)
+local function applyExtras(vehicle, properties, rebuild, settle)
     -- STEP 4. Before body health, because toggling an extra repairs the panel it is on.
     if type(properties.extras) ~= 'table' then return end
 
@@ -701,7 +704,7 @@ local function applyExtras(vehicle, properties, rebuild)
 
     if not next(wanted) then return end
 
-    local stuck = {}
+    local stuck, stable, needsWrite = {}, 0, true
     for attempt = 1, EXTRA_ATTEMPTS do
         if not DoesEntityExist(vehicle) then error('vehicle disappeared while restoring extras') end
         local controlled = nativeEnabled(NetworkHasControlOfEntity(vehicle))
@@ -709,7 +712,7 @@ local function applyExtras(vehicle, properties, rebuild)
 
         -- Keep the full desired set between attempts: an extra that appears late can reset
         -- one that succeeded earlier. Recheck all of them after the complete write pass.
-        if controlled then
+        if controlled and (not settle or needsWrite) then
             for disable = 1, 0, -1 do
                 for index = 0, 20 do
                     if wanted[index] == disable and nativeEnabled(DoesExtraExist(vehicle, index)) then
@@ -722,6 +725,10 @@ local function applyExtras(vehicle, properties, rebuild)
             if rebuild then SetVehicleFixed(vehicle) end
         end
 
+        if settle then
+            Wait(100)
+            controlled = DoesEntityExist(vehicle) and nativeEnabled(NetworkHasControlOfEntity(vehicle))
+        end
         stuck = {}
         for index = 0, 20 do
             local disable = wanted[index]
@@ -731,8 +738,14 @@ local function applyExtras(vehicle, properties, rebuild)
                 stuck[#stuck + 1] = index
             end
         end
-        if #stuck == 0 then return end
-        if attempt < EXTRA_ATTEMPTS then Wait(EXTRA_RETRY_MS) end
+        if #stuck == 0 then
+            stable = stable + 1
+            if not settle or stable >= 3 then return end
+            needsWrite = false
+        else
+            stable, needsWrite = 0, true
+        end
+        if not settle and attempt < EXTRA_ATTEMPTS then Wait(EXTRA_RETRY_MS) end
     end
     error(('extras %s did not restore after %d attempts')
         :format(table.concat(stuck, ', '), EXTRA_ATTEMPTS))
@@ -840,100 +853,120 @@ function Properties.apply(vehicle, properties, options)
         SetVehicleAutoRepairDisabled(vehicle, true)
     end
 
-    if enabledGroup('modifications') then
-        guard('modifications', function() applyModifications(vehicle, properties) end)
-    else
-        -- Even with modifications off, the mod kit must be set or the plate index and a few
-        -- other calls below behave inconsistently between builds.
-        SetVehicleModKit(vehicle, 0)
-    end
-
-    if enabledGroup('colours') then
-        guard('colours', function() applyColours(vehicle, properties) end)
-    end
-    if enabledGroup('customPaint') then
-        guard('customPaint', function() applyCustomPaint(vehicle, properties) end)
-    end
-
-    if enabledGroup('windowTint') and type(properties.windowTint) == 'number' then
-        SetVehicleWindowTint(vehicle, properties.windowTint)
-    end
-
-    if enabledGroup('xenon') and type(properties.xenonColor) == 'number' then
-        Properties.native('SetVehicleXenonLightsColour', 'SetVehicleXenonLightsColor',
-            vehicle, properties.xenonColor)
-    end
-
-    if enabledGroup('tyreSmoke') then
-        local smoke = properties.tyreSmokeColor
-        if type(smoke) == 'table' and #smoke == 3 then
-            SetVehicleTyreSmokeColor(vehicle, smoke[1], smoke[2], smoke[3])
+    if not options.finishPlacement then
+        if enabledGroup('modifications') then
+            guard('modifications', function() applyModifications(vehicle, properties) end)
+        else
+            -- Even with modifications off, the mod kit must be set or the plate index and a few
+            -- other calls below behave inconsistently between builds.
+            SetVehicleModKit(vehicle, 0)
         end
+
+        if enabledGroup('colours') then
+            guard('colours', function() applyColours(vehicle, properties) end)
+        end
+        if enabledGroup('customPaint') then
+            guard('customPaint', function() applyCustomPaint(vehicle, properties) end)
+        end
+
+        if enabledGroup('windowTint') and type(properties.windowTint) == 'number' then
+            SetVehicleWindowTint(vehicle, properties.windowTint)
+        end
+
+        if enabledGroup('xenon') and type(properties.xenonColor) == 'number' then
+            Properties.native('SetVehicleXenonLightsColour', 'SetVehicleXenonLightsColor',
+                vehicle, properties.xenonColor)
+        end
+
+        if enabledGroup('tyreSmoke') then
+            local smoke = properties.tyreSmokeColor
+            if type(smoke) == 'table' and #smoke == 3 then
+                SetVehicleTyreSmokeColor(vehicle, smoke[1], smoke[2], smoke[3])
+            end
+        end
+
+        if enabledGroup('livery') then
+            if type(properties.livery) == 'number' and properties.livery >= 0 then
+                SetVehicleLivery(vehicle, properties.livery)
+            end
+            if type(properties.roofLivery) == 'number' and properties.roofLivery >= 0 and SetVehicleRoofLivery then
+                SetVehicleRoofLivery(vehicle, properties.roofLivery)
+            end
+        end
+
+        if enabledGroup('extras') then
+            guard('extras', function()
+                if options.rebuildExtras and SetVehicleAutoRepairDisabled then
+                    SetVehicleAutoRepairDisabled(vehicle, false)
+                end
+                local ok, err = pcall(applyExtras, vehicle, properties, options.rebuildExtras == true)
+                if options.rebuildExtras and SetVehicleAutoRepairDisabled then
+                    SetVehicleAutoRepairDisabled(vehicle, true)
+                end
+                if not ok then error(err) end
+            end)
+        end
+
+        if enabledGroup('plate') then
+            if properties.plate then
+                SetVehicleNumberPlateText(vehicle, properties.plate)
+            end
+            if type(properties.plateIndex) == 'number' then
+                SetVehicleNumberPlateTextIndex(vehicle, properties.plateIndex)
+            end
+        end
+
+        if enabledGroup('lockState') and type(properties.lockState) == 'number' then
+            SetVehicleDoorsLocked(vehicle, properties.lockState)
+        end
+
+        if enabledGroup('roofState') and type(properties.roofState) == 'number' then
+            -- Instant, not animated: an animated fold on a car that has just appeared looks like
+            -- a glitch rather than a feature.
+            SetConvertibleRoof(vehicle, true)
+            if properties.roofState == 2 then
+                LowerConvertibleRoof(vehicle, true)
+            else
+                RaiseConvertibleRoof(vehicle, true)
+            end
+        end
+
+        if enabledGroup('engineState') then
+            local on = properties.engineOn == true
+            SetVehicleEngineOn(vehicle, on, true, true)
+        else
+            SetVehicleEngineOn(vehicle, false, true, true)
+        end
+
+        if enabledGroup('fuel') and type(properties.fuelLevel) == 'number' then
+            Compat.setFuel(vehicle, properties.fuelLevel)
+        end
+
+        if enabledGroup('oil') and type(properties.oilLevel) == 'number' then
+            SetVehicleOilLevel(vehicle, properties.oilLevel)
+        end
+
+        if enabledGroup('dirt') and type(properties.dirtLevel) == 'number' then
+            SetVehicleDirtLevel(vehicle, properties.dirtLevel + 0.0)
+        end
+
     end
 
-    if enabledGroup('livery') then
-        if type(properties.livery) == 'number' and properties.livery >= 0 then
-            SetVehicleLivery(vehicle, properties.livery)
+    -- Placement can replace extras after their initial readback. Complete the fresh-spawn
+    -- reconstruction after placement, then apply saved damage exactly once.
+    if options.deferDamage then
+        if enabledGroup('anchor') and Anchor and Anchor.want then
+            Anchor.want(vehicle, properties.anchored == true)
         end
-        if type(properties.roofLivery) == 'number' and properties.roofLivery >= 0 and SetVehicleRoofLivery then
-            SetVehicleRoofLivery(vehicle, properties.roofLivery)
-        end
+        return true, failed
     end
-
-    if enabledGroup('extras') then
+    if options.finishPlacement and enabledGroup('extras') then
         guard('extras', function()
-            if options.rebuildExtras and SetVehicleAutoRepairDisabled then
-                SetVehicleAutoRepairDisabled(vehicle, false)
-            end
-            local ok, err = pcall(applyExtras, vehicle, properties, options.rebuildExtras == true)
-            if options.rebuildExtras and SetVehicleAutoRepairDisabled then
-                SetVehicleAutoRepairDisabled(vehicle, true)
-            end
+            if SetVehicleAutoRepairDisabled then SetVehicleAutoRepairDisabled(vehicle, false) end
+            local ok, err = pcall(applyExtras, vehicle, properties, true, true)
+            if SetVehicleAutoRepairDisabled then SetVehicleAutoRepairDisabled(vehicle, true) end
             if not ok then error(err) end
         end)
-    end
-
-    if enabledGroup('plate') then
-        if properties.plate then
-            SetVehicleNumberPlateText(vehicle, properties.plate)
-        end
-        if type(properties.plateIndex) == 'number' then
-            SetVehicleNumberPlateTextIndex(vehicle, properties.plateIndex)
-        end
-    end
-
-    if enabledGroup('lockState') and type(properties.lockState) == 'number' then
-        SetVehicleDoorsLocked(vehicle, properties.lockState)
-    end
-
-    if enabledGroup('roofState') and type(properties.roofState) == 'number' then
-        -- Instant, not animated: an animated fold on a car that has just appeared looks like
-        -- a glitch rather than a feature.
-        SetConvertibleRoof(vehicle, true)
-        if properties.roofState == 2 then
-            LowerConvertibleRoof(vehicle, true)
-        else
-            RaiseConvertibleRoof(vehicle, true)
-        end
-    end
-
-    if enabledGroup('engineState') then
-        local on = properties.engineOn == true
-        SetVehicleEngineOn(vehicle, on, true, true)
-    else
-        SetVehicleEngineOn(vehicle, false, true, true)
-    end
-
-    if enabledGroup('fuel') and type(properties.fuelLevel) == 'number' then
-        Compat.setFuel(vehicle, properties.fuelLevel)
-    end
-
-    if enabledGroup('oil') and type(properties.oilLevel) == 'number' then
-        SetVehicleOilLevel(vehicle, properties.oilLevel)
-    end
-
-    if enabledGroup('dirt') and type(properties.dirtLevel) == 'number' then
-        SetVehicleDirtLevel(vehicle, properties.dirtLevel + 0.0)
     end
 
     --[[

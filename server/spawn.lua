@@ -207,7 +207,10 @@ local function sendRestore(record, src, netId)
         So the fact lives here, where there is one of it, exactly as the neon guard does and for
         exactly the same reason. Cleared by the placing client reporting that the apply worked.
     ]]
-    if entry then entry.undressed = true end
+    if entry then
+        entry.undressed = true
+        entry.extraAudit = {wanted=record.properties and record.properties.extras}
+    end
 
     TriggerClientEvent('vpark:client:restore', src, netId, {
         neighbours = neighboursOf(record),
@@ -1451,6 +1454,10 @@ RegisterNetEvent('vpark:server:restored', function(id, result)
         check at all, so any client could clear the flag for any id it knew by sending this
         message - and ids are not secret.
     ]]
+    entry.extraAudit = entry.extraAudit or {}
+    entry.extraAudit.observed = result.extrasObserved
+    entry.extraAudit.dressed = result.dressed
+
     pending[id] = nil
 
     --[[

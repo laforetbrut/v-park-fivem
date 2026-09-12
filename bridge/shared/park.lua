@@ -631,9 +631,16 @@ end
     line or take down whatever was logging.
 ]]
 Park.observer = nil
+Park.booting = false
+Park.bootLog = {}
 
 local function emit(level, message)
     if (LEVELS[level] or 3) > threshold() then return end
+
+    if Park.booting then
+        Park.bootLog[#Park.bootLog + 1] = { level = level, message = message }
+        return
+    end
 
     local colour = COLOURS[level] or '^7'
 

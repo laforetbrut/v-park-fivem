@@ -7,6 +7,74 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.2.1] - 2026-09-12
+
+### Fixed
+
+- **Restore extras after placement.** An early extra readback could pass, then placement changed
+  the selection and the next capture overwrote the saved values. Rebuild and verify extras after
+  placement, require three matching reads across scheduler ticks, and only then restore saved
+  health, broken parts and deformation. A final mismatch keeps the existing server save guard active.
+- Preserve the initial geometry pass and boat anchor intent, while applying saved damage only once.
+  Normalize boolean/numeric extra expectations during the final comparison.
+
+### Added
+
+- `/vparkprops` prints one copyable F8 block with live/stored extras, network control, save guards,
+  requested and post-placement selections, and the last accepted extra change. Diagnostics stay
+  in live memory and are not added to SQL rows.
+
+### Changed
+
+- Refresh the admin panel masthead with the Vyrriox mark and a persistent `Copyright vyrriox`
+  credit in the footer.
+- Replace the split startup messages with one boxed, readable v-park status block.
+- Re-license the project under Apache License 2.0. Public forks and derivatives are allowed,
+  provided their repositories remain public and retain the `Copyright vyrriox` notice.
+
+51 mocked Lua regression tests and 21 static check groups pass. Three new scenarios reproduce
+placement resets, unstable extras and changes after damage. The tester confirmed the stock
+`rebel2` streaming retest and reported success after the follow-up OFF/restart checks. The F8
+report showed matching requested, post-placement, live and saved selections. This is targeted
+validation, not a claim covering every custom vehicle or mechanic resource.
+
+Keep the existing config. No new dependency or SQL migration. When upgrading a running server,
+run `refresh` before `restart v-park`, or restart the whole server, to reload the manifest.
+
+### Correctifs
+
+- **Restauration des extras après placement.** La première vérification pouvait réussir, puis le
+  placement changeait les extras et une capture écrasait la bonne sauvegarde. Les extras sont
+  reconstruits et vérifiés après placement par trois lectures espacées, avant de remettre la santé,
+  les pièces cassées et les déformations. Une différence finale maintient la protection serveur.
+- La première passe de géométrie et l'intention d'ancrage sont conservées ; les dégâts sauvegardés
+  sont appliqués une seule fois. La comparaison finale accepte les états booléens et numériques.
+
+### Ajouts
+
+- `/vparkprops` produit un bloc copiable dans F8 : extras visibles/enregistrés, contrôle réseau,
+  protections, sélection demandée/après placement et dernière modification acceptée. Ces données
+  de diagnostic restent en mémoire et ne sont pas ajoutées aux lignes SQL.
+
+### Modifications
+
+- L'en-tête du panneau admin utilise désormais le logo Vyrriox et le pied de page conserve le
+  crédit `Copyright vyrriox`.
+- Les messages de démarrage sont regroupés dans un seul bloc v-park lisible.
+- Le projet passe sous Apache License 2.0. Les forks et dérivés publics sont autorisés si leur
+  dépôt reste public et conserve la mention `Copyright vyrriox`.
+
+Les 51 tests Lua simulés et les 21 groupes de contrôles passent. Trois nouveaux scénarios couvrent
+les changements au placement, les extras instables et les changements après dégâts. Le testeur a
+confirmé le retest d'éloignement du `rebel2`, puis signalé le succès des vérifications complémentaires
+OFF/redémarrage. Le rapport F8 montre les quatre sélections identiques. Cette validation ciblée
+ne couvre pas tous les modèles personnalisés ni toutes les ressources de mécanique.
+
+Conserver la configuration. Aucune nouvelle dépendance ni migration SQL. Pour une mise à jour à
+chaud, lancer `refresh` puis `restart v-park`, ou redémarrer tout le serveur pour relire le manifeste.
+
+---
+
 ## [1.2.0] - 2026-09-12
 
 ### Fixed and optimized

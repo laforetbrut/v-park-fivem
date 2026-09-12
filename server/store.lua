@@ -673,7 +673,10 @@ end
                   is not a secret - `vpark:id` is replicated - so a handler that takes one on
                   trust lets any client speak for any vehicle it has ever seen.
 ]]
+-- extraAudit: spawn records requested/observed extras, persist records the last accepted
+-- change, commands prints it. Replaced at restore and discarded with the live entry; no SQL.
 Store.liveFields = {
+    extraAudit = true,
     entity = true, netId = true, placer = true, placedAt = true, adopted = true,
     spawnX = true, spawnY = true, spawnZ = true,
     ready = true, seen = true, restoreAt = true, restoreTries = true,

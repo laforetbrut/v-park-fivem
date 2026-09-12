@@ -385,5 +385,83 @@ class Audit(unittest.TestCase):
         """)
 
 
+    def placed_extras(self):
+        self.load('client/properties.lua')
+        self.lua.execute("""
+            entity,netId=42,9
+            states={[1]=true,[2]=true,[3]=true,[4]=false,[11]=false}
+            data={id='sample',properties={extras={['1']=0,['2']=0,['3']=0,['4']=1,['11']=1},
+                bodyHealth=650,engineHealth=400,windows={0},doors={0},tyres={['0']=1},deformation={d={1}}}}
+            unverified={};order={};placed=false;lateReset=true;refuse=false
+            Schema.enabled=function(group)
+                return group=='extras' or group=='health' or group=='damage' or group=='deformation'
+            end
+            Park.round=function(v) return v end
+            local function note(v) order[#order+1]=v end
+            SetVehicleModKit,SetVehicleEngineOn,SetVehicleDoorsShut=noop,noop,noop
+            GetEntityModel=function() return 123 end
+            IsVehicleWindowIntact=function() return true end
+            GetVehicleBodyHealth=function() return 600 end
+            SetVehicleAutoRepairDisabled=function(_,value) disabled=value end
+            SetVehicleFixed=function()
+                assert(not disabled)
+                for _,v in ipairs(order) do assert(v~='deformation','repair after saved dents') end
+                note('repair')
+            end
+            SetVehicleBodyHealth=function() assert(placed);note('health') end
+            SetVehicleEngineHealth=function() assert(placed);note('engine') end
+            SmashVehicleWindow=function() note('window') end
+            SetVehicleDoorBroken=function() note('door') end
+            SetVehicleTyreBurst=function() note('tyre') end
+            Deformation={write=function() note('deformation') end}
+            Properties.rememberNeons=noop
+            Placement={place=function()
+                placed=true;note('placement')
+                states[1],states[2],states[4]=false,false,true
+                return {ok=true}
+            end}
+            Wait=function(ms)
+                assert(ms==50 or ms==100)
+                if placed and (lateReset or refuse) then
+                    lateReset=false
+                    states[1],states[2],states[4]=false,false,true
+                end
+            end
+        """)
+        source=(ROOT/'client/stream.lua').read_text(encoding='utf-8')
+        start=source.index('        local dressed = true')
+        end=source.index('        if result.ok then',source.index('result.health =',start))
+        return self.lua.eval('function() '+source[start:end]+' return result end')
+
+    def test_post_placement_extra_reset_is_repaired_before_saved_damage(self):
+        restore=self.placed_extras()
+        result=restore()
+        self.assertTrue(result['dressed'])
+        self.lua.execute("""
+            assert(Properties.extrasMatch(42,data.properties.extras))
+            assert(disabled)
+            local health=0
+            for _,step in ipairs(order) do if step=='health' then health=health+1 end end
+            assert(health==1,'health must only be restored once')
+            assert(order[#order]=='deformation')
+        """)
+
+    def test_unstable_extras_after_placement_keep_the_save_guard(self):
+        restore=self.placed_extras()
+        self.lua.execute('refuse=true')
+        result=restore()
+        self.assertFalse(result['dressed'])
+        self.assertTrue(self.lua.eval('unverified.sample.extras and disabled'))
+
+    def test_final_extra_readback_rejects_changes_after_damage(self):
+        restore=self.placed_extras()
+        self.lua.execute("""
+            Properties.rememberNeons=function() states[1]=false end
+        """)
+        result=restore()
+        self.assertFalse(result['dressed'])
+        self.assertTrue(self.lua.eval('unverified.sample.extras'))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

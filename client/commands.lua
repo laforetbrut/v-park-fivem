@@ -1,3 +1,4 @@
+-- Author: vyrriox
 --[[
     client/commands.lua
 
@@ -25,6 +26,20 @@
     `StartShapeTestRay` from the camera, not from the ped, because "looking at" means what is
     on screen and the ped's head does not always agree with the camera on a third-person view.
 ]]
+-- Print the server's authorized property report as one copyable F8 block.
+RegisterNetEvent('vpark:client:propsReport', function(lines)
+    if type(lines) ~= 'table' then return end
+    local out = { '[v-park] BEGIN vparkprops' }
+    for index = 1, math.min(#lines, 100) do
+        if type(lines[index]) == 'string' then
+            local line = lines[index]:sub(1, 2048):gsub('%^%d', ''):gsub('[%c]', ' ')
+            out[#out + 1] = line
+        end
+    end
+    out[#out + 1] = '[v-park] END vparkprops'
+    print(table.concat(out, '\n'))
+end)
+
 local function vehicleInFront()
     local ped = PlayerPedId()
 
