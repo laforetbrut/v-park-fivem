@@ -25,6 +25,8 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - **Vehicles in mappings sometimes fell through the floor.** Placed at exactly the stored height, a
   vehicle could start a hair inside the floor's collision. It is now created and placed
   `Config.Placement.spawnLift` (1 cm) higher; the stored position is not changed.
+  `Config.Placement.liftZones` sets a higher lift for a specific mapping, with the same circle, box
+  and polygon shapes as `Config.Zones` but without blocking persistence there.
 - **A persisted vehicle could come back under a random GTA plate.** A new entity carries a random plate
   until the client placing it sets the real one, and any nearby client may answer a capture: one
   of them reported the random plate and it replaced the stored one. Reported with fifteen affected
@@ -63,6 +65,8 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - `/vparkprops` affiche correctement une fumée stockée à `1`.
 - **Des véhicules dans les mappings passaient parfois à travers le sol** : ils apparaissent maintenant
   1 cm plus haut (`Config.Placement.spawnLift`), sans changer la position enregistrée.
+  `Config.Placement.liftZones` permet une levée plus haute dans une zone précise (cercle, boîte ou
+  polygone), sans y bloquer la persistance.
 - **Un véhicule persisté pouvait revenir avec une plaque GTA aléatoire** (15 véhicules sur un serveur).
   La plaque de la ligne fait maintenant foi, une ligne abîmée ressort avec sa vraie plaque, et la
   plaque est posée côté serveur dès la création. Changer une plaque doit passer par `SetPlate`.

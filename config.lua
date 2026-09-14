@@ -1055,6 +1055,23 @@ Config.Placement = {
     spawnLift = 0.01,
 
     --[[
+        Places where restored vehicles start higher than `spawnLift`, for a mapping whose floor
+        still swallows them. Same shapes as `Config.Zones` - circle, box, poly - but a separate
+        list, because a zone in `Config.Zones` means nothing persists there. `lift` is in metres
+        and replaces `spawnLift` inside the zone. The stored position is never changed.
+    ]]
+    liftZones = {
+        -- {
+        --     type = 'circle',
+        --     name = 'Caserne MLO',
+        --     centre = { x = 215.0, y = -810.0, z = 30.0 },
+        --     radius = 25.0,
+        --     heightRange = { min = 25.0, max = 40.0 },
+        --     lift = 0.15,
+        -- },
+    },
+
+    --[[
         Metres above whatever is beneath it before a restored vehicle is handed back to physics
         instead of being frozen. 0 switches the check off.
 

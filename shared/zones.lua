@@ -287,6 +287,66 @@ function Zones.blocked(position)
 end
 
 --[[
+    ================================================================================================
+    LIFT ZONES: WHERE A RESTORED VEHICLE STARTS HIGHER THAN USUAL.
+    ================================================================================================
+
+    A separate list from `Config.Zones`, on purpose. Every zone in that list means "nothing
+    persists here", so a lift zone put there would stop vehicles being saved in exactly the place
+    somebody wanted them lifted. Same three shapes, same compilers, same containment test - only
+    the meaning is different, and each zone carries its own `lift` in metres.
+]]
+local liftCompiled
+
+function Zones.compileLift()
+    liftCompiled = {}
+
+    local list = type(Config) == 'table' and type(Config.Placement) == 'table'
+        and Config.Placement.liftZones or nil
+    if type(list) ~= 'table' then return 0 end
+
+    for index, zone in ipairs(list) do
+        if type(zone) == 'table' and tonumber(zone.lift) then
+            local kind = tostring(zone.type or 'circle'):lower()
+            local built
+
+            if kind == 'circle' or kind == 'sphere' then
+                built = compileCircle(zone, index)
+            elseif kind == 'box' or kind == 'aabb' then
+                built = compileBox(zone, index)
+            elseif kind == 'poly' or kind == 'polygon' then
+                built = compilePoly(zone, index)
+            end
+
+            if built then
+                built.lift = tonumber(zone.lift)
+                liftCompiled[#liftCompiled + 1] = built
+            end
+        else
+            Park.warn('lift zone #%d has no numeric `lift` and was dropped', index)
+        end
+    end
+
+    return #liftCompiled
+end
+
+-- The lift for a position: the zone's own when it is inside one, otherwise nil.
+function Zones.liftAt(position)
+    if not liftCompiled then Zones.compileLift() end
+    if #liftCompiled == 0 then return nil end
+
+    local point = Park.toVec(position)
+    if not point then return nil end
+
+    for i = 1, #liftCompiled do
+        local zone = liftCompiled[i]
+        if contains(zone, point.x, point.y, point.z) then return zone.lift, zone end
+    end
+
+    return nil
+end
+
+--[[
     Every zone whose bounding box is within `radius` of a point.
 
     Used by the debug drawer, which wants the handful of zones near the player and not all of

@@ -1190,7 +1190,9 @@ function Placement.placeInner(entity, data)
         below anything visible and enough to start clear. It is applied to the pose only: `target`
         stays the stored position, so the reported position and the database never move.
     ]]
-    local lift = tonumber(options().spawnLift) or 0.01
+    -- A lift zone wins over the global value: some mappings need more than a centimetre.
+    local lift = (Zones and Zones.liftAt and Zones.liftAt(target))
+        or tonumber(options().spawnLift) or 0.01
     local placed = vector3(target.x, target.y, target.z + lift)
 
     -- ANSWER TO PROBLEM 3: exact placement, no ground snap, full rotation.

@@ -426,8 +426,10 @@ end
 
 -- The same centimetre the client placement adds, so the entity is never created inside the floor
 -- either. See `spawnLift` in client/placement.lua.
-local function spawnLift()
-    return tonumber(Config.Placement and Config.Placement.spawnLift) or 0.01
+local function spawnLift(record)
+    local zoned = record and Zones and Zones.liftAt
+        and Zones.liftAt({ x = record.pos_x, y = record.pos_y, z = record.pos_z })
+    return zoned or tonumber(Config.Placement and Config.Placement.spawnLift) or 0.01
 end
 
 local function safeExists(entity)
@@ -708,7 +710,7 @@ local function configure(entity, record)
         setting the heading would flatten the pitch a car parked on a slope actually has.
     ]]
     pcall(function()
-        SetEntityCoords(entity, record.pos_x, record.pos_y, record.pos_z + spawnLift(), false, false, false, false)
+        SetEntityCoords(entity, record.pos_x, record.pos_y, record.pos_z + spawnLift(record), false, false, false, false)
         SetEntityRotation(entity, record.rot_x, record.rot_y, record.rot_z, 2, true)
     end)
 
@@ -841,7 +843,7 @@ local function spawnEntity(record)
 
         local ok, entity = pcall(CreateVehicleServerSetter,
             record.model, kind,
-            record.pos_x, record.pos_y, record.pos_z + spawnLift(),
+            record.pos_x, record.pos_y, record.pos_z + spawnLift(record),
             heading)
 
         -- `true`: the entity is registered and orphaned, and must NOT be waited on.
@@ -861,7 +863,7 @@ local function spawnEntity(record)
 
     local ok, entity = pcall(CreateVehicle,
         record.model,
-        record.pos_x, record.pos_y, record.pos_z + spawnLift(),
+        record.pos_x, record.pos_y, record.pos_z + spawnLift(record),
         heading,
         true,   -- networked
         true)   -- script-owned, so the engine does not treat it as ambient
