@@ -60,6 +60,8 @@ local stats = {
     -- See `Park.timing`: the average and the worst case of the capture sweep, which is the
     -- loop that touches every live vehicle.
     sweepMs = Park.timing(),
+    -- Handling the answers: filtering, merging, hashing and marking every snapshot a client sent.
+    applyMs = Park.timing(),
 
     written = 0,
     batches = 0,
@@ -946,6 +948,7 @@ RegisterNetEvent('vpark:server:captured', function(snapshots, token)
     if type(snapshots) ~= 'table' then return end
 
     local changed = 0
+    local applyStarted = Park.clock()
     for _, snapshot in ipairs(snapshots) do
         if type(snapshot) == 'table' and type(snapshot.id) == 'string' then
             -- Only vehicles this client was actually asked about. Without this check a client
@@ -959,6 +962,7 @@ RegisterNetEvent('vpark:server:captured', function(snapshots, token)
     end
 
     stats.captures = stats.captures + 1
+    Park.observe(stats.applyMs, Park.clock() - applyStarted)
     Park.trace('captured %d vehicle(s) from %d, %d changed', #snapshots, src, changed)
 end)
 
@@ -1002,7 +1006,7 @@ end
     server is rather than to how large the table is.
 ]]
 local function sweep()
-    local sweepStartedAt = Park.ticks()
+    local sweepStartedAt = Park.clock()
     local slices = math.max(1, math.floor(tonumber(saveConfig().sweepSlices) or 4))
     sliceCursor = (sliceCursor % slices) + 1
 
@@ -1092,7 +1096,7 @@ local function sweep()
         end
     end
 
-    Park.observe(stats.sweepMs, Park.ticks() - sweepStartedAt)
+    Park.observe(stats.sweepMs, Park.clock() - sweepStartedAt)
 end
 
 -- ---------------------------------------------------------------------------------------

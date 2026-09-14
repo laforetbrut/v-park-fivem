@@ -193,6 +193,7 @@ Locale.register('en', {
     ['diag.progress'] = '  progress  ready %s, seen %s, %d retries, placed %s ago',
     ['diag.position'] = '  position  driven %s, parked %s, nudged %s -> a despawn would re-read its pose: %s',
     ['diag.placer']   = '  placer    %s  |  %s',
+    ['stats.apply']   = 'capture answers: %.2f ms avg / %.2f ms worst per batch received',
     ['stats.timing']  = 'timing: streaming pass %.1f ms avg / %.1f ms worst  |  capture sweep %.1f / %.1f  |  reconcile %.1f / %.1f',
     ['stats.health']  = 'restore: %d awaiting a client, %d awaiting deletion, %d re-asked',
     ['stats.header']       = 'v-park, right now:',

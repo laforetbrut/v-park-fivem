@@ -269,6 +269,21 @@ function Park.ticks()
 end
 
 --[[
+    A clock fine enough to TIME something, as opposed to schedule it.
+
+    `GetGameTimer` counts whole milliseconds, and every loop worth timing here finishes inside
+    one. Timed with it, a pass costing 1.1 ms reads as 0 most of the time and 1 now and then, so
+    `/vparkstats` printed "0.1 ms average" for a pass the server profiler measured at 1.1 ms. An
+    average of rounded-down samples is not a measurement. `os.nanotime` is, where it exists.
+]]
+local nanotime = os and os.nanotime
+
+function Park.clock()
+    if nanotime then return nanotime() / 1e6 end
+    return GetGameTimer() + 0.0
+end
+
+--[[
     ================================================================================================
     TIMING A LOOP THAT RUNS FOREVER
     ================================================================================================
@@ -529,12 +544,23 @@ Park.canonical = canonical
 function Park.hash(value)
     local text = canonical(value)
     local hash = FNV_OFFSET
+    local length = #text
+    local byte = string.byte
 
-    for i = 1, #text do
-        hash = hash ~ text:byte(i)
-        -- The multiply is done in 32 bits explicitly. Lua 5.4 integers are 64 bit and would
-        -- otherwise carry the overflow that FNV depends on discarding.
-        hash = (hash * FNV_PRIME) & 0xFFFFFFFF
+    --[[
+        Bytes are pulled out in blocks rather than one call per character. This runs on every
+        accepted snapshot over the whole canonical record, properties included, and a call into
+        C per byte was most of its cost. Same bytes, same order, same hash.
+    ]]
+    for first = 1, length, 256 do
+        local block = { byte(text, first, math.min(first + 255, length)) }
+
+        for i = 1, #block do
+            hash = hash ~ block[i]
+            -- The multiply is done in 32 bits explicitly. Lua 5.4 integers are 64 bit and would
+            -- otherwise carry the overflow that FNV depends on discarding.
+            hash = (hash * FNV_PRIME) & 0xFFFFFFFF
+        end
     end
 
     return hash

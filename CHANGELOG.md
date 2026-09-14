@@ -27,6 +27,17 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
   extras are fitted; the next capture then wrote the new selection. The extras are read before the
   repair and put back after it.
 
+### Changed
+
+- **`/vparkstats` timings are real measurements.** They were taken with `GetGameTimer`, which counts
+  whole milliseconds, so a streaming pass the server profiler measured at 1.1 ms read as a
+  0.1 ms average of rounded-down samples. They use `os.nanotime` now, and a new line reports the
+  cost of handling capture answers per batch received, which the profiler showed as the other half
+  of v-park's cost and which was not timed at all.
+- **Record hashing reads bytes in blocks.** The dirty check hashes the whole canonical record on
+  every accepted snapshot, and it made one call into C per byte. Same bytes, same order, same hash,
+  so nothing is rewritten on upgrade.
+
 ## [1.2.2] - 2026-09-14 (français)
 
 ### Corrigé
@@ -40,6 +51,12 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - `/vparkprops` affiche correctement une fumée stockée à `1`.
 - **Une réparation depuis le panneau changeait les extras** (la Mule, les utilitaires) : ils sont relus
   avant la réparation et remis après.
+
+### Modifié
+
+- **Les temps de `/vparkstats` sont de vraies mesures** (`os.nanotime` au lieu de millisecondes
+  entières), et une ligne mesure le coût de traitement des réponses de capture.
+- **Le hachage des lignes lit les octets par blocs** : même résultat, moins d'appels natifs.
 
 ---
 

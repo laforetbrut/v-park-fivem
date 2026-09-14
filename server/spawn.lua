@@ -1167,6 +1167,7 @@ end
 
 local function pass()
     local started = Park.ticks()
+    local clockStarted = Park.clock()
     local budget = tonumber(Config.Performance and Config.Performance.streamBudgetMs) or 3
 
     local players = onlinePlayers()
@@ -1317,7 +1318,7 @@ local function pass()
     local maximumEntities = tonumber(streaming().maximumEntities) or 400
     if maximumEntities > 0 and Store.liveCount() >= maximumEntities then
         Park.trace('the entity ceiling of %d is reached; not creating any more this pass', maximumEntities)
-        stats.lastPassMs = Park.ticks() - started
+        stats.lastPassMs = Park.clock() - clockStarted
         return
     end
 
@@ -1381,7 +1382,7 @@ local function pass()
     end
 
     stats.passes = stats.passes + 1
-    stats.lastPassMs = Park.ticks() - started
+    stats.lastPassMs = Park.clock() - clockStarted
     Park.observe(stats.passMs, stats.lastPassMs)
 end
 
@@ -2196,7 +2197,7 @@ end
 function Spawn.reconcile()
     if not GetAllVehicles then return 0 end
 
-    local startedAt = Park.ticks()
+    local startedAt = Park.clock()
 
     -- Before the orphan sweep below, which does not touch positions and does not care.
     pcall(sweepMoved)
@@ -2319,7 +2320,7 @@ function Spawn.reconcile()
 
     stats.condemned = stuck
 
-    Park.observe(stats.reconcileMs, Park.ticks() - startedAt)
+    Park.observe(stats.reconcileMs, Park.clock() - startedAt)
 
     return removed
 end

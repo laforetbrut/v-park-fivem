@@ -437,6 +437,8 @@ register('stats', {
             Park.average(persist.sweepMs), (persist.sweepMs or {}).worst or 0,
             Park.average(spawn.reconcileMs), (spawn.reconcileMs or {}).worst or 0),
 
+        L('stats.apply', Park.average(persist.applyMs), (persist.applyMs or {}).worst or 0),
+
         L('stats.health', Spawn.health()),
     })
 end)
