@@ -7,6 +7,36 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.2.2] - 2026-09-14
+
+### Fixed
+
+- **Turbo, xenon, tyre smoke, custom and drift tyres were switched off by every restore, and the
+  loss became permanent.** The capture stored these toggles as the native returned them, which is
+  `1` when on, and the restore tested them with `== true`. In Lua `1 == true` is false, so each
+  restore turned the option off and the next capture wrote `false`. Reported by a live server
+  with the rows to prove it: 37 vehicles, not one turbo left. Both sides now go through
+  `nativeEnabled`, so new captures store real booleans and rows already written with `1` are read
+  correctly without a migration. Options already lost are not recovered: the database no longer
+  holds them.
+- **`engineState = true` now does what it says.** An engine captured running was stored as `1` and
+  never restored. With the setting on, a vehicle parked running now comes back running.
+- `/vparkprops` reads a tyre smoke toggle stored as `1` as on.
+
+## [1.2.2] - 2026-09-14 (français)
+
+### Corrigé
+
+- **Le turbo, le xénon, la fumée de pneus, les pneus custom et drift étaient éteints à chaque
+  restauration, et la perte devenait définitive.** La capture stockait `1`, la restauration testait
+  `== true`, et `1 == true` est faux en Lua. Les deux côtés passent maintenant par `nativeEnabled` :
+  les lignes déjà écrites avec `1` sont relues correctement sans migration. Les options déjà
+  perdues ne reviennent pas, la base ne les a plus.
+- **`engineState = true` fonctionne enfin** : un moteur garé allumé repart allumé.
+- `/vparkprops` affiche correctement une fumée stockée à `1`.
+
+---
+
 ## [1.2.1] - 2026-09-12
 
 ### Fixed

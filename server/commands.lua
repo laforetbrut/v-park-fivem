@@ -780,7 +780,7 @@ RegisterNetEvent('vpark:server:props', function(token, live)
 
     if stored then
         lines[#lines + 1] = L('props.stored_smoke',
-            stored.modSmokeEnabled == true and '1' or '0', list(stored.tyreSmokeColor))
+            (stored.modSmokeEnabled == true or stored.modSmokeEnabled == 1) and '1' or '0', list(stored.tyreSmokeColor))
     end
 
     TriggerClientEvent('vpark:client:propsReport', src, lines)

@@ -248,7 +248,7 @@ function Properties.capture(vehicle, options)
 
     properties.fuelLevel = Compat.getFuel(vehicle)
 
-    properties.engineOn = GetIsVehicleEngineRunning(vehicle)
+    properties.engineOn = nativeEnabled(GetIsVehicleEngineRunning(vehicle))
 
     -- Convertibles only. 0 up, 1 lowering, 2 down, 3 raising. The two transitional states are
     -- stored as the state they are heading for, because a roof frozen mid-fold is not a thing
@@ -377,15 +377,15 @@ function Properties.capture(vehicle, options)
 
     -- Toggle mods answer a boolean and are set with a different native. Kept separate for
     -- that reason and for no other.
-    properties.modTurbo = IsToggleModOn(vehicle, 18)
-    properties.modSmokeEnabled = IsToggleModOn(vehicle, 20)
-    properties.modXenon = IsToggleModOn(vehicle, 22)
+    properties.modTurbo = nativeEnabled(IsToggleModOn(vehicle, 18))
+    properties.modSmokeEnabled = nativeEnabled(IsToggleModOn(vehicle, 20))
+    properties.modXenon = nativeEnabled(IsToggleModOn(vehicle, 22))
 
-    properties.modCustomTiresF = GetVehicleModVariation(vehicle, 23)
-    properties.modCustomTiresR = GetVehicleModVariation(vehicle, 24)
+    properties.modCustomTiresF = nativeEnabled(GetVehicleModVariation(vehicle, 23))
+    properties.modCustomTiresR = nativeEnabled(GetVehicleModVariation(vehicle, 24))
 
     properties.bulletProofTyres = GetVehicleTyresCanBurst(vehicle) == false
-    properties.driftTyres = GetDriftTyresEnabled and GetDriftTyresEnabled(vehicle) or false
+    properties.driftTyres = GetDriftTyresEnabled and nativeEnabled(GetDriftTyresEnabled(vehicle)) or false
 
     properties.livery = GetVehicleLivery(vehicle)
     properties.roofLivery = GetVehicleRoofLivery and GetVehicleRoofLivery(vehicle) or -1
@@ -518,18 +518,18 @@ local function applyModifications(vehicle, properties)
             -- The two wheel slots take a variation flag as well, and it is a separate stored
             -- property because a custom tyre and a stock one can be the same mod index.
             if slot == 23 then
-                SetVehicleMod(vehicle, slot, value, properties.modCustomTiresF == true)
+                SetVehicleMod(vehicle, slot, value, nativeEnabled(properties.modCustomTiresF))
             elseif slot == 24 then
-                SetVehicleMod(vehicle, slot, value, properties.modCustomTiresR == true)
+                SetVehicleMod(vehicle, slot, value, nativeEnabled(properties.modCustomTiresR))
             else
                 SetVehicleMod(vehicle, slot, value, false)
             end
         end
     end
 
-    if properties.modTurbo ~= nil then ToggleVehicleMod(vehicle, 18, properties.modTurbo == true) end
-    if properties.modSmokeEnabled ~= nil then ToggleVehicleMod(vehicle, 20, properties.modSmokeEnabled == true) end
-    if properties.modXenon ~= nil then ToggleVehicleMod(vehicle, 22, properties.modXenon == true) end
+    if properties.modTurbo ~= nil then ToggleVehicleMod(vehicle, 18, nativeEnabled(properties.modTurbo)) end
+    if properties.modSmokeEnabled ~= nil then ToggleVehicleMod(vehicle, 20, nativeEnabled(properties.modSmokeEnabled)) end
+    if properties.modXenon ~= nil then ToggleVehicleMod(vehicle, 22, nativeEnabled(properties.modXenon)) end
 
     -- Wheel geometry, after the wheels themselves. Only on a vehicle whose type supports it;
     -- writing a width to a model that has none produces wheels the size of the car.
@@ -544,7 +544,7 @@ local function applyModifications(vehicle, properties)
         SetVehicleTyresCanBurst(vehicle, not properties.bulletProofTyres)
     end
     if properties.driftTyres ~= nil and SetDriftTyresEnabled then
-        SetDriftTyresEnabled(vehicle, properties.driftTyres == true)
+        SetDriftTyresEnabled(vehicle, nativeEnabled(properties.driftTyres))
     end
 end
 
@@ -932,7 +932,7 @@ function Properties.apply(vehicle, properties, options)
         end
 
         if enabledGroup('engineState') then
-            local on = properties.engineOn == true
+            local on = nativeEnabled(properties.engineOn)
             SetVehicleEngineOn(vehicle, on, true, true)
         else
             SetVehicleEngineOn(vehicle, false, true, true)
