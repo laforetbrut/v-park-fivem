@@ -22,6 +22,9 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - **`engineState = true` now does what it says.** An engine captured running was stored as `1` and
   never restored. With the setting on, a vehicle parked running now comes back running.
 - `/vparkprops` reads a tyre smoke toggle stored as `1` as on.
+- **Vehicles in mappings sometimes fell through the floor.** Placed at exactly the stored height, a
+  vehicle could start a hair inside the floor's collision. It is now created and placed
+  `Config.Placement.spawnLift` (1 cm) higher; the stored position is not changed.
 - **A persisted vehicle could come back under a random GTA plate.** A new entity carries a random plate
   until the client placing it sets the real one, and any nearby client may answer a capture: one
   of them reported the random plate and it replaced the stored one. Reported with fifteen affected
@@ -58,6 +61,8 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
   perdues ne reviennent pas, la base ne les a plus.
 - **`engineState = true` fonctionne enfin** : un moteur garé allumé repart allumé.
 - `/vparkprops` affiche correctement une fumée stockée à `1`.
+- **Des véhicules dans les mappings passaient parfois à travers le sol** : ils apparaissent maintenant
+  1 cm plus haut (`Config.Placement.spawnLift`), sans changer la position enregistrée.
 - **Un véhicule persisté pouvait revenir avec une plaque GTA aléatoire** (15 véhicules sur un serveur).
   La plaque de la ligne fait maintenant foi, une ligne abîmée ressort avec sa vraie plaque, et la
   plaque est posée côté serveur dès la création. Changer une plaque doit passer par `SetPlate`.

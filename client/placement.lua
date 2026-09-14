@@ -1182,6 +1182,17 @@ function Placement.placeInner(entity, data)
         target = Placement.groundCorrect(model, target, data.class or -1)
     end
 
+    --[[
+        A CENTIMETRE OF AIR UNDER IT.
+
+        Placed at exactly the stored height, a vehicle in a mapping sometimes starts a hair inside
+        the floor's collision and the engine resolves that by dropping it through. A centimetre is
+        below anything visible and enough to start clear. It is applied to the pose only: `target`
+        stays the stored position, so the reported position and the database never move.
+    ]]
+    local lift = tonumber(options().spawnLift) or 0.01
+    local placed = vector3(target.x, target.y, target.z + lift)
+
     -- ANSWER TO PROBLEM 3: exact placement, no ground snap, full rotation.
     --
     -- `SetEntityRotation`, and NOT a `SetEntityHeading` after it. Heading sets the yaw and, on
@@ -1190,7 +1201,7 @@ function Placement.placeInner(entity, data)
     -- most visible way to get a restore subtly wrong.
     -- Through `setPose`, which unfreezes for the write. The entity was frozen at the top of
     -- this function and, since 1.0.7, was very likely frozen before that by the hold statebag.
-    setPose(entity, target, rotation, heading, true)
+    setPose(entity, placed, rotation, heading, true)
 
     SetEntityCollision(entity, true, true)
 
@@ -1199,7 +1210,7 @@ function Placement.placeInner(entity, data)
     -- Re-assert the pose after the map arrives. Streaming collision in around an entity can
     -- nudge it, and the nudge happens after the placement, so a pose set before is not
     -- necessarily the pose you have after.
-    setPose(entity, target, rotation, heading, true)
+    setPose(entity, placed, rotation, heading, true)
 
     -- Note for anybody editing below this line: `SetVehicleOnGroundProperly` does NOT belong
     -- here, however much the vehicle looks like it wants it. See the file header.
@@ -1302,11 +1313,11 @@ function Placement.placeInner(entity, data)
             local at = GetEntityCoords(entity)
             if not at then break end
 
-            if #(at - target) > 0.02 then
+            if #(at - placed) > 0.02 then
                 Park.debug('%s moved %.3f m after placement - re-asserting the pose',
                     tostring(data.id), #(at - target))
 
-                setPose(entity, target, rotation, heading, true)
+                setPose(entity, placed, rotation, heading, true)
             end
         end
     end

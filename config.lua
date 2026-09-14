@@ -1048,6 +1048,12 @@ Config.Placement = {
     -- costs nothing and looks like a parked car.
     settleDelay = 250,
 
+    -- Metres of air left under a restored vehicle. Placed at exactly the stored height, a vehicle
+    -- in a mapping can start a hair inside the floor's collision and drop through it. One
+    -- centimetre is invisible. Raise it if a particular mapping still swallows vehicles; the
+    -- stored position is never changed by it.
+    spawnLift = 0.01,
+
     --[[
         Metres above whatever is beneath it before a restored vehicle is handed back to physics
         instead of being frozen. 0 switches the check off.
