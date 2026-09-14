@@ -158,6 +158,24 @@ end
 
 Actions.askClient = askClient
 
+--[[
+    `askClient`, and the player who triggered the action as well when that is somebody else.
+
+    The owner can lose the entity in the same moment, and the admin who clicked is standing next
+    to the vehicle more often than not. Every action sent this way is idempotent, so applying it on
+    two machines gives the same result. Nothing extra from the console or another resource, where
+    `src` is 0.
+]]
+local function mutate(src, record, netId, action, value)
+    local _, owner = askClient(record, netId, action, value)
+
+    if src and src > 0 and src ~= owner then
+        TriggerClientEvent('vpark:client:mutate', src, netId, action, value)
+    end
+
+    return owner
+end
+
 -- ---------------------------------------------------------------------------------------
 -- Movement
 -- ---------------------------------------------------------------------------------------
@@ -329,13 +347,7 @@ function Actions.repair(src, reference)
     local entity, netId = ensureLive(record)
     if not entity then return false, 'error.not_in_world' end
 
-    local _, owner = askClient(record, netId, 'repair')
-
-    -- And the admin who clicked, if that is somebody else and they are in game. Repairing twice
-    -- changes nothing, and it covers an owner that loses the entity in the same moment.
-    if src and src > 0 and src ~= owner then
-        TriggerClientEvent('vpark:client:mutate', src, netId, 'repair')
-    end
+    mutate(src, record, netId, 'repair')
 
     --[[
         jim-mechanic's own parts.
@@ -421,7 +433,7 @@ function Actions.clean(src, reference)
     local entity, netId = ensureLive(record)
     if not entity then return false, 'error.not_in_world' end
 
-    askClient(record, netId, 'clean')
+    mutate(src, record, netId, 'clean')
 
     local properties = record.properties or {}
     properties.dirtLevel = 0.0
@@ -440,7 +452,7 @@ function Actions.refuel(src, reference, level)
 
     local entity, netId = ensureLive(record)
     if entity then
-        askClient(record, netId, 'refuel', level)
+        mutate(src, record, netId, 'refuel', level)
 
         -- The replicated statebag too: several fuel resources read it rather than the native,
         -- and a client-side write would not reach them.
@@ -561,7 +573,11 @@ function Actions.setLock(src, reference, locked)
 
     local entity, netId = ensureLive(record)
     if entity then
-        askClient(record, netId, locked and 'lock' or 'unlock', nil)
+        mutate(src, record, netId, locked and 'lock' or 'unlock', nil)
+
+        -- The lock is also a server setter under OneSync, so it takes effect even if no client
+        -- acts on the request.
+        pcall(SetVehicleDoorsLocked, entity, locked and 2 or 1)
     end
 
     local properties = record.properties or {}

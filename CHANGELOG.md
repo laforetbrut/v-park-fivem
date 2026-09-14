@@ -39,7 +39,8 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - **The admin panel's repair fixed only the bodywork.** The repair was sent to the client that placed the
   vehicle, which could be connected and far away with the vehicle out of scope, so nothing was
   repaired while the server cleared the dents for everybody. It now goes to the entity's network
-  owner, and to the admin who clicked. The same fix covers clean, refuel and the lock actions.
+  owner, and to the admin who clicked. Clean, refuel, lock and unlock go the same way, and the lock
+  is also set by the server so it holds even if no client acts on it.
   jim-mechanic's parts are repaired through its own `jim-mechanic:server:fixAllPart` event, the
   qb-core `player_vehicles` row is repaired so a garage does not hand back the damaged car, and
   the client repair now also covers six-wheelers' middle tyres, wheel health, decals and fire.
@@ -77,7 +78,8 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
   plaque est posée côté serveur dès la création. Changer une plaque doit passer par `SetPlate`.
 - **La réparation du panneau admin ne réparait que la carrosserie.** L'ordre partait au client qui avait
   placé le véhicule, parfois loin et hors de portée. Il part maintenant au propriétaire réseau et à
-  l'admin qui clique (même correctif pour nettoyer, faire le plein, verrouiller). Les pièces de
+  l'admin qui clique, comme nettoyer, faire le plein et verrouiller (le verrou est aussi posé par le
+  serveur). Les pièces de
   jim-mechanic passent par son événement `fixAllPart`, la fiche `player_vehicles` est réparée pour
   que le garage ne rende pas un véhicule cassé, et les roues du milieu, la santé des roues, les
   traces et le feu sont aussi réparés.
