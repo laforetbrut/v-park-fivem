@@ -185,6 +185,15 @@ function Spawn.publishNeons(record, entry)
 end
 
 local function sendRestore(record, src, netId)
+    -- A row already written with a stale plate is restored with its real one, rather than putting
+    -- the wrong plate back on the car. See the plate note in `Persist.applySnapshot`.
+    if record.plate and type(record.properties) == 'table'
+        and Park.plate(record.properties.plate) ~= record.plate then
+        Park.warn('%s: stored properties carried plate %s - restoring with %s',
+            record.id, tostring(record.properties.plate), record.plate)
+        record.properties.plate = record.plate
+    end
+
     -- Not to be believed about its neons until the client that places it says they held.
     local entry = Store.live(record.id)
     if entry then
@@ -830,7 +839,16 @@ local function spawnEntity(record)
             heading)
 
         -- `true`: the entity is registered and orphaned, and must NOT be waited on.
-        if ok and entity and entity ~= 0 then return entity, true end
+        if ok and entity and entity ~= 0 then
+            --[[
+                The real plate goes on here, from the server, the instant the entity exists. A
+                setter entity is a real server entity, so this is a server setter rather than an
+                RPC, and no client ever sees the random plate GTA gives a new vehicle - which is
+                what a nearby client used to read and report as the truth.
+            ]]
+            if record.plate then pcall(SetVehicleNumberPlateText, entity, record.plate) end
+            return entity, true
+        end
 
         Park.debug('the setter native did not create %s as `%s` - falling back', record.id, kind)
     end

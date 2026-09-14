@@ -26,6 +26,14 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
   vehicle built from extras (a Mule, utility trucks, most job vehicles) the rebuild changes which
   extras are fitted; the next capture then wrote the new selection. The extras are read before the
   repair and put back after it.
+- **A persisted vehicle could come back under a random GTA plate.** A new entity carries a random plate
+  until the client placing it sets the real one, and any nearby client may answer a capture: one
+  of them reported the random plate and it replaced the stored one. Reported with fifteen affected
+  rows, keys and garages no longer recognising the vehicles. The row's plate is now authoritative
+  for snapshots, a row already carrying a stale plate is restored with its real one, and the plate
+  is set on the server the moment the entity is created so no client sees the random one.
+  Plates must be changed through `exports['v-park']:SetPlate`: a script that changes an entity's
+  plate without it (jim-mechanic's plate change, for one) is reverted at the next restore.
 - **A repair from v-park now repairs jim-mechanic's parts too.** Its extra damage components live in
   jim-mechanic's own status table, out of reach of any native, so a repair fixed the bodywork and
   left the rest broken. It goes through jim-mechanic's documented client exports
@@ -56,6 +64,9 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - `/vparkprops` affiche correctement une fumée stockée à `1`.
 - **Une réparation depuis le panneau changeait les extras** (la Mule, les utilitaires) : ils sont relus
   avant la réparation et remis après.
+- **Un véhicule persisté pouvait revenir avec une plaque GTA aléatoire** (15 véhicules sur un serveur).
+  La plaque de la ligne fait maintenant foi, une ligne abîmée ressort avec sa vraie plaque, et la
+  plaque est posée côté serveur dès la création. Changer une plaque doit passer par `SetPlate`.
 - **Une réparation v-park répare aussi les pièces de jim-mechanic** (pompe à huile, bougies,
   batterie...) via ses exports documentés ; harnais et nitro ne sont pas touchés.
 

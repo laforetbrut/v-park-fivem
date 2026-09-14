@@ -852,6 +852,25 @@ function Persist.applySnapshot(id, snapshot, proven, src)
             properties.deformation = nil
         end
 
+        --[[
+            THE ROW'S PLATE IS THE PLATE.
+
+            A freshly created entity carries a random GTA plate until the client placing it sets
+            the real one, and every OTHER client can still read the random one for a moment. Any
+            nearby client may answer a capture, so one of them reported it, this assignment replaced
+            the stored properties with it, and the next restore put the random plate on the car.
+            Reported with fifteen rows to show for it: keys, garages and every plate-keyed script
+            stopped recognising the vehicle.
+
+            `SetPlate` is the one path that changes a plate, and it updates `record.plate` and the
+            properties together. A snapshot plate that differs from the row is a stale read.
+        ]]
+        if record.plate and properties.plate ~= nil and Park.plate(properties.plate) ~= record.plate then
+            Park.warn('%s: a snapshot from %s reported plate %s, the row says %s - kept the row',
+                id, tostring(src), tostring(properties.plate), record.plate)
+            properties.plate = record.plate
+        end
+
         patch.properties = properties
         patch.body_health = tonumber(properties.bodyHealth) or record.body_health
         patch.engine_health = tonumber(properties.engineHealth) or record.engine_health
