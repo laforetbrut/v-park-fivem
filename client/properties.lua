@@ -1146,6 +1146,16 @@ end
 function Properties.repair(vehicle)
     if not DoesEntityExist(vehicle) then return false end
 
+    --[[
+        THE EXTRAS SURVIVE THE REPAIR.
+
+        `SetVehicleFixed` rebuilds the model, and on a vehicle built from extras - a Mule, a
+        utility truck, most job vehicles - the rebuild re-rolls which extras are fitted. The
+        repair then came back as a different-looking vehicle, and the next capture wrote the new
+        selection over the one the player had. Read before, put back after.
+    ]]
+    local extras = Properties.captureExtras and Properties.captureExtras(vehicle) or nil
+
     SetVehicleFixed(vehicle)
     SetVehicleDeformationFixed(vehicle)
     SetVehicleUndriveable(vehicle, false)
@@ -1163,6 +1173,13 @@ function Properties.repair(vehicle)
 
     SetVehicleDirtLevel(vehicle, 0.0)
     SetVehicleEngineOn(vehicle, false, true, true)
+
+    if type(extras) == 'table' then
+        for key, disable in pairs(extras) do
+            local index = tonumber(key)
+            if index then SetVehicleExtra(vehicle, index, disable == 1) end
+        end
+    end
 
     Deformation.clear(vehicle)
 

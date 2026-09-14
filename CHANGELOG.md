@@ -22,6 +22,10 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - **`engineState = true` now does what it says.** An engine captured running was stored as `1` and
   never restored. With the setting on, a vehicle parked running now comes back running.
 - `/vparkprops` reads a tyre smoke toggle stored as `1` as on.
+- **A repair from the admin panel re-rolled the extras.** `SetVehicleFixed` rebuilds the model, and on a
+  vehicle built from extras (a Mule, utility trucks, most job vehicles) the rebuild changes which
+  extras are fitted; the next capture then wrote the new selection. The extras are read before the
+  repair and put back after it.
 
 ## [1.2.2] - 2026-09-14 (français)
 
@@ -34,6 +38,8 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
   perdues ne reviennent pas, la base ne les a plus.
 - **`engineState = true` fonctionne enfin** : un moteur garé allumé repart allumé.
 - `/vparkprops` affiche correctement une fumée stockée à `1`.
+- **Une réparation depuis le panneau changeait les extras** (la Mule, les utilitaires) : ils sont relus
+  avant la réparation et remis après.
 
 ---
 
