@@ -1166,41 +1166,23 @@ function Properties.repair(vehicle)
 
     Deformation.clear(vehicle)
 
+
     --[[
-        AND jim-mechanic's OWN PARTS.
-
-        A v-park repair reset everything the game knows about - body, engine, tank, tyres, windows,
-        dents - and players reported it as "ne le repare pas totalement mais seulement la
-        carrosserie". jim-mechanic keeps its extra damage components (oil pump, drive shaft, spark
-        plugs, battery, fuel tank) in its own status table, which no native can reach.
-
-        Through its documented client exports only: `GetVehicleStatus`, `SetVehicleStatus` and
-        `updateVehicle`. The component names are not documented, so none are hard-coded: every
-        numeric entry on the 0-100 part scale is raised to 100, and the keys that are fitted
-        equipment rather than wear (harness, nitrous) are left alone.
+        What `SetVehicleFixed` and the 0-7 loops above do not reach: the middle wheels of a
+        six-wheeler (tyre indexes 45 and 47), bent wheels, impact decals and a fire still burning.
+        jim-mechanic's parts are repaired on the server through its own event; see `Actions.repair`.
     ]]
-    if Park.started('jim-mechanic') then
-        Park.try(function()
-            local status = exports['jim-mechanic']:GetVehicleStatus(vehicle)
-            if type(status) ~= 'table' then return end
+    SetVehicleTyreFixed(vehicle, 45)
+    SetVehicleTyreFixed(vehicle, 47)
 
-            local equipment = { harness = true, nos = true, nitrous = true, hasnitro = true, noslevel = true }
-            local repaired = 0
-
-            for key, value in pairs(status) do
-                if type(value) == 'number' and value >= 0 and value < 100
-                    and not equipment[tostring(key):lower()] then
-                    exports['jim-mechanic']:SetVehicleStatus(vehicle, key, 100)
-                    repaired = repaired + 1
-                end
-            end
-
-            if repaired > 0 then
-                exports['jim-mechanic']:updateVehicle(vehicle)
-                Park.debug('repaired %d jim-mechanic component(s) on %d', repaired, vehicle)
-            end
-        end)
+    -- `nil` on a boat, hence the fallback.
+    local wheels = tonumber(GetVehicleNumberOfWheels(vehicle)) or 0
+    for index = 0, wheels - 1 do
+        SetVehicleWheelHealth(vehicle, index, 1000.0)
     end
+
+    WashDecalsFromVehicle(vehicle, 1.0)
+    StopEntityFire(vehicle)
 
     return true
 end

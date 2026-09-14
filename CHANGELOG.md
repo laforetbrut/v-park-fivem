@@ -36,11 +36,14 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
   is set on the server the moment the entity is created so no client sees the random one.
   Plates must be changed through `exports['v-park']:SetPlate`: a script that changes an entity's
   plate without it (jim-mechanic's plate change, for one) is reverted at the next restore.
-- **A repair from v-park now repairs jim-mechanic's parts too.** Its extra damage components live in
-  jim-mechanic's own status table, out of reach of any native, so a repair fixed the bodywork and
-  left the rest broken. It goes through jim-mechanic's documented client exports
-  (`GetVehicleStatus`, `SetVehicleStatus`, `updateVehicle`): every worn part is set back to 100,
-  fitted equipment such as the harness and nitrous is left untouched.
+- **The admin panel's repair fixed only the bodywork.** The repair was sent to the client that placed the
+  vehicle, which could be connected and far away with the vehicle out of scope, so nothing was
+  repaired while the server cleared the dents for everybody. It now goes to the entity's network
+  owner, and to the admin who clicked. The same fix covers clean, refuel and the lock actions.
+  jim-mechanic's parts are repaired through its own `jim-mechanic:server:fixAllPart` event, the
+  qb-core `player_vehicles` row is repaired so a garage does not hand back the damaged car, and
+  the client repair now also covers six-wheelers' middle tyres, wheel health, decals and fire.
+  Reported, with the jim-mechanic event identified, by a live server.
 
 ### Changed
 
@@ -72,8 +75,12 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - **Un véhicule persisté pouvait revenir avec une plaque GTA aléatoire** (15 véhicules sur un serveur).
   La plaque de la ligne fait maintenant foi, une ligne abîmée ressort avec sa vraie plaque, et la
   plaque est posée côté serveur dès la création. Changer une plaque doit passer par `SetPlate`.
-- **Une réparation v-park répare aussi les pièces de jim-mechanic** (pompe à huile, bougies,
-  batterie...) via ses exports documentés ; harnais et nitro ne sont pas touchés.
+- **La réparation du panneau admin ne réparait que la carrosserie.** L'ordre partait au client qui avait
+  placé le véhicule, parfois loin et hors de portée. Il part maintenant au propriétaire réseau et à
+  l'admin qui clique (même correctif pour nettoyer, faire le plein, verrouiller). Les pièces de
+  jim-mechanic passent par son événement `fixAllPart`, la fiche `player_vehicles` est réparée pour
+  que le garage ne rende pas un véhicule cassé, et les roues du milieu, la santé des roues, les
+  traces et le feu sont aussi réparés.
 
 ### Modifié
 

@@ -117,6 +117,24 @@ Actions.ensureLive = ensureLive
 ]]
 local function askClient(record, netId, action, value)
     local entry = Store.live(record.id)
+
+    --[[
+        THE NETWORK OWNER FIRST, NOT THE PLACER.
+
+        The client that placed a vehicle can still be connected and far away, with the vehicle out
+        of its scope. The request then resolved to no entity on that machine and did nothing, while
+        the server went on to mark the vehicle repaired and clear the dents for everybody - which is
+        exactly how a repair came to fix only the bodywork. The owner simulates the entity, so it
+        has it in scope and already has control.
+    ]]
+    if entry and entry.entity and DoesEntityExist(entry.entity) then
+        local ok, owner = pcall(NetworkGetEntityOwner, entry.entity)
+        if ok and owner and owner > 0 then
+            TriggerClientEvent('vpark:client:mutate', owner, netId, action, value)
+            return true, owner
+        end
+    end
+
     local src = entry and entry.placer
 
     if not Bridge.playerName(src) then
@@ -311,7 +329,56 @@ function Actions.repair(src, reference)
     local entity, netId = ensureLive(record)
     if not entity then return false, 'error.not_in_world' end
 
-    askClient(record, netId, 'repair')
+    local _, owner = askClient(record, netId, 'repair')
+
+    -- And the admin who clicked, if that is somebody else and they are in game. Repairing twice
+    -- changes nothing, and it covers an owner that loses the entity in the same moment.
+    if src and src > 0 and src ~= owner then
+        TriggerClientEvent('vpark:client:mutate', src, netId, 'repair')
+    end
+
+    --[[
+        jim-mechanic's own parts.
+
+        Its wear (oil, axle, spark plugs, battery, fuel) lives in its server memory and in
+        `player_vehicles.status`, out of reach of any native. `jim-mechanic:server:fixAllPart` is
+        its own event for putting every part back to 100 and syncing its clients. Identified from
+        jim-mechanic 3.6.16 by the server that reported the bug.
+    ]]
+    if Park.started('jim-mechanic') and netId then
+        TriggerEvent('jim-mechanic:server:fixAllPart', netId)
+    end
+
+    --[[
+        And the framework's own row, so the garage does not hand back the damaged car.
+
+        qb-core keeps engine and body health and the tyre, door and window state in
+        `player_vehicles`, and a garage respawns from that - so a vehicle repaired here and then
+        sent to a garage came out broken again. Damage keys are REMOVED from `mods` rather than
+        rewritten: qb-core's property apply does nothing for an absent key, which is intact.
+        Owned vehicles on the qb adapter only.
+    ]]
+    local schema = Bridge.ownedTable and Bridge.ownedTable()
+    if record.owner_type == 'owned' and record.plate and Bridge.kind() == 'qb'
+        and type(schema) == 'table' and schema.table == 'player_vehicles' and Database.available() then
+        Park.try(function()
+            Database.execute([[
+                UPDATE `player_vehicles`
+                   SET engine = 1000, body = 1000,
+                       mods = IF(JSON_VALID(mods),
+                                 JSON_REMOVE(JSON_SET(mods, '$.engineHealth', 1000.0, '$.bodyHealth', 1000.0,
+                                                      '$.tankHealth', 1000.0, '$.dirtLevel', 0.0),
+                                             '$.tireHealth', '$.tireBurstState', '$.tireBurstCompletely',
+                                             '$.windowStatus', '$.doorStatus'),
+                                 mods),
+                       status = IF(JSON_VALID(status) AND JSON_TYPE(status) = 'OBJECT',
+                                   JSON_SET(status, '$.oil', 100.0, '$.axle', 100.0, '$.spark', 100.0,
+                                            '$.battery', 100.0, '$.fuel', 100.0),
+                                   status)
+                 WHERE plate = ?
+            ]], { record.plate })
+        end)
+    end
 
     -- The stored properties are corrected too, so that a repair survives a restart even if
     -- nobody is near the vehicle when the next sweep runs.
