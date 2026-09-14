@@ -26,6 +26,11 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
   vehicle built from extras (a Mule, utility trucks, most job vehicles) the rebuild changes which
   extras are fitted; the next capture then wrote the new selection. The extras are read before the
   repair and put back after it.
+- **A repair from v-park now repairs jim-mechanic's parts too.** Its extra damage components live in
+  jim-mechanic's own status table, out of reach of any native, so a repair fixed the bodywork and
+  left the rest broken. It goes through jim-mechanic's documented client exports
+  (`GetVehicleStatus`, `SetVehicleStatus`, `updateVehicle`): every worn part is set back to 100,
+  fitted equipment such as the harness and nitrous is left untouched.
 
 ### Changed
 
@@ -51,6 +56,8 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - `/vparkprops` affiche correctement une fumée stockée à `1`.
 - **Une réparation depuis le panneau changeait les extras** (la Mule, les utilitaires) : ils sont relus
   avant la réparation et remis après.
+- **Une réparation v-park répare aussi les pièces de jim-mechanic** (pompe à huile, bougies,
+  batterie...) via ses exports documentés ; harnais et nitro ne sont pas touchés.
 
 ### Modifié
 
