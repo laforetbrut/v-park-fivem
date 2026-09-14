@@ -1061,6 +1061,28 @@ Config.Placement = {
         and replaces `spawnLift` inside the zone. The stored position is never changed.
     ]]
     liftZones = {
+        -- The ranch mapping near Grapeseed: vehicles parked on its floor dropped through it.
+        -- Traced corner by corner on a live server. The height range covers the whole site with
+        -- a margin, from its lowest corner (36.9) to its highest (48.6).
+        {
+            type = 'poly',
+            name = 'mapping ranch',
+            points = {
+                { x = 2274.64, y = 5000.11 },
+                { x = 2362.41, y = 4911.47 },
+                { x = 2434.85, y = 4842.84 },
+                { x = 2431.04, y = 4929.23 },
+                { x = 2474.13, y = 4975.26 },
+                { x = 2476.75, y = 4997.65 },
+                { x = 2452.02, y = 5028.65 },
+                { x = 2370.13, y = 5091.77 },
+                { x = 2343.80, y = 5073.16 },
+                { x = 2282.12, y = 5012.72 },
+            },
+            heightRange = { min = 30.0, max = 60.0 },
+            lift = 0.15,
+        },
+
         -- {
         --     type = 'circle',
         --     name = 'Caserne MLO',

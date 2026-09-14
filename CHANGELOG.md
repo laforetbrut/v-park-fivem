@@ -27,6 +27,7 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
   `Config.Placement.spawnLift` (1 cm) higher; the stored position is not changed.
   `Config.Placement.liftZones` sets a higher lift for a specific mapping, with the same circle, box
   and polygon shapes as `Config.Zones` but without blocking persistence there.
+  It ships with one zone, the ranch mapping near Grapeseed, lifted 15 cm.
 - **A persisted vehicle could come back under a random GTA plate.** A new entity carries a random plate
   until the client placing it sets the real one, and any nearby client may answer a capture: one
   of them reported the random plate and it replaced the stored one. Reported with fifteen affected
@@ -67,6 +68,7 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
   1 cm plus haut (`Config.Placement.spawnLift`), sans changer la position enregistrée.
   `Config.Placement.liftZones` permet une levée plus haute dans une zone précise (cercle, boîte ou
   polygone), sans y bloquer la persistance.
+  Une zone est fournie par défaut : le mapping ranch près de Grapeseed, levé de 15 cm.
 - **Un véhicule persisté pouvait revenir avec une plaque GTA aléatoire** (15 véhicules sur un serveur).
   La plaque de la ligne fait maintenant foi, une ligne abîmée ressort avec sa vraie plaque, et la
   plaque est posée côté serveur dès la création. Changer une plaque doit passer par `SetPlate`.
