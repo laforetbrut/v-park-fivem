@@ -22,10 +22,6 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - **`engineState = true` now does what it says.** An engine captured running was stored as `1` and
   never restored. With the setting on, a vehicle parked running now comes back running.
 - `/vparkprops` reads a tyre smoke toggle stored as `1` as on.
-- **A repair from the admin panel re-rolled the extras.** `SetVehicleFixed` rebuilds the model, and on a
-  vehicle built from extras (a Mule, utility trucks, most job vehicles) the rebuild changes which
-  extras are fitted; the next capture then wrote the new selection. The extras are read before the
-  repair and put back after it.
 - **A persisted vehicle could come back under a random GTA plate.** A new entity carries a random plate
   until the client placing it sets the real one, and any nearby client may answer a capture: one
   of them reported the random plate and it replaced the stored one. Reported with fifteen affected
@@ -62,8 +58,6 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
   perdues ne reviennent pas, la base ne les a plus.
 - **`engineState = true` fonctionne enfin** : un moteur garé allumé repart allumé.
 - `/vparkprops` affiche correctement une fumée stockée à `1`.
-- **Une réparation depuis le panneau changeait les extras** (la Mule, les utilitaires) : ils sont relus
-  avant la réparation et remis après.
 - **Un véhicule persisté pouvait revenir avec une plaque GTA aléatoire** (15 véhicules sur un serveur).
   La plaque de la ligne fait maintenant foi, une ligne abîmée ressort avec sa vraie plaque, et la
   plaque est posée côté serveur dès la création. Changer une plaque doit passer par `SetPlate`.
