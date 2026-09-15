@@ -7,6 +7,63 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.2.4] - 2026-09-15
+
+Performance and robustness. Nothing about what is stored or restored changes; every addition
+switches off with a config value.
+
+### Added
+
+- **Synchronisation work goes to players who can do it.** v-park names the nearest player to
+  dress and place a restored vehicle and to answer captures. When that player has a bad
+  connection or a machine at low FPS, a placement waited twenty seconds for nothing and was redone.
+  A player is now passed over when they are clearly struggling - ping over 250 ms, reported FPS
+  under 25, or two unanswered placements or captures in five minutes - but only when another
+  player is within 40 metres of them, so the replacement is as likely to have the vehicle in
+  scope. Otherwise the nearest player is still used, and where the entity's network owner is the
+  one asked, nothing changes. Packet loss is not readable on the server; unanswered requests and
+  ping are what it looks like from there. `Config.Performance.syncQuality`, `enabled = false`
+  restores the old behaviour exactly.
+- **`/vparkstats` shows which property keys captures actually change**, and how many players are
+  struggling right now. A server reported 744 row writes for 38 vehicles; this line names the
+  field behind it in one reading.
+
+### Changed
+
+- **A large capture answer is applied over several ticks** instead of all at once, four vehicles
+  per tick. The same work, the same writes, without the 27 ms stall a big answer produced.
+- **Fuel is stored to a tenth of a litre.** A level drifting in the second decimal marked the whole
+  row dirty on every capture.
+
+### Fixed
+
+- **The streaming line of `/vparkstats` printed `%d` instead of its numbers**, since the precise
+  timers of 1.2.2 made the last pass duration a fraction.
+
+## [1.2.4] - 2026-09-15 (français)
+
+### Ajouté
+
+- **Le travail de synchro va aux joueurs capables de le faire.** Un joueur en difficulté (ping
+  au-dessus de 250 ms, moins de 25 FPS, ou deux demandes sans réponse en cinq minutes) n'est plus
+  choisi pour placer un véhicule ou répondre aux captures, mais seulement si un autre joueur est à
+  moins de 40 m de lui. Sinon, le plus proche reste choisi. `Config.Performance.syncQuality`,
+  `enabled = false` pour revenir à l'ancien comportement.
+- **`/vparkstats` indique quels champs changent vraiment en capture** et combien de joueurs sont
+  en difficulté.
+
+### Modifié
+
+- **Une grosse réponse de capture est traitée sur plusieurs ticks** (quatre véhicules par tick) :
+  même travail, sans l'à-coup de 27 ms.
+- **Le carburant est enregistré au dixième.**
+
+### Corrigé
+
+- **La ligne streaming de `/vparkstats` affichait `%d`** au lieu des chiffres.
+
+---
+
 ## [1.2.3] - 2026-09-15
 
 ### Fixed

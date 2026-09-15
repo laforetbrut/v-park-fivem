@@ -189,6 +189,8 @@ Locale.register('fr', {
     ['diag.progress'] = "  progression prêt %s, vu %s, %d tentatives, placé il y a %s",
     ['diag.position'] = "  position    conduit %s, garé %s, décalé %s -> un despawn relirait sa pose : %s",
     ['diag.placer']   = "  placeur     %s  |  %s",
+    ['stats.changes'] = "champs les plus modifiés en capture : %s",
+    ['stats.quality'] = "qualité de synchro : %d joueur(s) en difficulté, %d nomination(s) confiée(s) à un meilleur joueur",
     ['stats.apply']   = "réponses de capture : %.2f ms moy / %.2f ms pire par lot reçu",
     ['stats.timing']  = "temps : passe de streaming %.1f ms moy / %.1f ms pire  |  balayage de capture %.1f / %.1f  |  réconciliation %.1f / %.1f",
     ['stats.health']  = "restauration : %d en attente d'un client, %d en attente de suppression, %d redemandés",

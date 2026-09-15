@@ -5,7 +5,7 @@ lua54 'yes'
 name 'v-park'
 author 'vyrriox'
 description 'Vehicle persistence for FiveM on qb-core, qbx_core, ESX and ox_core: vehicles stay where they were left across restarts, are restored to the exact spot even in tight spaces, and are streamed in only when somebody is near. Bodywork deformation is stored and synchronised, job and rental vehicles can be semi-persistent, and there is a migration from Advanced Parking.'
-version '1.2.3'
+version '1.2.4'
 
 -- No hard dependency, on purpose. oxmysql, every framework, every fuel resource, every key
 -- resource, every garage and every notification system are detected at runtime and all
@@ -109,6 +109,9 @@ server_scripts {
     'server/ownership.lua',
 
     -- What exists in the world right now.
+    -- Which players are fit to be handed synchronisation work. Before spawn.lua and persist.lua,
+    -- which both ask it who to nominate.
+    'server/quality.lua',
     'server/spawn.lua',
 
     -- Turning a vehicle into a row, as rarely as possible.

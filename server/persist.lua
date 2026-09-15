@@ -62,6 +62,9 @@ local stats = {
     sweepMs = Park.timing(),
     -- Handling the answers: filtering, merging, hashing and marking every snapshot a client sent.
     applyMs = Park.timing(),
+    -- property key -> how many accepted snapshots actually changed it. The answer to "why is this
+    -- vehicle written twenty times", in one reading.
+    changedFields = {},
 
     written = 0,
     batches = 0,
@@ -871,6 +874,10 @@ function Persist.applySnapshot(id, snapshot, proven, src)
             properties.plate = record.plate
         end
 
+        if type(properties.fuelLevel) == 'number' then
+            properties.fuelLevel = Park.round(properties.fuelLevel, 1)
+        end
+
         patch.properties = properties
         patch.body_health = tonumber(properties.bodyHealth) or record.body_health
         patch.engine_health = tonumber(properties.engineHealth) or record.engine_health
@@ -902,9 +909,29 @@ function Persist.applySnapshot(id, snapshot, proven, src)
     end
 
     local oldNeons = Schema.neonState(record.properties)
+    local oldProperties = record.properties
     local changed = Store.update(id, patch)
 
     if changed then
+        --[[
+            Count which property keys moved. Only on a change, so it costs nothing on the common
+            path, and tables are compared through the C encoder rather than walked in Lua.
+        ]]
+        if type(oldProperties) == 'table' and type(record.properties) == 'table'
+            and oldProperties ~= record.properties then
+            local counts = stats.changedFields
+            for key, value in pairs(record.properties) do
+                local before = oldProperties[key]
+                local differs
+                if type(value) == 'table' and type(before) == 'table' then
+                    differs = Park.encode(value) ~= Park.encode(before)
+                else
+                    differs = value ~= before
+                end
+                if differs then counts[key] = (counts[key] or 0) + 1 end
+            end
+        end
+
         Persist.guardSize(record)
         if patch.properties and not Schema.sameNeons(oldNeons, record.properties)
             and (oldNeons or Schema.neonState(record.properties)) then
@@ -966,23 +993,42 @@ RegisterNetEvent('vpark:server:captured', function(snapshots, token)
 
     if type(snapshots) ~= 'table' then return end
 
-    local changed = 0
-    local applyStarted = Park.clock()
-    for _, snapshot in ipairs(snapshots) do
-        if type(snapshot) == 'table' and type(snapshot.id) == 'string' then
-            -- Only vehicles this client was actually asked about. Without this check a client
-            -- could volunteer a snapshot for any vehicle on the server.
-            if request.allowed[snapshot.id] then
-                if Persist.applySnapshot(snapshot.id, snapshot, nil, src) then
-                    changed = changed + 1
+    --[[
+        On its own thread, a few snapshots per tick.
+
+        A lot answered in one go was applied in one go: a client near a dozen vehicles with
+        deformation data produced a 27 ms stall on the server thread. Spreading the same work over
+        ticks changes nothing about what is written, only when inside the next few frames.
+        The timing records the work itself, not the waits between slices.
+    ]]
+    CreateThread(function()
+        local changed = 0
+        local spent = 0.0
+        local slice = Park.clock()
+
+        for index, snapshot in ipairs(snapshots) do
+            if type(snapshot) == 'table' and type(snapshot.id) == 'string' then
+                -- Only vehicles this client was actually asked about. Without this check a client
+                -- could volunteer a snapshot for any vehicle on the server.
+                if request.allowed[snapshot.id] then
+                    if Persist.applySnapshot(snapshot.id, snapshot, nil, src) then
+                        changed = changed + 1
+                    end
                 end
             end
-        end
-    end
 
-    stats.captures = stats.captures + 1
-    Park.observe(stats.applyMs, Park.clock() - applyStarted)
-    Park.trace('captured %d vehicle(s) from %d, %d changed', #snapshots, src, changed)
+            if index % 4 == 0 and index < #snapshots then
+                spent = spent + (Park.clock() - slice)
+                Wait(0)
+                slice = Park.clock()
+            end
+        end
+
+        spent = spent + (Park.clock() - slice)
+        stats.captures = stats.captures + 1
+        Park.observe(stats.applyMs, spent)
+        Park.trace('captured %d vehicle(s) from %d, %d changed', #snapshots, src, changed)
+    end)
 end)
 
 --[[
@@ -1077,15 +1123,8 @@ local function sweep()
                 elseif driving then
                     best = entry.occupant
                 else
-                    for _, player in ipairs(players) do
-                        if player.bucket == record.bucket then
-                            local dx, dy = player.x - record.pos_x, player.y - record.pos_y
-                            local distance = dx * dx + dy * dy
-                            if not bestDistance or distance < bestDistance then
-                                best, bestDistance = player.src, distance
-                            end
-                        end
-                    end
+                    local picked = Quality.pick(players, record.pos_x, record.pos_y, record.bucket)
+                    best = picked and picked.src or nil
                 end
 
                 if best then
@@ -1111,6 +1150,7 @@ local function sweep()
     -- without this the table grows for the life of the server.
     for token, request in pairs(requests) do
         if Park.ticks() - request.sentAt > 30000 then
+            Quality.strike(request.src)
             requests[token] = nil
         end
     end

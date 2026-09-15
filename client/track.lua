@@ -607,3 +607,30 @@ end)
 function Track.currentVehicle()
     return current.entity
 end
+
+--[[
+    Tell the server how this machine is coping, every ten seconds.
+
+    The server passes over a clearly struggling player when it hands out synchronisation work -
+    see server/quality.lua. Frame rate is the one part of that it cannot read itself. Sampled once
+    a second rather than every frame, and averaged, so the report costs nothing and is not thrown
+    by a single hitch.
+]]
+CreateThread(function()
+    while true do
+        local total, samples = 0.0, 0
+
+        for _ = 1, 10 do
+            Wait(1000)
+            local frame = GetFrameTime()
+            if frame and frame > 0 then
+                total = total + frame
+                samples = samples + 1
+            end
+        end
+
+        if samples > 0 then
+            TriggerServerEvent('vpark:server:quality', samples / total)
+        end
+    end
+end)

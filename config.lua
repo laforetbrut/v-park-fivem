@@ -2508,6 +2508,27 @@ Config.Migration = {
 -- ===========================================================================================
 
 Config.Performance = {
+    --[[
+        Pass over a clearly struggling player when handing out synchronisation work.
+
+        v-park names the NEAREST player to dress and place a restored vehicle and to answer
+        captures. When that player has a bad connection or a machine at 15 FPS, a placement waits
+        twenty seconds for nothing and is redone. With this on, such a player is skipped - but
+        only when another player is within `slack` metres of them, so the replacement is just as
+        likely to have the vehicle in scope. Otherwise the nearest player is still used.
+
+        The thresholds are deliberately far past an ordinary player. `enabled = false` restores
+        the old behaviour exactly.
+    ]]
+    syncQuality = {
+        enabled = true,
+        maxPing = 250,       -- ms, read on the server
+        minFps = 25,         -- reported by the client every ten seconds
+        maxStrikes = 2,      -- unanswered placements or captures within `strikeMinutes`
+        strikeMinutes = 5,
+        slack = 40.0,        -- metres a replacement may be further away than the nearest player
+    },
+
     -- Milliseconds of server time the streaming pass may take before it yields and finishes
     -- on the next tick. A budget, not a target: the pass normally costs a fraction of it.
     streamBudgetMs = 3,

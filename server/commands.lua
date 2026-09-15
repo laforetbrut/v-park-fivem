@@ -417,7 +417,10 @@ register('stats', {
     replyMany(src, {
         L('stats.header'),
         L('stats.store', store.total, store.live, store.dirty, store.cells),
-        L('stats.spawn', spawn.spawned, spawn.despawned, spawn.failed, spawn.lastPassMs),
+        -- Rounded: the pass is timed with a sub-millisecond clock since 1.2.2, and `%d` refuses a
+        -- fraction, which printed the raw template instead of the numbers.
+        L('stats.spawn', spawn.spawned, spawn.despawned, spawn.failed,
+            math.floor((tonumber(spawn.lastPassMs) or 0) + 0.5)),
         L('stats.placement', spawn.exact or 0, spawn.nudged or 0, spawn.forced or 0, spawn.grounded or 0),
         L('stats.persist', persist.written, persist.batches, persist.captures, persist.lastFlushMs),
         L('stats.database', db.queries, db.writes, db.errors, db.averageMs, db.slowestMs),
@@ -438,6 +441,21 @@ register('stats', {
             Park.average(spawn.reconcileMs), (spawn.reconcileMs or {}).worst or 0),
 
         L('stats.apply', Park.average(persist.applyMs), (persist.applyMs or {}).worst or 0),
+
+        L('stats.changes', (function()
+            local list = {}
+            for key, count in pairs(persist.changedFields or {}) do
+                list[#list + 1] = { key = key, count = count }
+            end
+            table.sort(list, function(a, b) return a.count > b.count end)
+            local out = {}
+            for i = 1, math.min(6, #list) do
+                out[#out + 1] = ('%s %d'):format(list[i].key, list[i].count)
+            end
+            return #out > 0 and table.concat(out, ', ') or '-'
+        end)()),
+
+        L('stats.quality', Quality.stats().poor, Quality.stats().passedOver),
 
         L('stats.health', Spawn.health()),
     })

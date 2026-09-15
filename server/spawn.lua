@@ -626,19 +626,9 @@ end
     "the space is free" for an area it cannot see.
 ]]
 local function nominate(record, players)
-    local best, bestDistance
-
-    for _, player in ipairs(players) do
-        if player.bucket == record.bucket then
-            local dx, dy = player.x - record.pos_x, player.y - record.pos_y
-            local distance = dx * dx + dy * dy
-            if not bestDistance or distance < bestDistance then
-                best, bestDistance = player, distance
-            end
-        end
-    end
-
-    return best
+    -- Nearest player, unless they are clearly struggling and somebody close to them is not.
+    -- See server/quality.lua.
+    return Quality.pick(players, record.pos_x, record.pos_y, record.bucket)
 end
 
 --[[
@@ -1220,6 +1210,8 @@ local function pass()
     for id, sentAt in pairs(pending) do
         if Park.ticks() - sentAt > 20000 then
             pending[id] = nil
+            local timedOut = Store.live(id)
+            if timedOut and timedOut.placer then Quality.strike(timedOut.placer) end
             Park.debug('no placement answer for %s after 20s - removing it and re-nominating', id)
             -- Individually protected. One vehicle that cannot be despawned must not stop the
             -- other three hundred from being.
@@ -1691,6 +1683,9 @@ RegisterNetEvent('vpark:server:restoreFailed', function(id, reason)
     if not entry or entry.placer ~= src then return end
 
     pending[id] = nil
+
+    -- The entity never reached this client: the signature of a connection that is not keeping up.
+    if reason == 'no_entity' then Quality.strike(src) end
 
     Park.debug('client could not restore %s: %s', id, tostring(reason))
     pcall(Spawn.despawn, id, 'client failed')
