@@ -7,6 +7,25 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **`exports['v-park']:Delete(plate)` did nothing.** It passed the reference straight to
+  `Lifecycle.remove`, which looks up by id only, so a plate returned `false, 'unknown'` and the
+  vehicle stayed persisted - the only reference-taking export that did not resolve a plate. It now
+  goes through `Store.resolve` like the others and returns `false, 'no such vehicle'` when nothing
+  matches. Reported by a server whose dealership repossessions silently failed.
+
+## [Non publié]
+
+### Corrigé
+
+- **`exports['v-park']:Delete(plaque)` ne faisait rien** : l'export accepte maintenant une plaque
+  comme un identifiant, comme tous les autres.
+
+---
+
 ## [1.2.2] - 2026-09-14
 
 ### Fixed

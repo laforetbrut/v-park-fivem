@@ -341,7 +341,12 @@ exports('Delete', function(reference, reason)
     local ok, why = writesAllowed()
     if not ok then return refuse(why) end
 
-    return Lifecycle.remove(reference, 'delete', GetInvokingResource() or 'api', reason or 'api')
+    -- Resolved like every other write that takes a reference: an id OR a plate. `Lifecycle.remove`
+    -- looks up by id only, so a plate went straight through as "unknown" and the vehicle stayed.
+    local record = Store.resolve(reference)
+    if not record then return false, 'no such vehicle' end
+
+    return Lifecycle.remove(record.id, 'delete', GetInvokingResource() or 'api', reason or 'api')
 end)
 
 exports('SetOwner', function(reference, characterId, ownerType, name)
