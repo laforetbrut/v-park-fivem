@@ -7,7 +7,7 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased]
+## [1.2.3] - 2026-09-15
 
 ### Fixed
 
@@ -17,7 +17,7 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
   goes through `Store.resolve` like the others and returns `false, 'no such vehicle'` when nothing
   matches. Reported by a server whose dealership repossessions silently failed.
 
-## [Non publié]
+## [1.2.3] - 2026-09-15 (français)
 
 ### Corrigé
 
