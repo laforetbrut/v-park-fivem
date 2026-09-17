@@ -658,7 +658,35 @@ Deformation.external = external
 
 AddStateBagChangeHandler('vpark:deform', '', function(bagName, _, value)
     if not enabled() or external() then return end
-    if type(value) ~= 'table' then return end
+
+    --[[
+        ================================================================================================
+        CLEARING THE BAG SMOOTHS THE BODYWORK. IT USED TO DO NOTHING AT ALL.
+        ================================================================================================
+
+        A repair calls `SetVehicleDeformationFixed` on ONE client: the one that was asked to do it.
+        Deformation is not reliably synced - that is the whole reason this file exists - so every
+        other client kept the dents it had applied locally, and the server clearing this bag was
+        ignored here because the handler only accepted a table.
+
+        Which is the report, in the words it was sent in: the player who repaired saw a smooth car,
+        five other players saw it dented, and some saw it smooth because they had never applied the
+        dents in the first place.
+
+        So an absent value is an instruction. Smooth the vehicle and forget the version, so a later
+        deformation on the same entity is applied rather than skipped as already done.
+    ]]
+    if type(value) ~= 'table' then
+        CreateThread(function()
+            local entity = GetEntityFromStateBagName(bagName)
+            if not entity or entity == 0 or not DoesEntityExist(entity) then return end
+
+            SetVehicleDeformationFixed(entity)
+            Deformation.clear(entity)
+        end)
+
+        return
+    end
 
     CreateThread(function()
         local entity

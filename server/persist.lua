@@ -829,18 +829,40 @@ function Persist.applySnapshot(id, snapshot, proven, src)
             nothing else.
         ]]
         local deformation = properties.deformation
+        local pristine = tonumber(Config.Deformation and Config.Deformation.pristineHealth) or 999.0
+        local reported = tonumber(properties.bodyHealth)
 
         if type(deformation) == 'table' and type(deformation.d) == 'table' and #deformation.d == 0
             and record.properties and record.properties.deformation then
-
-            local pristine = tonumber(Config.Deformation and Config.Deformation.pristineHealth) or 999.0
-            local reported = tonumber(properties.bodyHealth)
 
             if reported and reported < pristine then
                 properties.deformation = record.properties.deformation
                 Park.trace('%s reported no dents at %.1f body health - keeping the stored ones',
                     id, reported)
             end
+        end
+
+        --[[
+            AND THE OTHER DIRECTION, WHICH WAS MISSING.
+
+            The rule above is symmetric and only half of it was written: a car with dents cannot
+            read as pristine, AND a car that reads as pristine cannot have dents. Only the first
+            half was enforced.
+
+            So a client that still showed the dents of a repaired car - deformation is applied per
+            client, and until this release clearing it reached nobody - reported them back at full
+            body health, and they were written into the row. The next restore handed them to
+            everybody, which is "I repaired it, I came back, it is dented again, and the bodywork
+            reads 100%".
+
+            Dropped rather than replaced with the stored value: the stored value is the row this is
+            repairing. A pristine car has no dents, and that is what gets written.
+        ]]
+        if type(deformation) == 'table' and type(deformation.d) == 'table' and #deformation.d > 0
+            and reported and reported >= pristine then
+            Park.trace('%s reported %d dent(s) at %.1f body health - a pristine car has none',
+                id, #deformation.d / 2, reported)
+            properties.deformation = nil
         end
 
         --[[

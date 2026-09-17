@@ -7,6 +7,46 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.2.5] - 2026-09-17
+
+### Fixed
+
+- **A repaired vehicle stayed dented for everybody except the player who repaired it, and came back
+  dented after a reload.** Two halves of the same rule, and each was only written once.
+
+  Deformation is applied per client, because the engine does not sync it reliably - that is the
+  reason `client/deformation.lua` exists. A repair calls `SetVehicleDeformationFixed` on the one
+  client asked to do it, and the server clears the replicated `vpark:deform` bag to tell everybody
+  else. The handler for that bag ignored anything that was not a table, so clearing it reached
+  nobody: the repairer saw a smooth car, players who had applied the dents still saw them, and
+  players who had never applied them saw it smooth. An absent value is now an instruction to smooth
+  the bodywork.
+
+  The server then accepted those phantom dents back. Its guard says a car with dents cannot read as
+  pristine and a car that reads as pristine cannot have dents - but only the first half was
+  enforced, so a client still showing the dents reported them at full body health and they were
+  written to the row, then handed to everybody on the next restore. Dents reported at pristine body
+  health are now dropped, which also repairs rows already written that way the next time the
+  vehicle is captured.
+
+## [1.2.5] - 2026-09-17 (français)
+
+### Corrigé
+
+- **Un véhicule réparé restait déformé pour tout le monde sauf celui qui l'avait réparé, et revenait
+  déformé après rechargement.** La déformation est appliquée par chaque client, car le moteur ne la
+  synchronise pas de façon fiable. La réparation ne lisse la tôle que chez le client qui l'exécute,
+  et le serveur efface le statebag `vpark:deform` pour prévenir les autres : ce gestionnaire
+  ignorait l'effacement. D'où trois cas en même temps : le réparateur voyait la voiture lisse, ceux
+  qui avaient appliqué les bosses les gardaient, et ceux qui ne les avaient jamais appliquées la
+  voyaient lisse.
+
+  Ensuite, le serveur réacceptait ces bosses fantômes : son garde-fou ne vérifiait que dans un sens.
+  Des bosses rapportées avec une carrosserie à 100 % sont maintenant refusées, ce qui répare aussi
+  les lignes déjà écrites ainsi à la prochaine capture.
+
+---
+
 ## [1.2.4] - 2026-09-15
 
 Performance and robustness. Nothing about what is stored or restored changes; every addition
