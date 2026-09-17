@@ -88,6 +88,26 @@ local failures = {}
     only source of truth that does not lie about an entity in this state.
 ]]
 local ours = {}
+
+--[[
+    ================================================================================================
+    THE SAME BOOK, READ THE OTHER WAY: id -> entity.
+    ================================================================================================
+
+    `ours` answers "whose is this entity". Nothing could answer "does an entity for this vehicle
+    already exist", and that is the question that stops a duplicate being created.
+
+    `Store.isLive` was the only guard, and it answers something subtly different: whether v-park has
+    an entity REGISTERED for that vehicle. An entity that survived a despawn - a delete that did not
+    take, a handle the engine had not released yet - is not registered and is very much still in the
+    world. The next streaming pass then created a second one, and a server watched vehicles
+    duplicate as a player connected and disappear again fifteen seconds later when the reconcile
+    sweep collected the copies.
+
+    This index is written and cleared everywhere `ours` is, so the two cannot disagree.
+]]
+local oursById = {}
+
 local condemned = {}
 
 --[[
@@ -455,6 +475,9 @@ Spawn.safeRotation = safeRotation
 ]]
 local function release(entity)
     if not entity or entity == 0 then return end
+
+    local owned = ours[entity]
+    if owned and oursById[owned] == entity then oursById[owned] = nil end
 
     ours[entity] = nil
     condemned[entity] = condemned[entity] or Park.ticks()
@@ -885,6 +908,33 @@ function Spawn.create(record, players)
     if Store.isLive(record.id) then return nil end
     if pending[record.id] then return nil end
 
+    --[[
+        AND NOT WHILE AN ENTITY OF OURS FOR THIS VEHICLE IS STILL IN THE WORLD.
+
+        `Store.isLive` says whether one is REGISTERED, which is not the same as whether one exists.
+        A despawn clears the registration first and deletes afterwards - deliberately, so a raise
+        cannot leave the resource stuck - so between those two steps, and for as long as a delete
+        that did not take leaves the handle alive, this vehicle has an entity and no registration.
+
+        Refused rather than adopted: we cannot tell whether that entity was ever dressed or placed,
+        and the reconcile sweep already collects it within fifteen seconds. The vehicle then appears
+        on a later pass, a few seconds late, instead of appearing twice.
+    ]]
+    local existing = oursById[record.id]
+
+    if existing then
+        -- `ours[existing] == record.id` as well as the entity existing: GTA reuses handles, and a
+        -- freed one handed to somebody else's vehicle must not block this one from ever spawning.
+        if ours[existing] == record.id and DoesEntityExist(existing) then
+            Park.warn('%s already has an entity in the world (%d) that is not registered - not '
+                .. 'creating a second one. The reconcile sweep will collect it.',
+                record.id, existing)
+            return nil
+        end
+
+        oursById[record.id] = nil
+    end
+
     -- Nominated BEFORE anything is created. An early return after `CreateVehicle` has to
     -- delete what it made, and the cheapest way not to get that wrong is to have nothing to
     -- delete.
@@ -924,6 +974,7 @@ function Spawn.create(record, players)
                        finishes.
     ]]
     ours[entity] = record.id
+    oursById[record.id] = entity
 
     Store.setLive(record.id, {
         entity = entity,

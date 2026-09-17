@@ -7,6 +7,51 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.2.7] - 2026-09-17
+
+### Fixed
+
+- **A vehicle could be created twice, and the copies vanished shortly after.** Reported on a live
+  server as a player connected: vehicles duplicated, then disappeared about fifteen seconds later,
+  which is the reconcile sweep collecting the copies it found.
+
+  Creation was guarded by `Store.isLive`, which answers whether v-park has an entity REGISTERED for
+  a vehicle - not whether one exists. A despawn clears the registration first and deletes
+  afterwards, deliberately, so that a raise cannot leave the resource stuck; and a delete does not
+  always take effect immediately. In that window the vehicle has an entity in the world and no
+  registration, so the next streaming pass created a second one.
+
+  v-park now keeps its entity book readable both ways and refuses to create a vehicle while an
+  entity of its own for that vehicle is still in the world, naming it in the console. The stray is
+  collected by the reconcile sweep within fifteen seconds and the vehicle appears on a later pass,
+  a few seconds late instead of twice. The refusal checks the handle is still ours as well as still
+  alive, because the game reuses handles and a freed one must not block a vehicle from spawning.
+
+  This is a safety net rather than a diagnosis: it prevents the duplicate whatever produced the
+  stray entity. If a server still sees the console line, that line names the vehicle.
+
+## [1.2.7] - 2026-09-17 (français)
+
+### Corrigé
+
+- **Un véhicule pouvait être créé deux fois, et les copies disparaissaient peu après.** Signalé sur
+  un serveur à la connexion d'un joueur : des véhicules se sont dupliqués puis ont disparu une
+  quinzaine de secondes plus tard, ce qui est le balayage de réconciliation qui ramasse les copies.
+
+  La création n'était gardée que par « v-park a-t-il une entité ENREGISTRÉE pour ce véhicule »,
+  ce qui n'est pas la même question que « une entité existe-t-elle ». Une suppression efface
+  l'enregistrement d'abord et supprime ensuite, volontairement, et une suppression ne prend pas
+  toujours effet tout de suite. Dans cette fenêtre, la passe de streaming en créait une deuxième.
+
+  v-park lit maintenant son registre d'entités dans les deux sens et refuse de créer un véhicule
+  tant qu'une de ses propres entités pour ce véhicule est encore dans le monde, en le nommant dans
+  la console. Le véhicule apparaît quelques secondes plus tard au lieu d'apparaître en double.
+
+  C'est un filet de sécurité, pas un diagnostic : si la ligne console apparaît, elle nomme le
+  véhicule concerné.
+
+---
+
 ## [1.2.6] - 2026-09-17
 
 ### Added
