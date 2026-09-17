@@ -321,6 +321,45 @@ register('rename', {
     end)
 end)
 
+--[[
+    Which players are struggling, and what v-park has asked of them.
+
+    A desync is reported as "the vehicle is wrong for some people", and until now nothing on the
+    server could turn that into a name. Everything printed here was already being measured to
+    decide who gets handed synchronisation work - this only says it out loud.
+]]
+register('sync', {
+    description = 'Which players are struggling with synchronisation',
+    params = {},
+}, function(src)
+    local rows = Quality.report()
+
+    if #rows == 0 then
+        reply(src, L('sync.nobody'))
+        return
+    end
+
+    local lines = { L('sync.header', #rows) }
+
+    for _, row in ipairs(rows) do
+        lines[#lines + 1] = L('sync.row',
+            row.poor and '!' or ' ',
+            row.name, row.src,
+            row.ping or 0,
+            row.fps and ('%d'):format(row.fps) or '?',
+            row.strikes,
+            row.nominated, row.answered, row.asked)
+
+        if row.reason and row.strikes > 0 then
+            lines[#lines + 1] = L('sync.reason', row.reason)
+        end
+    end
+
+    lines[#lines + 1] = L('sync.legend')
+
+    replyMany(src, lines)
+end)
+
 register('anchor', {
     description = "Drop or raise a boat's anchor",
     params = { { name = 'on|off', help = 'omit to toggle' } },

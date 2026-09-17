@@ -72,13 +72,89 @@ end
 --[[
     Something this player was asked to do did not happen: a placement with no answer, a restore
     that could not find the entity, a capture request that expired.
+
+    `reason` is kept for `/vparksync`, which is the only way anybody can tell WHICH player is
+    behind a desync. Counting is not enough on its own: "three strikes" says a player is struggling
+    and says nothing about whether their vehicles never arrive or their captures never come back.
 ]]
-function Quality.strike(src)
+function Quality.strike(src, reason)
     src = tonumber(src)
     if not src or src <= 0 then return end
 
     local item = entry(src)
+    local was = Quality.poor(src)
+
     item.strikes[#item.strikes + 1] = Park.ticks()
+    item.reasons = item.reasons or {}
+    item.reasons[reason or 'unknown'] = (item.reasons[reason or 'unknown'] or 0) + 1
+    item.lastReason = reason or 'unknown'
+    item.lastStrikeAt = Park.ticks()
+
+    -- One line when a player crosses over, not one per strike. A console that says it every time
+    -- is a console nobody reads.
+    if not was and Quality.poor(src) then
+        Park.warn('%s (%s) is struggling with synchronisation: %s. See /vparksync',
+            Bridge.playerName(src) or 'a player', tostring(src), tostring(reason or 'unknown'))
+    end
+end
+
+-- Work handed to this player, so `/vparksync` can show what they were actually asked to do.
+function Quality.nominated(src)
+    src = tonumber(src)
+    if not src or src <= 0 then return end
+    local item = entry(src)
+    item.nominated = (item.nominated or 0) + 1
+end
+
+function Quality.asked(src)
+    src = tonumber(src)
+    if not src or src <= 0 then return end
+    local item = entry(src)
+    item.asked = (item.asked or 0) + 1
+end
+
+function Quality.answered(src)
+    src = tonumber(src)
+    if not src or src <= 0 then return end
+    local item = entry(src)
+    item.answered = (item.answered or 0) + 1
+end
+
+--[[
+    One row per connected player, worst first.
+
+    Everything here is already measured; this only puts a name on it. The order is what the command
+    is for: the player at the top is the one a desync report should start with.
+]]
+function Quality.report()
+    local rows = {}
+
+    for _, raw in ipairs(GetPlayers()) do
+        local src = tonumber(raw)
+        local item = players[src] or {}
+        local fresh = item.fpsAt and (Park.ticks() - item.fpsAt) < 30000
+
+        rows[#rows + 1] = {
+            src = src,
+            name = Bridge.playerName(src) or ('player ' .. tostring(src)),
+            ping = GetPlayerPing and GetPlayerPing(src) or 0,
+            fps = fresh and item.fps or nil,
+            strikes = strikeCount(item.strikes and item or { strikes = {} }),
+            reason = item.lastReason,
+            nominated = item.nominated or 0,
+            asked = item.asked or 0,
+            answered = item.answered or 0,
+            poor = Quality.poor(src),
+        }
+    end
+
+    table.sort(rows, function(a, b)
+        if a.poor ~= b.poor then return a.poor end
+        if a.strikes ~= b.strikes then return a.strikes > b.strikes end
+        return (a.ping or 0) > (b.ping or 0)
+    end)
+
+    return rows
 end
 
 function Quality.forget(src)

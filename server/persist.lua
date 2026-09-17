@@ -1023,6 +1023,8 @@ RegisterNetEvent('vpark:server:captured', function(snapshots, token)
         ticks changes nothing about what is written, only when inside the next few frames.
         The timing records the work itself, not the waits between slices.
     ]]
+    Quality.answered(src)
+
     CreateThread(function()
         local changed = 0
         local spent = 0.0
@@ -1077,6 +1079,7 @@ local function requestCapture(src, ids)
     for _, asked in ipairs(ids) do allowed[asked[1]] = true end
 
     requests[token] = { src = src, ids = ids, allowed = allowed, sentAt = Park.ticks() }
+    Quality.asked(src)
 
     TriggerClientEvent('vpark:client:capture', src, ids, token)
 end
@@ -1172,7 +1175,7 @@ local function sweep()
     -- without this the table grows for the life of the server.
     for token, request in pairs(requests) do
         if Park.ticks() - request.sentAt > 30000 then
-            Quality.strike(request.src)
+            Quality.strike(request.src, 'capture request unanswered')
             requests[token] = nil
         end
     end

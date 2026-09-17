@@ -7,6 +7,40 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.2.6] - 2026-09-17
+
+### Added
+
+- **`/vparksync`: which players are struggling, by name.** A desync is reported as "the vehicle is
+  wrong for some people", and nothing on a server could turn that into a name. One row per
+  connected player, worst first: ping, reported frame rate, recent unanswered requests and what
+  the last one was, how many vehicles they were nominated to place, and how many capture requests
+  they answered out of those they were sent. A `!` marks a player v-park currently passes over when
+  somebody else is near them.
+
+  All of it was already being measured to decide who gets handed synchronisation work since 1.2.4.
+  This only says it out loud.
+
+- **A console warning the first time a player starts struggling**, naming them and why. Once per
+  crossing rather than once per incident, because a console that says it every time is a console
+  nobody reads.
+
+## [1.2.6] - 2026-09-17 (français)
+
+### Ajouté
+
+- **`/vparksync` : quels joueurs sont en difficulté, nommément.** Une ligne par joueur connecté, du
+  pire au meilleur : ping, images par seconde, incidents récents et lequel était le dernier, nombre
+  de véhicules qu'on lui a demandé de placer, et captures auxquelles il a répondu sur celles
+  envoyées. Un `!` marque un joueur que v-park écarte déjà quand un autre est à proximité.
+
+  Tout cela était déjà mesuré depuis la 1.2.4 pour décider à qui confier la synchro. La commande ne
+  fait que le dire.
+
+- **Un avertissement console la première fois qu'un joueur décroche**, avec son nom et la raison.
+
+---
+
 ## [1.2.5] - 2026-09-17
 
 ### Fixed

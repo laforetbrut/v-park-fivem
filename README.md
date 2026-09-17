@@ -339,6 +339,7 @@ resource. Rename any of them in `Config.Commands`; set `enabled = false` to remo
 | `/vparkprobe [model]` | Run the placement probe where you stand, and print the result |
 | `/vparkwhere` | Report how far each restored vehicle near you is from where the database says it should be - per axis, plus heading, frozen, dressed and owner |
 | `/vparkdiag [id\|plate]` | What the SERVER thinks. With no argument, every vehicle in the world ordered by how far it drifted from its stored place; with one, the full record - stored pose, actual pose, drift, entity and net id, and the four flags that decide whether its position may be saved. Works from the console, unlike `/vparkwhere` |
+| `/vparksync` | Which players are struggling with synchronisation, worst first: ping, frame rate, unanswered requests, and what v-park asked of them. The answer to "which player is causing the desync" |
 | `/vparkanchor` | Drop or raise a boat's anchor. With no argument it toggles; `on`/`off` are explicit. A dropped anchor is stored, so it survives a restart |
 | `/vparkneontest` | Forces neons onto the vehicle you are in and reports, in the server console, what the game does with them over the next three seconds. A test, not an inspection: it changes the vehicle |
 | `/vparkprops` | What your client sees on the vehicle you are in, beside what is stored: neons, windows, doors, body health. The answer to "this modification does not survive" |

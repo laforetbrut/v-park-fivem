@@ -2150,6 +2150,9 @@ Config.Commands = {
     -- vehicles and reports what the client sees; this reports what the SERVER thinks, including
     -- the four flags that decide whether a vehicle's position may be written down at all.
     diag       = { name = 'vparkdiag',    permission = 'admin',    enabled = true },
+    -- Who is struggling with synchronisation, worst first. The answer to "which player is causing
+    -- the desync", which nothing else on a server will tell you.
+    sync       = { name = 'vparksync',    permission = 'admin',    enabled = true },
     -- Why the last few vehicles were not kept. Every refusal in the adoption path used to be a
     -- silent return, which made "I bought a car and it was not kept" unanswerable.
     why        = { name = 'vparkwhy',     permission = 'admin',    enabled = true },
