@@ -47,6 +47,33 @@ local stats = {
 -- id -> tick first noticed.
 local vanishing = {}
 
+--[[
+    Vehicles whose entity vanished and which the streaming pass then despawned before the grace
+    period below had run out. id -> tick the disappearance was first seen.
+
+    `sweepVanishing` only looks at LIVE vehicles, and a despawn is what makes a vehicle stop being
+    live. So a garage that deleted the entity, followed by the player walking away or disconnecting
+    within those few seconds, took the vehicle out of the one list that would have noticed - and the
+    record, still standing at the garage's storage point, was created again the next time anybody
+    came near. Reported exactly that way: "stored it in a Quasar garage, logged off at once, and the
+    car was back on the storage point".
+
+    Handed over here instead, so the grace period finishes and the vehicle is forgotten as it would
+    have been. `Spawn.create` refuses a vehicle on this list, so it cannot come back in the meantime.
+]]
+local handedOver = {}
+
+function Lifecycle.vanished(id, since)
+    -- Read directly: `lifecycleConfig` is declared further down this file.
+    if ((Config and Config.Lifecycle) or {}).forgetOnExternalDelete == false then return end
+    handedOver[id] = vanishing[id] or since or Park.ticks()
+    vanishing[id] = nil
+end
+
+function Lifecycle.isVanishing(id)
+    return handedOver[id] ~= nil
+end
+
 -- The last tick the semi-persistence sweep ran, so it can add its own elapsed time to the
 -- offline counters rather than assuming its interval was honoured exactly.
 local lastSemiTick
@@ -634,10 +661,45 @@ end
 -- would forget a vehicle that is about to come straight back.
 -- ---------------------------------------------------------------------------------------
 
+local function forgetDeleted(id)
+    local record = Store.get(id)
+    if not record then return end
+
+    Park.debug('%s was deleted by something else - forgetting it', id)
+    stats.externalDeletes = stats.externalDeletes + 1
+
+    Store.setLive(id, nil)
+
+    -- Removed from persistence, NOT put in the trash and not handed to a garage: whatever
+    -- deleted it has already decided what happens to it, and second-guessing that is how a
+    -- vehicle ends up in a garage and in the street.
+    Store.remove(id)
+
+    if Database.available() then
+        Database.thread(function()
+            Database.execute(
+                ('DELETE FROM %s WHERE `id` = ?'):format(Database.table('vehicles')),
+                { id })
+        end)
+    end
+end
+
 local function sweepVanishing()
     if lifecycleConfig().forgetOnExternalDelete == false then return end
 
     local grace = (tonumber(lifecycleConfig().externalDeleteGrace) or 5) * 1000
+
+    -- The ones the streaming pass despawned mid-grace. See `handedOver`.
+    for id, since in pairs(handedOver) do
+        if Store.isLive(id) then
+            -- Something put it back in the world after all; it is live again and the loop
+            -- below watches it the normal way.
+            handedOver[id] = nil
+        elseif Park.ticks() - since > grace then
+            handedOver[id] = nil
+            forgetDeleted(id)
+        end
+    end
 
     for id, entry in pairs(Store.allLive()) do
         local exists = entry.entity ~= nil and DoesEntityExist(entry.entity)
@@ -668,27 +730,7 @@ local function sweepVanishing()
 
                 -- It came back. Some resources recreate with a new handle, in which case the
                 -- statebag is gone and this is a genuine deletion after all.
-                local record = Store.get(id)
-                if record then
-                    Park.debug('%s was deleted by something else - forgetting it', id)
-                    stats.externalDeletes = stats.externalDeletes + 1
-
-                    Store.setLive(id, nil)
-
-                    -- Removed from persistence, NOT put in the trash and not handed to a
-                    -- garage: whatever deleted it has already decided what happens to it, and
-                    -- second-guessing that is how a vehicle ends up in a garage and in the
-                    -- street.
-                    Store.remove(id)
-
-                    if Database.available() then
-                        Database.thread(function()
-                            Database.execute(
-                                ('DELETE FROM %s WHERE `id` = ?'):format(Database.table('vehicles')),
-                                { id })
-                        end)
-                    end
-                end
+                forgetDeleted(id)
             end
         else
             vanishing[id] = nil

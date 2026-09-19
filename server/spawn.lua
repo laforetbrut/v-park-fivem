@@ -908,6 +908,9 @@ function Spawn.create(record, players)
     if Store.isLive(record.id) then return nil end
     if pending[record.id] then return nil end
 
+    -- Deleted by something else and waiting out the grace period. See `Lifecycle.vanished`.
+    if Lifecycle and Lifecycle.isVanishing and Lifecycle.isVanishing(record.id) then return nil end
+
     --[[
         AND NOT WHILE AN ENTITY OF OURS FOR THIS VEHICLE IS STILL IN THE WORLD.
 
@@ -1132,6 +1135,21 @@ end
 function Spawn.despawn(id, reason)
     local entry = Store.live(id)
     if not entry then return false end
+
+    --[[
+        A streaming despawn of a vehicle whose entity is ALREADY GONE is not ours to decide.
+
+        Something else deleted it - a garage storing it, most often - and the external-delete sweep
+        was counting down its grace period. Despawning takes it out of the list that sweep watches,
+        so it is handed over to finish the count instead, and the vehicle is not recreated at its
+        last position in the meantime. Only for the two streaming reasons: every other despawn is a
+        deliberate removal that already decides what happens to the record.
+    ]]
+    if (reason == 'out of range' or reason == 'no players online')
+        and entry.seen and entry.entity and not DoesEntityExist(entry.entity)
+        and Lifecycle and Lifecycle.vanished then
+        Lifecycle.vanished(id)
+    end
 
     --[[
         THE BOOKKEEPING COMES FIRST AND CANNOT FAIL.

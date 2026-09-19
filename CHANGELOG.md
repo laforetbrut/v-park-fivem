@@ -7,6 +7,44 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.2.8] - 2026-09-19
+
+### Fixed
+
+- **A vehicle stored in a garage came back on the garage's storage point.** Reported with a Quasar
+  garage, by a player who stored the vehicle and logged off at once.
+
+  A garage stores a vehicle by deleting its entity. v-park notices an entity of its own that has
+  gone away, waits `Config.Lifecycle.externalDeleteGrace` (5 s) in case the resource that deleted it
+  is about to recreate it, then forgets the vehicle. That sweep only looks at vehicles that are
+  live, and the streaming pass despawns a vehicle once nobody is near it - so a player who walked
+  away or disconnected inside those five seconds took the vehicle out of the one list that would
+  have noticed. The record stayed, still at the storage point, and the next player to come near had
+  it created in front of them.
+
+  A streaming despawn of a vehicle whose entity is already gone now hands it over to finish the
+  grace period, and it cannot be recreated in the meantime. Only the two streaming reasons do this;
+  every deliberate removal already decides what happens to the record.
+
+## [1.2.8] - 2026-09-19 (français)
+
+### Corrigé
+
+- **Un véhicule rangé dans un garage réapparaissait sur le point de rangement.** Signalé avec un
+  garage Quasar, par un joueur qui a rangé son véhicule puis s'est déconnecté aussitôt.
+
+  Un garage range un véhicule en supprimant son entité. v-park le remarque, attend 5 secondes au
+  cas où la ressource le recrée, puis l'oublie. Mais ce balayage ne surveille que les véhicules
+  actifs, et la passe de streaming retire un véhicule dès que plus personne n'est à proximité : un
+  joueur qui partait ou se déconnectait dans ces 5 secondes faisait sortir le véhicule de la seule
+  liste qui l'aurait remarqué. La ligne restait, au point de rangement, et le véhicule était recréé
+  au prochain passage.
+
+  Le véhicule termine maintenant son délai de grâce même après avoir été retiré, et ne peut pas être
+  recréé pendant ce temps.
+
+---
+
 ## [1.2.7] - 2026-09-17
 
 ### Fixed
