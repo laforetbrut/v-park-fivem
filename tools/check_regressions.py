@@ -16,6 +16,31 @@ class Regressions(unittest.TestCase):
                 Log = {}, Compat = { garages = 'auto' } }
             Park = { log = noop, warn = noop, error = noop, debug = noop, now = function() return 100 end,
                 vec = function(x,y,z) return {x=x,y=y,z=z} end, try = function(fn) return fn() end }
+
+            -- `Park.encode` is the real resource's JSON encoder, which `Persist.applySnapshot`
+            -- compares tables through and `Persist.trim` measures the length of. Keys are sorted
+            -- so two tables built in a different order encode identically, which is the whole
+            -- point of comparing this way.
+            -- `Park.clock` times a loop; the resource uses os.nanotime where it exists and the
+            -- game timer otherwise. Neither is here, and nothing under test reads the number back.
+            function Park.clock() return 0.0 end
+
+            function Park.encode(value)
+                if type(value) ~= 'table' then
+                    if type(value) == 'string' then return string.format('%q', value) end
+                    return tostring(value)
+                end
+                local keys = {}
+                for key in pairs(value) do keys[#keys + 1] = tostring(key) end
+                table.sort(keys)
+                local parts = {}
+                for _, key in ipairs(keys) do
+                    local item = value[key]
+                    if item == nil then item = value[tonumber(key)] end
+                    parts[#parts + 1] = key .. ':' .. Park.encode(item)
+                end
+                return '{' .. table.concat(parts, ',') .. '}'
+            end
             function upvalue(fn, name)
                 for i = 1, 100 do
                     local key, value = debug.getupvalue(fn, i)
@@ -97,7 +122,12 @@ class Regressions(unittest.TestCase):
                 assert(Properties.extrasMatch(42, captured), 'restore must round-trip exactly')
             end
             SetVehicleExtra = noop
-            assert(not pcall(apply, 42, {extras = {['1'] = 0}}), 'refused extra must fail its group')
+            local warned
+            Park.warn = function(text, ...) warned = tostring(text):format(...) end
+            assert(apply(42, {extras = {['1'] = 0}}) == false, 'refused extra must fail its group')
+            assert(warned and warned:find('would not hold', 1, true), 'and say the model refused it')
+            assert(not warned:find('not on this model', 1, true), 'extra 1 exists here')
+            Park.warn = noop
         """)
 
     def test_delayed_and_never_available_extras(self):
@@ -116,9 +146,13 @@ class Regressions(unittest.TestCase):
             assert(waits == 3 and states[3], 'late extra must be restored')
             waits = 0
             Wait = function(ms) assert(ms == 50); waits = waits + 1 end
-            local ok, err = pcall(apply, 42, {extras = {['4'] = 1}})
-            assert(not ok and tostring(err):find('extras 4', 1, true))
+            local warned
+            Park.warn = function(text, ...) warned = tostring(text):format(...) end
+            assert(apply(42, {extras = {['4'] = 1}}) == false, 'an absent extra does not settle')
+            assert(warned and warned:find('extras 4 are not on this model', 1, true),
+                'and is reported as a fact about the model, not as an error')
             assert(waits == 9, 'retry budget must be bounded at 450 ms')
+            Park.warn = noop
         """)
 
     def test_extra_retry_keeps_control_and_rechecks_linked_extras(self):
@@ -146,7 +180,10 @@ class Regressions(unittest.TestCase):
             apply(42, {extras = {['1'] = 0, ['2'] = 0}})
             assert(waits == 1 and states[1] and states[2], 'recheck the full set after writes')
             NetworkHasControlOfEntity = function() return false end
-            assert(not pcall(apply, 42, {extras = {['1'] = 0}}))
+            assert(apply(42, {extras = {['1'] = 0}}) == false, 'no control settles nothing')
+
+            -- A vehicle that went away mid-restore is still a raise. It is not a fact about the
+            -- model: the caller must not carry on dressing an entity that no longer exists.
             DoesEntityExist = function() return false end
             assert(not pcall(apply, 42, {extras = {['1'] = 0}}))
         """)
@@ -475,7 +512,14 @@ class Regressions(unittest.TestCase):
                 if key == 'vpark:neons' then published = published + 1 end
             end
             Entity = function() return {state=bag} end
+
+            -- The real thing, not a stub: which player is handed work is exactly what the sweep
+            -- test is about, and `Quality.pick` is what decides it.
+            function GetPlayers() return {} end
+            function GetPlayerPing() return 30 end
+            Bridge.playerName = function() return 'tester' end
         """)
+        self.load('server/quality.lua')
         self.load('server/spawn.lua')
         self.load('server/persist.lua')
         self.lua.execute('Persist.guardSize = noop')

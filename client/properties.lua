@@ -740,15 +740,63 @@ local function applyExtras(vehicle, properties, rebuild, settle)
         end
         if #stuck == 0 then
             stable = stable + 1
-            if not settle or stable >= 3 then return end
+            if not settle or stable >= 3 then return true end
             needsWrite = false
         else
             stable, needsWrite = 0, true
         end
         if not settle and attempt < EXTRA_ATTEMPTS then Wait(EXTRA_RETRY_MS) end
     end
-    error(('extras %s did not restore after %d attempts')
-        :format(table.concat(stuck, ', '), EXTRA_ATTEMPTS))
+
+    --[[
+        ================================================================================================
+        AN EXTRA THAT WILL NOT HOLD IS NOT AN ERROR.
+        ================================================================================================
+
+        This used to raise, which `Properties.apply` caught and printed as
+        `ERROR: applying extras to <entity> raised: extras 1 did not restore after 10 attempts`. The
+        restore itself was fine - the caller withholds the extras group either way, so nothing was
+        overwritten - but a console full of red for a vehicle that came back correct is a console
+        nobody reads, and it was reported as a v-park failure.
+
+        There are two reasons an index never settles, and NEITHER is a fault:
+
+        - THE MODEL DOES NOT HAVE IT. `DoesExtraExist` is false, so the write pass never touches it
+          and the recheck counts it stuck on all ten attempts. A row written when the model had that
+          extra, and read back after an addon update or on a server running a different version of
+          the same model, looks exactly like this.
+
+        - THE MODEL WILL NOT HOLD IT. Extras can be mutually exclusive: switching one on switches
+          another off, and no number of attempts changes that. The loop rewrites the same set and
+          measures the same refusal each time.
+
+        So they are told apart and reported as what they are, once, at warning level. The caller is
+        still told it did not settle, and still protects the stored extras - that part was never the
+        problem.
+    ]]
+    local absent = {}
+    local refused = {}
+
+    for _, index in ipairs(stuck) do
+        if nativeEnabled(DoesExtraExist(vehicle, index)) then
+            refused[#refused + 1] = index
+        else
+            absent[#absent + 1] = index
+        end
+    end
+
+    if #absent > 0 then
+        Park.warn('extras %s are not on this model; the stored selection is kept untouched',
+            table.concat(absent, ', '))
+    end
+
+    if #refused > 0 then
+        Park.warn('extras %s would not hold after %d attempts - the model is refusing the '
+            .. 'combination; the stored selection is kept untouched',
+            table.concat(refused, ', '), EXTRA_ATTEMPTS)
+    end
+
+    return false
 end
 
 local function applyDamage(vehicle, properties)
@@ -899,11 +947,15 @@ function Properties.apply(vehicle, properties, options)
                 if options.rebuildExtras and SetVehicleAutoRepairDisabled then
                     SetVehicleAutoRepairDisabled(vehicle, false)
                 end
-                local ok, err = pcall(applyExtras, vehicle, properties, options.rebuildExtras == true)
+                local ok, settled = pcall(applyExtras, vehicle, properties, options.rebuildExtras == true)
                 if options.rebuildExtras and SetVehicleAutoRepairDisabled then
                     SetVehicleAutoRepairDisabled(vehicle, true)
                 end
-                if not ok then error(err) end
+                if not ok then error(settled) end
+
+                -- Not settled is not raised: `applyExtras` has already said why, in one line. The
+                -- group is still marked so the capture withholds it. See the note at its end.
+                if settled == false then failed.extras = true end
             end)
         end
 
@@ -963,9 +1015,10 @@ function Properties.apply(vehicle, properties, options)
     if options.finishPlacement and enabledGroup('extras') then
         guard('extras', function()
             if SetVehicleAutoRepairDisabled then SetVehicleAutoRepairDisabled(vehicle, false) end
-            local ok, err = pcall(applyExtras, vehicle, properties, true, true)
+            local ok, settled = pcall(applyExtras, vehicle, properties, true, true)
             if SetVehicleAutoRepairDisabled then SetVehicleAutoRepairDisabled(vehicle, true) end
-            if not ok then error(err) end
+            if not ok then error(settled) end
+            if settled == false then failed.extras = true end
         end)
     end
 

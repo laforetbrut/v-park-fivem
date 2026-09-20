@@ -7,6 +7,53 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.2.11] - 2026-09-20
+
+### Fixed
+
+- **A red `ERROR` in the console for a vehicle that came back correct.** Reported from a live
+  console: `applying extras to 452866 raised: extras 1 did not restore after 10 attempts`, followed
+  by the warning that the saved properties were being protected.
+
+  The restore was doing the right thing. An extra index can fail to settle for two reasons, neither
+  of them a fault: the model does not have it, so nothing can be written to it - which is what a row
+  saved before an addon update looks like - or the model refuses to hold it, because extras can be
+  mutually exclusive and switching one on switches another off. Ten attempts change neither.
+
+  Both are now told apart and reported once, at warning level, saying which of the two it was. The
+  stored extras are still protected from being overwritten, which is the part that was already
+  working and is why the affected vehicles kept their selection.
+
+### Tests
+
+- The harness was missing `Park.encode`, `Park.clock` and the whole of `server/quality.lua`, so
+  seven behavioural regressions had been erroring out rather than running since the 1.2.4
+  performance work. They pass; nothing they cover had broken.
+
+## [1.2.11] - 2026-09-20 (français)
+
+### Corrigé
+
+- **Une ERREUR rouge en console pour un véhicule revenu correct** : `extras 1 did not restore after
+  10 attempts`. La restauration faisait pourtant ce qu'il fallait.
+
+  Un extra peut ne jamais se poser pour deux raisons, et aucune n'est un défaut : le modèle ne
+  possède pas cet extra (une ligne enregistrée avant une mise à jour d'addon ressemble exactement à
+  ça), ou le modèle refuse de le tenir, car certains extras sont mutuellement exclusifs et en
+  allumer un en éteint un autre. Dix tentatives n'y changent rien.
+
+  Les deux cas sont maintenant distingués et signalés une seule fois, en avertissement, en disant
+  lequel des deux c'était. Les extras enregistrés restent protégés : c'est la partie qui
+  fonctionnait déjà, et c'est pourquoi les véhicules concernés avaient gardé leur sélection.
+
+### Tests
+
+- Il manquait au banc de test `Park.encode`, `Park.clock` et tout `server/quality.lua` : sept tests
+  de régression plantaient au lieu de s'exécuter depuis les travaux de performance de la 1.2.4. Ils
+  passent, et rien de ce qu'ils couvrent n'était cassé.
+
+---
+
 ## [1.2.10] - 2026-09-20
 
 ### Fixed
