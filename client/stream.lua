@@ -439,6 +439,44 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
         local ready = Park.ticks() + 5000
         while GetEntityModel(entity) == 0 and Park.ticks() < ready do Wait(50) end
 
+        --[[
+            ================================================================================================
+            IS THIS ACTUALLY THE VEHICLE THE SERVER MEANT?
+            ================================================================================================
+
+            A restore names a vehicle by NETWORK ID, and network ids are recycled. A vehicle deleted a
+            moment ago hands its id to the next one created, so an instruction that arrives late - a
+            client that was loading, a connection that stalled for a second - resolves to somebody
+            else's car. It was then dressed with the wrong properties and placed at the wrong
+            coordinates, which is exactly what issue #1 describes: two vehicles on top of each other,
+            and one of them wearing the other's plate until an admin moved it.
+
+            The server sets `vpark:id` on the entity BEFORE sending this event, so the answer is
+            already on the vehicle. A mismatch is refused outright and the server re-nominates; the
+            vehicle it meant is placed a moment later by somebody else.
+
+            An absent bag is NOT treated as a mismatch. It may simply not have replicated to this
+            client yet, and refusing on that would turn a slow connection into a vehicle that never
+            gets placed - the failure this resource spent 1.2.4 reducing.
+        ]]
+        local settled = Park.ticks() + 3000
+        local marked
+
+        repeat
+            local ok, bag = pcall(function() return Entity(entity).state['vpark:id'] end)
+            marked = ok and bag or nil
+            if marked ~= nil then break end
+            Wait(50)
+        until Park.ticks() > settled
+
+        if marked ~= nil and marked ~= data.id then
+            Park.warn('restore for %s resolved to a vehicle carrying %s - network id %d was reused, '
+                .. 'refusing rather than dressing the wrong car',
+                tostring(data.id), tostring(marked), netId)
+            answer('vpark:server:restoreFailed', data.id, 'wrong_entity')
+            return
+        end
+
         SetEntityAsMissionEntity(entity, true, true)
 
         -- Belt and braces with the hold handler above: if the bag has not landed on this

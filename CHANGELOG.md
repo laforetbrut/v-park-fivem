@@ -7,6 +7,45 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.2.9] - 2026-09-20
+
+### Fixed
+
+- **A restore could dress somebody else's vehicle, giving it the wrong plate and placing it on top of
+  another car.** Reported as issue #1: two vehicles appeared merged, separated when approached, and
+  the reporter's own car was wearing another player's plate until an admin teleported it.
+
+  A restore names a vehicle by network id, and network ids are reused: one freed by a vehicle that
+  has just been deleted is handed to the next vehicle created. An instruction that arrived late - a
+  client still loading, a connection that stalled for a second - therefore resolved to a different
+  vehicle, which was then dressed with the wrong properties and moved to the wrong coordinates.
+
+  The server sets `vpark:id` on a vehicle before it sends the restore, so the answer was already on
+  the entity and nothing was reading it. The client now refuses an entity carrying a different id
+  and the server re-nominates. An entity carrying no id yet is still accepted: the bag may not have
+  replicated on a slow connection, and refusing there would turn a slow client into a vehicle that
+  never gets placed.
+
+## [1.2.9] - 2026-09-20 (français)
+
+### Corrigé
+
+- **Une restauration pouvait habiller le véhicule de quelqu'un d'autre**, lui donnant la mauvaise
+  plaque et le posant sur une autre voiture. Signalé dans l'issue #1 : deux véhicules superposés, qui
+  se séparaient quand on s'approchait, et la voiture du joueur portait la plaque d'un autre jusqu'à
+  ce qu'un admin la téléporte.
+
+  Une restauration désigne un véhicule par son identifiant réseau, et ces identifiants sont
+  recyclés : celui d'un véhicule supprimé est donné au suivant. Un ordre arrivé en retard tombait
+  donc sur un autre véhicule, qui était habillé avec les mauvaises propriétés et déplacé.
+
+  Le serveur pose `vpark:id` sur le véhicule avant d'envoyer l'ordre : la réponse était déjà là et
+  personne ne la lisait. Le client refuse maintenant une entité qui porte un autre identifiant. Une
+  entité qui n'en porte pas encore reste acceptée, car sur une connexion lente le statebag peut ne
+  pas être arrivé.
+
+---
+
 ## [1.2.8] - 2026-09-19
 
 ### Fixed
