@@ -86,6 +86,34 @@ function L(key, ...)
     if select('#', ...) == 0 then return text end
 
     local ok, formatted = pcall(string.format, text, ...)
+    if ok then return formatted end
+
+    --[[
+        ================================================================================================
+        A `%d` WITH A FRACTION IS NOT A REASON TO LOSE THE WHOLE LINE.
+        ================================================================================================
+
+        Lua 5.4 refuses `string.format('%d', 1.03)` outright: "number has no integer representation".
+        A caller that measures something and prints it with `%d` therefore works for as long as the
+        measurement happens to be whole, and raises the first time it is not. That has now happened
+        twice - the streaming line in 1.2.2, when the pass timer gained sub-millisecond precision,
+        and `/vparksync` in 1.2.6, whose frame rate is an average.
+
+        Both were the same mistake and neither was the translator's. So a failed format is retried
+        with every fraction rounded, which is what the `%d` was asking for. The raw text is still the
+        last resort, because a line that reads badly beats a command that raises.
+    ]]
+    local rounded = {}
+
+    for index = 1, select('#', ...) do
+        local value = select(index, ...)
+        if type(value) == 'number' and value % 1 ~= 0 then
+            value = math.floor(value + 0.5)
+        end
+        rounded[index] = value
+    end
+
+    ok, formatted = pcall(string.format, text, table.unpack(rounded, 1, select('#', ...)))
     return ok and formatted or text
 end
 

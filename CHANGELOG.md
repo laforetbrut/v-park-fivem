@@ -7,6 +7,32 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.2.10] - 2026-09-20
+
+### Fixed
+
+- **`/vparksync` raised instead of printing.** `bad argument #1 to 'format' (number has no integer
+  representation)`: the frame rate it prints is an average, and Lua 5.4 refuses `%d` for anything
+  that is not whole. It is rounded now, along with the ping beside it.
+
+- **And the whole class of that bug, once.** A failed translation is retried with every fraction
+  rounded, which is what a `%d` was asking for in the first place; the raw text remains the last
+  resort. The same mistake had already cost the streaming line of `/vparkstats` in 1.2.2, when the
+  pass timer gained sub-millisecond precision, and it was the translator's fault neither time.
+
+## [1.2.10] - 2026-09-20 (français)
+
+### Corrigé
+
+- **`/vparksync` plantait au lieu de s'afficher** : les images par seconde sont une moyenne, et Lua
+  5.4 refuse `%d` pour un nombre à virgule. La valeur est arrondie, le ping aussi.
+
+- **Et toute cette classe d'erreur, une bonne fois.** Une traduction qui échoue est réessayée avec
+  les nombres arrondis. La même erreur avait déjà cassé la ligne streaming de `/vparkstats` en
+  1.2.2.
+
+---
+
 ## [1.2.9] - 2026-09-20
 
 ### Fixed

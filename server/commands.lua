@@ -345,8 +345,11 @@ register('sync', {
         lines[#lines + 1] = L('sync.row',
             row.poor and '!' or ' ',
             row.name, row.src,
-            row.ping or 0,
-            row.fps and ('%d'):format(row.fps) or '?',
+            -- Rounded, both of them: `%d` refuses a fraction in Lua 5.4 and the frame rate is an
+            -- average, so `/vparksync` raised instead of printing. Same mistake the streaming stats
+            -- line made in 1.2.2, in a second place.
+            math.floor((tonumber(row.ping) or 0) + 0.5),
+            row.fps and ('%d'):format(math.floor(row.fps + 0.5)) or '?',
             row.strikes,
             row.nominated, row.answered, row.asked)
 
