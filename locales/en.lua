@@ -163,6 +163,7 @@ Locale.register('en', {
     ['props.none']         = 'you are not in or near a vehicle',
     ['props.nothing_stored'] = '  stored    nothing: v-park is not keeping this vehicle',
     ['props.neons_guarded'] = '  guarded   the restore has not confirmed these neons, so no capture may change them',
+    ['props.extras_guarded'] = '  guarded   these extras would not settle on this model; they stay as stored until the player changes them',
     ['props.header']       = 'properties on %s [%s], id %s:',
     ['props.extra_restore'] = '  restore   net %s  requested [%s]  after placement [%s]',
     ['props.extra_change'] = '  last save extra change [%s] -> [%s]',

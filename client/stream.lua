@@ -124,7 +124,20 @@ local function observeExtras(id, entity)
     local previous = seenExtras[id]
     if previous and previous.entity == entity and Properties.extrasMatch(entity, previous.values) then return end
     seenExtras[id] = {entity=entity, values=Properties.captureExtras(entity)}
-    if previous and previous.entity == entity then Stream.dirty(id) end
+    if previous and previous.entity == entity then
+        --[[
+            The extras moved after the restore had settled them, on a vehicle this client
+            simulates. That is somebody choosing a different selection, so the guard a failed
+            restore put on the extras has nothing left to protect: what is on the car now is what
+            the player wants kept. The server applies the same rule on its side, measured against
+            what the restore reported. See `unverifiedExtras` in server/store.lua.
+        ]]
+        if unverified[id] then
+            unverified[id].extras = nil
+            if next(unverified[id]) == nil then unverified[id] = nil end
+        end
+        Stream.dirty(id)
+    end
 end
 
 
@@ -529,10 +542,23 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
             local ok, applied, failed = pcall(Properties.apply, entity, data.properties,
                 { version = data.version, rebuildExtras = true, deferNeons = true, deferDamage = true })
 
-            -- A local withheld group cannot protect a snapshot from another client.
-            -- Keep the server's existing undressed guard up when extras never verified.
+            --[[
+                EXTRAS THAT WOULD NOT SETTLE GUARD THE EXTRAS, NOT THE WHOLE VEHICLE.
+
+                This used to fold an extras failure into `dressed`, and an undressed vehicle has
+                nothing captured at all - on this client, and on the server, which ignores the
+                properties of every snapshot from anybody while its own `undressed` flag is up.
+                So one extra the model does not have made the car read-only for good: every
+                restore failed the same extra and put the flag back, and a player who fitted black
+                plates, repainted it or changed a bumper saw it all come back stock after the next
+                restart. Reported exactly that way: black plates, white again after the reboot.
+
+                The guard now covers the group that failed. This client withholds it through
+                `unverified`, and the server holds its own `unverifiedExtras` for the snapshots
+                other clients send, which is the part a local withheld group cannot reach.
+            ]]
             appearanceApplied = ok and applied ~= false
-            dressed = ok and applied ~= false and not (type(failed) == 'table' and failed.extras)
+            dressed = ok and applied ~= false
             unverified[data.id] = type(failed) == 'table' and next(failed) and failed or nil
             if not dressed then
                 Park.debug('could not apply properties to %s - placing it anyway, and it will '
@@ -559,9 +585,8 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
             local ok, applied, failed = pcall(Properties.apply, entity, data.properties,
                 {version=data.version, finishPlacement=true, rebuildExtras=true, deferNeons=true})
             dressed = appearanceApplied and ok and applied ~= false
-                and not (type(failed) == 'table' and failed.extras)
             local withheld = unverified[data.id] or {}
-            withheld.extras = not dressed or nil
+            if not dressed then withheld.extras = true end
             if type(failed) == 'table' then
                 for group in pairs(failed) do withheld[group] = true end
             end
@@ -608,12 +633,15 @@ RegisterNetEvent('vpark:client:restore', function(netId, data)
         if Schema.enabled('extras') and type(data.properties) == 'table'
             and type(data.properties.extras) == 'table' and next(data.properties.extras) ~= nil
             and not Properties.extrasMatch(entity, data.properties.extras) then
-            dressed = false
             unverified[data.id] = unverified[data.id] or {}
             unverified[data.id].extras = true
-            Park.warn('extras changed after placement for %s; keeping saved properties protected', data.id)
+            Park.debug('extras on %s do not match the saved selection; keeping the saved extras '
+                .. 'protected, everything else is captured as usual', data.id)
         end
         result.dressed = dressed
+
+        -- Told apart from `dressed` so the server can guard the extras alone. See above.
+        result.extrasVerified = not (unverified[data.id] and unverified[data.id].extras)
         result.extrasObserved = Properties.captureExtras(entity)
 
         --[[

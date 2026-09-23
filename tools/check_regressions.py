@@ -130,6 +130,96 @@ class Regressions(unittest.TestCase):
             Park.warn = noop
         """)
 
+    def test_extras_match_agrees_with_the_previous_implementation(self):
+        # 1.2.12 rewrote extrasMatch to answer in place instead of building a table per call. The
+        # previous implementation is kept here verbatim as the reference, and both are asked the
+        # same questions: every state a model can be in, every shape a stored selection arrives in.
+        self.load('client/properties.lua')
+        self.lua.execute("""
+            local function nativeEnabled(value) return value == true or value == 1 end
+            local function previousCapture(vehicle)
+                local extras = {}
+                for index = 0, 20 do
+                    if nativeEnabled(DoesExtraExist(vehicle, index)) then
+                        extras[tostring(index)] = nativeEnabled(IsVehicleExtraTurnedOn(vehicle, index)) and 0 or 1
+                    end
+                end
+                return extras
+            end
+            local function previous(vehicle, expected)
+                if type(expected) ~= 'table' then return false end
+                local current = previousCapture(vehicle)
+                for key, value in pairs(current) do
+                    local wanted = expected[key]
+                    if wanted == nil then wanted = expected[tonumber(key)] end
+                    if type(wanted) == 'boolean' then wanted = wanted and 0 or 1 else wanted = tonumber(wanted) end
+                    if wanted ~= value then return false end
+                end
+                for key in pairs(expected) do
+                    if current[tostring(key)] == nil then return false end
+                end
+                return true
+            end
+
+            math.randomseed(1212)
+            local shapes = {
+                function(i) return tostring(i) end, function(i) return i end,
+                function(i) return i + 0.0 end, function(i) return '0' .. i end,
+            }
+            local values = {0, 1, '0', '1', true, false, 2, 'x'}
+            local agreed, matches = 0, 0
+
+            for round = 1, 6000 do
+                integerNatives = round % 2 == 0
+                states = {}
+                for index = 0, 20 do
+                    local roll = math.random(3)
+                    if roll == 2 then states[index] = true elseif roll == 3 then states[index] = false end
+                end
+
+                local expected
+                local kind = math.random(6)
+                if kind == 1 then
+                    expected = previousCapture(42)
+                elseif kind == 2 then
+                    -- The live selection, re-keyed and re-typed the way imports store it.
+                    expected = {}
+                    for key, value in pairs(previousCapture(42)) do
+                        local index = tonumber(key)
+                        local shaped = math.random(2) == 1 and index or key
+                        if math.random(2) == 1 then expected[shaped] = value == 0 else expected[shaped] = value end
+                    end
+                elseif kind == 3 then
+                    -- The live selection with one thing wrong with it.
+                    expected = previousCapture(42)
+                    local index = math.random(0, 22)
+                    expected[shapes[math.random(#shapes)](index)] = values[math.random(#values)]
+                elseif kind == 4 then
+                    expected = {}
+                elseif kind == 5 then
+                    expected = math.random(2) == 1 and 'not a table' or nil
+                else
+                    expected = {}
+                    for _ = 1, math.random(0, 6) do
+                        local index = math.random(-1, 22)
+                        expected[shapes[math.random(#shapes)](index)] = values[math.random(#values)]
+                    end
+                    if math.random(4) == 1 then expected.garbage = 0 end
+                end
+
+                local want = previous(42, expected)
+                local got = Properties.extrasMatch(42, expected)
+                assert(want == got, ('round %d: previous says %s, new says %s'):format(
+                    round, tostring(want), tostring(got)))
+                agreed = agreed + 1
+                if want then matches = matches + 1 end
+            end
+
+            -- Both answers must actually occur, or the agreement proves nothing.
+            assert(agreed == 6000)
+            assert(matches > 500 and matches < 5500, 'matches: ' .. matches)
+        """)
+
     def test_delayed_and_never_available_extras(self):
         self.load('client/properties.lua')
         self.lua.execute("""
@@ -188,6 +278,70 @@ class Regressions(unittest.TestCase):
             assert(not pcall(apply, 42, {extras = {['1'] = 0}}))
         """)
 
+    def test_owner_who_loads_after_the_restore_still_gets_the_keys(self):
+        # The report: after a restart, a semi-persistent vehicle came back beside its owner while
+        # their character was still loading, and they had no keys until it was despawned and
+        # restored again. The keys must also be handed over when the OWNER arrives.
+        self.lua.execute("""
+            threads = {}
+            CreateThread = function(fn) threads[#threads + 1] = fn end
+            Park.resource = 'v-park'
+            Park.started = function() return false end
+            Config.Keys = {restore = true}
+            Config.Ownership = {matchOwnedByPlate = false}
+            given = {}
+            character = nil
+            Bridge = {
+                playerName = function() return 'farmer' end,
+                characterId = function() return character end,
+                waitForCharacter = function() return character end,
+                giveKeys = function(src, plate, netId)
+                    given[#given + 1] = {src = src, plate = plate, netId = netId}
+                    return true
+                end,
+            }
+            Lifecycle = {onOwnerOnline = noop, onOwnerOffline = noop, warnExpiring = noop}
+            Persist = {onPlayerDropped = noop}
+            Database = {thread = function(fn) fn() end}
+            tractor = {id = 'tractor', plate = 'FARM01', owner = 'CID1', owner_type = 'job'}
+            stored = {id = 'stored', plate = 'FARM02', owner = 'CID1', owner_type = 'job'}
+            liveEntries = {tractor = {entity = 42, netId = 9}}
+            Store = {
+                ownedBy = function(owner)
+                    if owner == 'CID1' then return {tractor, stored} end
+                    return {}
+                end,
+                live = function(id) return liveEntries[id] end,
+                update = noop,
+            }
+        """)
+        self.load('server/ownership.lua')
+        self.lua.execute("""
+            -- 1. The vehicle is restored while its owner's character has not loaded yet.
+            Ownership.onRestored(tractor, 42, 9)
+            assert(#given == 0, 'nobody is online under that id yet')
+
+            -- 2. The character finishes loading.
+            character = 'CID1'
+            source = 3
+            handlers['playerJoining'][1]()
+            for _, fn in ipairs(threads) do fn() end
+
+            assert(#given == 1, 'the owner gets the keys to the vehicle already out: ' .. #given)
+            assert(given[1].src == 3 and given[1].plate == 'FARM01' and given[1].netId == 9)
+
+            -- 3. And a vehicle restored AFTER they are online still goes through onRestored.
+            given = {}
+            liveEntries.stored = {entity = 43, netId = 10}
+            Ownership.onRestored(stored, 43, 10)
+            assert(#given == 1 and given[1].plate == 'FARM02')
+
+            -- 4. Switched off means switched off.
+            given = {}
+            Config.Keys.restore = false
+            assert(Ownership.giveLiveKeys(3, 'CID1') == 0 and #given == 0)
+        """)
+
     def test_tyre_states_round_trip_across_repeated_restores(self):
         self.load('client/properties.lua')
         self.lua.execute("""
@@ -214,14 +368,15 @@ class Regressions(unittest.TestCase):
             end
         """)
 
-    def test_failed_extras_keep_server_undressed_guard(self):
+    def test_failed_extras_guard_the_extras_and_nothing_else(self):
         source = (ROOT / 'client/stream.lua').read_text(encoding='utf-8')
         start = source.index('        local dressed = true')
         end = source.index('        local result = Placement.place', start)
         self.lua.execute("\n            entity = 42\n            data = {id = 'sample', properties = {extras = {['1'] = 0}}}\n            unverified = {}\n            Properties = {}\n        ")
         assess = self.lua.eval('function() ' + source[start:end] + ' return dressed end')
+        # Failed extras: the vehicle is still dressed, and the extras alone are withheld.
         self.lua.execute('Properties.apply = function() return true, {extras = true} end')
-        self.assertFalse(assess())
+        self.assertTrue(assess())
         self.assertTrue(self.lua.eval('unverified.sample.extras'))
         self.lua.execute('Properties.apply = function() return true, {} end')
         self.assertTrue(assess())
@@ -236,11 +391,13 @@ class Regressions(unittest.TestCase):
             IsVehicleWindowIntact = function() return true end
             data.properties.extras = {['4'] = 0}
         """)
-        self.assertFalse(assess())
+        self.assertTrue(assess())
         self.assertTrue(self.lua.eval('unverified.sample.extras'))
         self.lua.execute("""
             live = {entity=42, placer=7, undressed=true}
-            saved = {properties={extras={['4']=0}}, vehicle_type='automobile'}
+            saved = {properties={extras={['4']=0}, plateIndex=0}, vehicle_type='automobile'}
+            owner = 7
+            NetworkGetEntityOwner = function() return owner end
             Park.ticks = function() return 1000 end
             Park.trace = noop
             Park.timing = function() return {} end
@@ -251,14 +408,47 @@ class Regressions(unittest.TestCase):
                 end}
             Entity = function() return {state={set=noop}} end
         """)
+        # The real Schema: the server now reads the properties of this vehicle, which is the fix.
+        self.load('shared/schema.lua')
+        self.load('shared/appearance.lua')
+        self.lua.execute("Schema.enabled = function(group) return group == 'extras' or group == 'plate' end")
         self.load('server/spawn.lua')
         self.load('server/persist.lua')
+        self.lua.execute('Persist.guardSize = noop')
         self.lua.execute("""
             source = 7
             netEvents['vpark:server:restored']('sample', {ok=true, dressed=false})
-            assert(live.undressed, 'failed extras must keep the server guard')
-            Persist.applySnapshot('sample', {properties={extras={['4']=1}}}, false, 8)
+            assert(live.undressed, 'an apply that failed outright keeps the whole-vehicle guard')
+            Persist.applySnapshot('sample', {properties={extras={['4']=1}, plateIndex=1}}, false, 8)
             assert(saved.properties.extras['4'] == 0, 'another client must not overwrite the choice')
+            assert(saved.properties.plateIndex == 0, 'and nothing else is believed about a stock car')
+
+            -- Dressed, but the extras would not settle. The report this answers: black plates
+            -- fitted afterwards came back white, because this used to undress the whole car.
+            netEvents['vpark:server:restored']('sample',
+                {ok=true, dressed=true, extrasVerified=false, extrasObserved={['4']=1}})
+            assert(not live.undressed, 'extras alone must not undress the vehicle')
+            assert(live.unverifiedExtras, 'but they are guarded')
+
+            Persist.applySnapshot('sample', {properties={extras={['4']=1}, plateIndex=1}}, false, 8)
+            assert(saved.properties.extras['4'] == 0, 'a spectator still cannot change the extras')
+            assert(saved.properties.plateIndex == 1, 'the plate IS captured - this is the bug')
+
+            Persist.applySnapshot('sample', {properties={extras={['4']=1}, plateIndex=5}}, false, 7)
+            assert(saved.properties.extras['4'] == 0,
+                'the owner reporting what the restore left on the car is not a choice')
+            assert(live.unverifiedExtras)
+            assert(saved.properties.plateIndex == 5)
+
+            Persist.applySnapshot('sample', {properties={extras={['4']=0}, plateIndex=5}}, false, 7)
+            assert(not live.unverifiedExtras, 'a selection the owner changed releases the guard')
+            assert(saved.properties.extras['4'] == 0)
+
+            -- A new restore starts clean: the guard belongs to one restore, not to the vehicle.
+            live.unverifiedExtras = true
+            netEvents['vpark:server:restored']('sample', {ok=true, dressed=true, extrasVerified=true})
+            assert(not live.unverifiedExtras)
+            live.undressed = true
         """)
         self.lua.execute('states[4] = false')
         self.assertTrue(assess())
@@ -690,12 +880,18 @@ class Regressions(unittest.TestCase):
         self.neon_client()
         source = (ROOT / 'client/stream.lua').read_text(encoding='utf-8')
         start, end = source.index('local seenExtras = {}'), source.index('local function forgetForeign')
+        self.lua.execute("unverified = {sample = {extras = true, neons = true}}")
         observe = self.lua.eval('function() ' + source[start:end] + ' return observeExtras end')()
         self.lua.execute('Stream = {dirty=changed}')
         observe('sample', 42)
+        self.assertTrue(self.lua.eval('unverified.sample.extras'),
+            'the first reading is the baseline, not a change')
         self.lua.execute('states[1] = true')
         observe('sample', 42)
         self.assertEqual(self.lua.eval('dirty'), 1)
+        self.assertIsNone(self.lua.eval('unverified.sample.extras'),
+            'a change the owner made releases the extras guard')
+        self.assertTrue(self.lua.eval('unverified.sample.neons'), 'and only that one')
         observe('sample', 42)
         self.assertEqual(self.lua.eval('dirty'), 1)
         self.lua.execute('owner = 8; states[1] = false')

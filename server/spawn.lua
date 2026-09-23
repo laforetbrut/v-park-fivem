@@ -238,6 +238,7 @@ local function sendRestore(record, src, netId)
     ]]
     if entry then
         entry.undressed = true
+        entry.unverifiedExtras = nil
         entry.extraAudit = {wanted=record.properties and record.properties.extras}
     end
 
@@ -1560,6 +1561,10 @@ RegisterNetEvent('vpark:server:restored', function(id, result)
         if result.neonsVerified == true and Spawn.isNetworkOwner(entry, src) then
             entry.unverifiedNeons = nil
         end
+
+        -- Extras that did not settle guard the extras and nothing else. See `unverifiedExtras`
+        -- in server/store.lua for why this is no longer the whole vehicle.
+        entry.unverifiedExtras = result.extrasVerified == false or nil
     end
 
     --[[

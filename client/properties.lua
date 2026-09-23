@@ -188,28 +188,62 @@ local function nativeEnabled(value)
     return value == true or value == 1
 end
 
+-- The stored key for each extra index, and back. Built once: `tostring` in a loop that runs for
+-- every owned vehicle on every client tick is an allocation per extra per pass.
+local EXTRA_KEY, EXTRA_INDEX = {}, {}
+for index = 0, 20 do
+    EXTRA_KEY[index] = tostring(index)
+    EXTRA_INDEX[EXTRA_KEY[index]] = index
+end
+
 function Properties.captureExtras(vehicle)
     local extras = {}
     for index = 0, 20 do
         if nativeEnabled(DoesExtraExist(vehicle, index)) then
-            extras[tostring(index)] = nativeEnabled(IsVehicleExtraTurnedOn(vehicle, index)) and 0 or 1
+            extras[EXTRA_KEY[index]] = nativeEnabled(IsVehicleExtraTurnedOn(vehicle, index)) and 0 or 1
         end
     end
     return extras
 end
 
+--[[
+    Does the vehicle show exactly this extras selection?
+
+    This is the question `observeExtras` and the frozen shortcut in `Stream.snapshot` ask on every
+    client tick, for every vehicle the client owns - five times a second near a player. It used to
+    be answered by building the whole current selection as a table and comparing the two, and the
+    table was thrown away immediately. It is now answered in place, with the same rules, and
+    `tools/check_regressions.py` holds the previous implementation and checks the two agree on
+    thousands of generated cases:
+
+      - every extra the model has must be present in `expected`, with the same state, under a
+        string key or a number key, as 0/1 or as an imported boolean;
+      - every key in `expected` must name an extra the model has - a stored index the model does
+        not have is a mismatch, not something to ignore.
+
+    It also stops at the first difference instead of reading every extra first.
+]]
 function Properties.extrasMatch(vehicle, expected)
     if type(expected) ~= 'table' then return false end
-    local current = Properties.captureExtras(vehicle)
-    for key, value in pairs(current) do
-        local wanted = expected[key]
-        if wanted == nil then wanted = expected[tonumber(key)] end
-        if type(wanted) == 'boolean' then wanted = wanted and 0 or 1 else wanted = tonumber(wanted) end
-        if wanted ~= value then return false end
+
+    local present = 0
+    for index = 0, 20 do
+        if nativeEnabled(DoesExtraExist(vehicle, index)) then
+            present = present | (1 << index)
+            local wanted = expected[EXTRA_KEY[index]]
+            if wanted == nil then wanted = expected[index] end
+            if type(wanted) == 'boolean' then wanted = wanted and 0 or 1 else wanted = tonumber(wanted) end
+            if wanted ~= (nativeEnabled(IsVehicleExtraTurnedOn(vehicle, index)) and 0 or 1) then
+                return false
+            end
+        end
     end
+
     for key in pairs(expected) do
-        if current[tostring(key)] == nil then return false end
+        local index = EXTRA_INDEX[tostring(key)]
+        if not index or present & (1 << index) == 0 then return false end
     end
+
     return true
 end
 

@@ -545,6 +545,33 @@ end
     Everything else leaves it out, and then the position is accepted ONLY for a vehicle the server
     itself believes somebody has driven. See the note over the position below for why that matters.
 ]]
+--[[
+    Two extras selections, compared the way the game means them.
+
+    Keys arrive as strings from a capture and as numbers from an older row, values as 0/1 from the
+    game and as booleans from a framework import. Nil on either side is "unknown", never "equal".
+]]
+local function extrasValue(value)
+    if type(value) == 'boolean' then return value and 0 or 1 end
+    return tonumber(value)
+end
+
+local function sameExtras(a, b)
+    if type(a) ~= 'table' or type(b) ~= 'table' then return false end
+    local seen = {}
+    for key, value in pairs(a) do
+        local index = tostring(key)
+        seen[index] = true
+        local other = b[index]
+        if other == nil then other = b[tonumber(index)] end
+        if extrasValue(value) ~= extrasValue(other) then return false end
+    end
+    for key in pairs(b) do
+        if not seen[tostring(key)] then return false end
+    end
+    return true
+end
+
 function Persist.applySnapshot(id, snapshot, proven, src)
     local record = Store.get(id)
     if not record or type(snapshot) ~= 'table' then return false end
@@ -783,7 +810,22 @@ function Persist.applySnapshot(id, snapshot, proven, src)
                 if properties.extras[tostring(index)] == nil then completeExtras = false; break end
             end
         end
-        if Schema.enabled('extras') and (not networkOwner or not completeExtras) then
+        --[[
+            EXTRAS A RESTORE COULD NOT SETTLE STAY AS STORED UNTIL SOMEBODY CHANGES THEM.
+
+            What the car shows after such a restore is the model's answer, not the player's choice,
+            so a capture of it is refused. What releases the guard is the network owner reporting a
+            selection that differs from the one the restore observed: the extras moved after the
+            restore, which is a person choosing them. The placing client applies the same rule to
+            its own snapshots in `observeExtras`.
+        ]]
+        if live and live.unverifiedExtras and networkOwner and completeExtras
+            and not sameExtras(properties.extras, live.extraAudit and live.extraAudit.observed) then
+            live.unverifiedExtras = nil
+        end
+
+        if Schema.enabled('extras')
+            and (not networkOwner or not completeExtras or (live and live.unverifiedExtras)) then
             for _, key in ipairs(Schema.keys.extras or {}) do properties[key] = nil end
             withheld.extras = true
         elseif not Schema.enabled('extras') then

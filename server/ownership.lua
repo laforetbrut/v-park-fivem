@@ -299,6 +299,51 @@ function Ownership.sourceOf(characterId)
     return src
 end
 
+--[[
+    ================================================================================================
+    KEYS FOR THE VEHICLES THAT WERE ALREADY OUT WHEN THEIR OWNER ARRIVED.
+    ================================================================================================
+
+    `Ownership.onRestored` hands the keys over at the moment a vehicle is created, and only to an
+    owner who is online at that moment. Online means registered, and registering waits for the
+    framework to decide who the character is - which is the slowest part of joining.
+
+    After a restart that wait is exactly when the vehicles come back. A player who logged off at
+    the farm spawns at the farm, the streaming pass sees their ped and restores the tractor beside
+    them, and their character is still loading: nobody is online under that id, so nobody gets
+    keys. The same happens when another player's presence restored the vehicle before its owner
+    connected at all. Reported exactly that way: harvest loaded into a semi-persistent vehicle,
+    "no keys", and the only way to get them was to drive far enough away for the vehicle to be
+    despawned and come near again for it to be restored with the owner registered.
+
+    So the keys are also handed over from the other side: the moment an owner becomes online, for
+    every vehicle of theirs that is already standing in the world. Vehicles still in storage are
+    left to `onRestored`, which covers them when they come out.
+
+    Giving a key a player already holds is harmless in every provider `Bridge.giveKeys` supports,
+    so the two paths do not need to know about each other.
+]]
+function Ownership.giveLiveKeys(src, characterId)
+    if not (Config.Keys and Config.Keys.restore) then return 0 end
+    if not src or not characterId then return 0 end
+
+    local given = 0
+
+    for _, record in ipairs(Store.ownedBy(characterId)) do
+        local entry = record.plate and Store.live(record.id)
+        if entry and entry.entity and entry.netId and DoesEntityExist(entry.entity) then
+            if Bridge.giveKeys(src, record.plate, entry.netId) then given = given + 1 end
+        end
+    end
+
+    if given > 0 then
+        Park.debug('handed %s the keys to %d vehicle(s) already in the world',
+            Bridge.playerName(src) or tostring(src), given)
+    end
+
+    return given
+end
+
 function Ownership.isOnline(characterId)
     return Ownership.sourceOf(characterId) ~= nil
 end
@@ -339,6 +384,9 @@ local function register(src)
         -- so that a player who reconnects with thirty seconds to spare keeps their vehicle
         -- even if the sweep would have run first.
         Lifecycle.onOwnerOnline(characterId)
+
+        -- And the keys to whatever of theirs is already out. See `giveLiveKeys`.
+        Ownership.giveLiveKeys(src, characterId)
 
         Lifecycle.warnExpiring(src, characterId)
     end)

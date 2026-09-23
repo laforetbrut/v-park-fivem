@@ -7,6 +7,82 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.2.12] - 2026-09-23
+
+### Fixed
+
+- **Plate customisation was lost on restart.** Reported as black plates coming back white after a
+  reboot. It was not the plate: it was everything.
+
+  When a restore could not settle a vehicle's extras - the model does not have one of them, or
+  refuses the combination, the case 1.2.11 stopped reporting as an error - the vehicle was marked
+  undressed, and an undressed vehicle has nothing captured, on any client, until it is dressed
+  again. It never was: every restore failed the same extra. So the vehicle became read-only for
+  good, and plates, paint and mods fitted afterwards all reverted on the next restart.
+
+  The guard now covers the extras alone. The stored selection is kept exactly as before, and it
+  still cannot be overwritten by another client or by what the model left on the car; it is
+  released when the player actually changes the extras. Everything else is captured as usual.
+  `/vparkprops` shows the guard when it is up.
+
+- **No keys for a vehicle restored before its owner's character had loaded.** Reported with a
+  semi-persistent farm vehicle after a restart: "you do not have the keys", and the only way to get
+  them was to drive far enough away for the vehicle to despawn and come back.
+
+  Keys were handed over when a vehicle was restored, and only to an owner who was online at that
+  moment. After a restart the vehicles come back while characters are still loading, so the owner
+  was not online yet. The keys are now also handed over when the owner comes online, for every
+  vehicle of theirs already in the world.
+
+### Performance
+
+- **The extras comparison no longer builds a table it throws away.** It runs for every vehicle a
+  client owns on every tick, up to five times a second nearby. It now answers in place and stops at
+  the first difference. The previous implementation is kept in the tests and both are checked to
+  agree on 6000 generated cases.
+
+### Documentation
+
+- The README's current release had stayed at 1.2.1 through every bump since. It is current again.
+
+## [1.2.12] - 2026-09-23 (français)
+
+### Corrigé
+
+- **La personnalisation des plaques était perdue au redémarrage.** Signalé avec des plaques noires
+  redevenues blanches. Ce n'était pas la plaque : c'était tout.
+
+  Quand une restauration n'arrivait pas à poser les extras d'un véhicule (le modèle n'a pas l'un
+  d'eux, ou refuse la combinaison, le cas que la 1.2.11 a cessé de signaler comme une erreur), le
+  véhicule était marqué « non habillé », et plus rien n'était capturé sur lui. Chaque restauration
+  échouait sur le même extra, donc le véhicule devenait définitivement figé : plaques, peinture et
+  mods posés ensuite revenaient comme avant au redémarrage suivant.
+
+  La protection ne couvre plus que les extras. Ils restent tels qu'enregistrés et ne peuvent
+  toujours pas être écrasés ; la protection se lève quand le joueur change réellement ses extras.
+  Tout le reste est capturé normalement. `/vparkprops` affiche la protection quand elle est active.
+
+- **Pas de clés pour un véhicule restauré avant le chargement du personnage de son propriétaire.**
+  Signalé avec un véhicule semi-persistant de la ferme après un redémarrage : il fallait partir
+  assez loin pour que le véhicule disparaisse puis revenir pour récupérer les clés.
+
+  Les clés étaient données au moment de la restauration, et seulement si le propriétaire était
+  déjà en ligne. Après un redémarrage, les véhicules reviennent pendant que les personnages
+  chargent encore. Les clés sont maintenant aussi données quand le propriétaire se connecte, pour
+  chacun de ses véhicules déjà présents.
+
+### Performance
+
+- **La comparaison des extras ne construit plus une table jetée aussitôt.** Elle tourne à chaque
+  passe pour chaque véhicule possédé par un client, jusqu'à cinq fois par seconde à proximité.
+  L'ancienne version est gardée dans les tests et les deux sont vérifiées identiques sur 6000 cas.
+
+### Documentation
+
+- Le README affichait encore la 1.2.1. Il est à jour.
+
+---
+
 ## [1.2.11] - 2026-09-20
 
 ### Fixed

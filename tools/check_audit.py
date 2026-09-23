@@ -450,7 +450,9 @@ class Audit(unittest.TestCase):
         restore=self.placed_extras()
         self.lua.execute('refuse=true')
         result=restore()
-        self.assertFalse(result['dressed'])
+        # The extras are guarded; the vehicle is not undressed for it. See `unverifiedExtras`.
+        self.assertTrue(result['dressed'])
+        self.assertFalse(result['extrasVerified'])
         self.assertTrue(self.lua.eval('unverified.sample.extras and disabled'))
 
     def test_final_extra_readback_rejects_changes_after_damage(self):
@@ -459,7 +461,8 @@ class Audit(unittest.TestCase):
             Properties.rememberNeons=function() states[1]=false end
         """)
         result=restore()
-        self.assertFalse(result['dressed'])
+        self.assertTrue(result['dressed'])
+        self.assertFalse(result['extrasVerified'])
         self.assertTrue(self.lua.eval('unverified.sample.extras'))
 
 

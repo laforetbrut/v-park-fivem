@@ -656,6 +656,15 @@ end
                   down. Absent until a restore reports one, and `record.body_health` is the
                   fallback.
 
+    unverifiedExtras
+                  Set when the placing client reports that the stored extras would not settle: the
+                  model does not have one of them, or refuses the combination. While it is set,
+                  `Persist.applySnapshot` keeps the stored extras and accepts everything else.
+                  Cleared when the network owner reports a selection different from the one the
+                  restore observed, which is a person changing it. Until 1.2.12 this case raised
+                  `undressed` instead, which froze EVERY property of the vehicle for good: plates,
+                  paint and mods fitted afterwards all came back stock on the next restart.
+
     undressed     Set when a restore is sent, and cleared when the placing client reports that the
                   properties actually went on. While it is set, `Persist.applySnapshot` ignores the
                   properties in EVERY snapshot, whoever sent it - a vehicle that has been created
@@ -682,7 +691,7 @@ Store.liveFields = {
     ready = true, seen = true, restoreAt = true, restoreTries = true,
     frozen = true, driven = true, parked = true, nudged = true,
     occupant = true,
-    unverifiedNeons = true, undressed = true, restoredHealth = true,
+    unverifiedNeons = true, unverifiedExtras = true, undressed = true, restoredHealth = true,
 }
 
 function Store.setLive(id, entry)

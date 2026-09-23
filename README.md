@@ -1,6 +1,6 @@
 # v-park
 
-Current release: **1.2.1**. Author: **vyrriox**.
+Current release: **1.2.12**. Author: **vyrriox**.
 
 Vehicle persistence for FiveM, built for QBCore and running on qbx_core, ESX and ox_core too.
 
@@ -164,7 +164,7 @@ The tester confirmed the stock `rebel2` retest; 51 Lua regressions and 21 static
 Neon restoration remains unchanged. No new dependency or SQL migration is needed.
 
 Stop v-park, replace the resource files, then run `refresh` and `start v-park` in the server console.
-A full server restart also reloads the manifest. Verify **1.2.1** in the startup banner.
+A full server restart also reloads the manifest. Verify **1.2.12** in the startup banner.
 If old code already saved the wrong extras, select them again before retesting.
 
 `/vparkprops` now prints a copyable report in **F8**, including requested/post-placement and
@@ -821,7 +821,7 @@ encore. Le testeur a confirmé le retest du `rebel2` d'origine ; 51 tests Lua et
 passent. La restauration des néons reste identique. Aucune nouvelle dépendance ni migration SQL.
 
 Arrêter v-park, remplacer les fichiers, puis lancer `refresh` et `start v-park` dans la console serveur.
-Un redémarrage complet relit également le manifeste. Vérifier **1.2.1** dans la bannière de démarrage.
+Un redémarrage complet relit également le manifeste. Vérifier **1.2.12** dans la bannière de démarrage.
 Si l'ancien code a déjà sauvegardé les mauvais extras, les régler à nouveau avant le retest.
 
 `/vparkprops` affiche maintenant un rapport copiable dans **F8**, avec les extras demandés/après

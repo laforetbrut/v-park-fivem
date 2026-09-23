@@ -2399,6 +2399,48 @@ involved and the script is inspectable if it goes wrong.
 
 ---
 
+## [2026-09-23 10:00] — One extra the model lacks made a vehicle read-only for good
+
+**Context:** A report of black plates reverting to white after a restart.
+
+**Error:** No error at all. Every property fitted after a certain restore was silently discarded,
+on every client, for as long as the vehicle existed.
+
+**Root cause:** An extras mismatch after placement set `dressed = false`, which keeps the server's
+whole-vehicle `undressed` guard up. The guard was designed for a restore that failed outright and
+is cleared by the next successful restore. An extra the model does not have fails on EVERY
+restore, so the next successful one never came. The server already had a per-group extras guard
+(`completeExtras`), so the escalation protected nothing extra and froze everything else.
+
+**Fix:** A per-group `unverifiedExtras` guard on the server, mirroring `unverifiedNeons`, released
+when the network owner reports a selection different from what the restore observed. `dressed`
+now means the apply ran, not that every group agreed.
+
+**Prevention:** A guard must be cleared by something the failure it guards against cannot
+prevent. Before widening a guard to the whole vehicle, ask whether the failure can repeat forever.
+
+---
+
+## [2026-09-23 10:30] — Seven regressions had been erroring out, not failing, since 1.2.4
+
+**Context:** Running `tools/check_regressions.py` while fixing an unrelated bug.
+
+**Error:** `attempt to call a nil value (field 'encode')`, then `'clock'`, then
+`attempt to index a nil value (global 'Quality')`.
+
+**Root cause:** The 1.2.4 performance work made `Persist.applySnapshot` compare tables through
+`Park.encode`, timed the capture sweep with `Park.clock`, and routed nominations through
+`Quality.pick`. The harness stubs `Park` and never loaded `server/quality.lua`. The tests stopped
+running their assertions and nobody looked, because the static checks and the integration suite
+were green.
+
+**Fix:** The stubs, and the real `server/quality.lua` in the server harness.
+
+**Prevention:** Run all three suites (`check.py`, `check_regressions.py`, `check_audit.py`) before
+every release, and read the counts, not only the last line.
+
+---
+
 ## Conventions for adding an entry
 
 ```markdown

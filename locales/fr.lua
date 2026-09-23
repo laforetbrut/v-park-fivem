@@ -159,6 +159,7 @@ Locale.register('fr', {
     ['props.none']         = "tu n'es ni dans ni à côté d'un véhicule",
     ['props.nothing_stored'] = "  enregistré  rien : v-park ne conserve pas ce véhicule",
     ['props.neons_guarded'] = "  protégé     la restauration n'a pas confirmé ces néons, aucune capture ne peut les modifier",
+    ['props.extras_guarded'] = "  protégé     ces extras ne tiennent pas sur ce modèle, ils restent tels qu'enregistrés jusqu'à ce que le joueur les change",
     ['props.header']       = "propriétés de %s [%s], id %s :",
     ['props.extra_restore'] = '  restauration net %s  demande [%s]  apres placement [%s]',
     ['props.extra_change'] = '  derniere modification enregistree [%s] -> [%s]',

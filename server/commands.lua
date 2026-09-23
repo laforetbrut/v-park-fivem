@@ -805,6 +805,9 @@ RegisterNetEvent('vpark:server:props', function(token, live)
         if live and live.unverifiedNeons then
             lines[#lines + 1] = L('props.neons_guarded')
         end
+        if live and live.unverifiedExtras then
+            lines[#lines + 1] = L('props.extras_guarded')
+        end
         lines[#lines + 1] = L('props.stored_damage', list(stored.windows), list(stored.doors),
             tostring(stored.bodyHealth or '?'))
         lines[#lines + 1] = L('props.stored_paint',
